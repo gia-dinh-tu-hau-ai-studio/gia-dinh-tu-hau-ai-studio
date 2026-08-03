@@ -42,3 +42,11 @@ Google Drive connector chỉ hoạt động sau khi cấu hình quyền và thô
 - `GOOGLE_SERVICE_ACCOUNT_JSON` cho môi trường cho phép quản lý khóa an toàn.
 
 Khi chưa cấu hình, API trả mã kiểm soát `CHARACTER_LIBRARY_NOT_CONFIGURED`.
+
+## Cloud Run API
+
+API hỗ trợ cổng `PORT` do Cloud Run cấp và có cấu hình build tại
+`infra/cloudrun/api.cloudbuild.yaml`. Runtime nên gắn một Service Account riêng,
+dùng Application Default Credentials và chỉ được chia sẻ quyền đọc spreadsheet
+cần thiết. Lần triển khai đầu tiên giữ dịch vụ ở chế độ yêu cầu xác thực; chỉ
+công khai sau khi lớp kiểm soát truy cập của ứng dụng được phê duyệt.
