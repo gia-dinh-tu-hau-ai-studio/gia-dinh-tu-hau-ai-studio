@@ -1,0 +1,34 @@
+:root {
+  color-scheme: dark;
+  --gold: #e0b45c;
+  --wine: #63182a;
+  --panel: rgba(22, 18, 21, 0.94);
+  --line: rgba(224, 180, 92, 0.22);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; color: #f8f0e7; background: radial-gradient(circle at top, #511523 0, #171014 42%, #0b090a 100%); font-family: Arial, sans-serif; }
+main { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 96px; }
+.hero { text-align: center; margin-bottom: 40px; }
+.hero h1 { margin: 8px 0; font-family: Georgia, serif; font-size: clamp(36px, 6vw, 72px); color: #ffe8b2; }
+.hero p { color: #cdbfb8; }
+.eyebrow { color: var(--gold) !important; letter-spacing: .28em; font-size: 12px; }
+form { display: grid; gap: 22px; }
+section { padding: 28px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); box-shadow: 0 24px 70px rgba(0, 0, 0, .24); }
+.section-heading { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 22px; }
+.section-heading > span { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--wine); color: #ffe6aa; font-weight: 700; }
+h2 { margin: 0 0 6px; font-family: Georgia, serif; }
+.section-heading p { margin: 0; color: #aa9ca2; }
+.project-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.project-card { display: grid; gap: 7px; padding: 18px; border: 1px solid #3b2e33; border-radius: 14px; cursor: pointer; background: #151114; }
+.project-card.selected { border-color: var(--gold); background: #28151b; }
+.project-card input { width: auto; justify-self: start; }
+.project-card small { color: #aa9ca2; line-height: 1.45; }
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+label { display: grid; gap: 8px; color: #e4d7d1; font-size: 14px; }
+input { width: 100%; padding: 12px 13px; color: #fff; background: #0e0b0d; border: 1px solid #47383e; border-radius: 10px; outline: none; }
+input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(224, 180, 92, .1); }
+button { justify-self: end; padding: 14px 26px; border: 0; border-radius: 999px; color: #2b1700; background: linear-gradient(135deg, #f4d58b, #c58c2d); font-weight: 800; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 14px; color: #d9ffd9; background: #080708; }
+@media (max-width: 760px) { .project-grid, .field-grid { grid-template-columns: 1fr; } section { padding: 21px; } }

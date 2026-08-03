@@ -1,0 +1,20 @@
+{
+  "name": "gia-dinh-tu-hau-ai-studio",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @tu-hau/contracts && npm run build --workspace @tu-hau/api && npm run build --workspace @tu-hau/worker && npm run build --workspace @tu-hau/web",
+    "dev:api": "npm run dev --workspace @tu-hau/api",
+    "dev:web": "npm run dev --workspace @tu-hau/web",
+    "dev:worker": "npm run dev --workspace @tu-hau/worker",
+    "test": "npm run test --workspace @tu-hau/contracts",
+    "typecheck": "npm run typecheck --workspace @tu-hau/contracts && npm run typecheck --workspace @tu-hau/api && npm run typecheck --workspace @tu-hau/worker && npm run typecheck --workspace @tu-hau/web"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
