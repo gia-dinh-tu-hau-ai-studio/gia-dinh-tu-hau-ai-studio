@@ -58,3 +58,24 @@ tư bằng Service Account. Chỉ cấu hình `API_URL` ở runtime; không đư
 token xác thực vào JavaScript phía trình duyệt. Image được build bằng
 `infra/cloudrun/web.cloudbuild.yaml` và dịch vụ Web được bảo vệ trực tiếp bằng
 Identity-Aware Proxy (IAP).
+
+## Tạo dự án qua AI_MUSIC_FACTORY
+
+Biểu mẫu dùng quy trình hai bước: kiểm tra contract trước, sau đó mới hiển thị
+nút xác nhận tạo dự án chính thức. API kiểm tra lại Character Library ngay trước
+khi gửi; Web và API không tự tạo `project_id`, thư mục Drive hoặc dòng
+`01_PROJECTS`. Quyền ghi các tài nguyên này tiếp tục thuộc duy nhất về
+`AI_MUSIC_FACTORY` theo kiến trúc 331.
+
+API gửi `AI_MUSIC_FACTORY_INPUT_CONTRACT` phiên bản `3.1` kèm `submission_id`
+và header `x-idempotency-key`. Workflow nhận phải bảo toàn khóa này để cùng một
+yêu cầu không tạo nhiều Project Master. API không tự động gửi lại khi xảy ra lỗi
+mạng và chỉ công nhận thành công khi Output Contract trả `project_id` hợp lệ.
+
+Biến runtime chỉ cấu hình trên dịch vụ API:
+
+- `AI_MUSIC_FACTORY_WEBHOOK_URL`: Production Webhook HTTPS của workflow.
+- `AI_MUSIC_FACTORY_WEBHOOK_TOKEN`: Bearer token lưu bằng Secret Manager; có thể
+  bỏ trống nếu webhook đã có lớp xác thực tương đương.
+
+Không đưa URL webhook hoặc token vào Web, GitHub hay biến `NEXT_PUBLIC_*`.
