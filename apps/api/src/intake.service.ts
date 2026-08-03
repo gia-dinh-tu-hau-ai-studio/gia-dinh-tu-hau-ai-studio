@@ -91,7 +91,7 @@ export class IntakeService {
       throw new ServiceUnavailableException({
         code: "CHARACTER_LIBRARY_NOT_CONFIGURED",
         message:
-          "Cấu hình GOOGLE_SHEETS_DATABASE_ID, GOOGLE_SERVICE_ACCOUNT_JSON và CHARACTER_LIBRARY_SHEET_NAME.",
+          "Cấu hình GOOGLE_SHEETS_DATABASE_ID và CHARACTER_LIBRARY_SHEET_NAME; runtime phải có Google Application Default Credentials hoặc GOOGLE_SERVICE_ACCOUNT_JSON.",
       });
     }
 

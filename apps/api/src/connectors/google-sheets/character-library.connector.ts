@@ -54,14 +54,18 @@ export class CharacterLibraryConnector {
     const rawCredentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
     const databaseId = process.env.GOOGLE_SHEETS_DATABASE_ID;
 
-    if (!rawCredentials || !databaseId) {
+    if (!databaseId) {
       throw new CharacterLibraryNotConfiguredError();
     }
 
-    const auth = new google.auth.GoogleAuth({
-      credentials: JSON.parse(rawCredentials) as Record<string, unknown>,
-      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-    });
+    const auth = rawCredentials
+      ? new google.auth.GoogleAuth({
+          credentials: JSON.parse(rawCredentials) as Record<string, unknown>,
+          scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+        })
+      : new google.auth.GoogleAuth({
+          scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+        });
 
     return google.sheets({ version: "v4", auth });
   }
