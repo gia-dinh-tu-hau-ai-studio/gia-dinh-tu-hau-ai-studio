@@ -14,6 +14,11 @@ export class AppController {
     };
   }
 
+  @Get("characters/eligible")
+  listEligibleCharacters() {
+    return this.intakeService.listEligibleCharacters();
+  }
+
   @Post("intake/validate")
   validateIntake(@Body() body: unknown) {
     return this.intakeService.validate(body);

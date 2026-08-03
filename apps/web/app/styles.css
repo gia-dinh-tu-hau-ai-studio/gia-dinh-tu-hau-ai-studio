@@ -26,9 +26,22 @@ h2 { margin: 0 0 6px; font-family: Georgia, serif; }
 .project-card small { color: #aa9ca2; line-height: 1.45; }
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 label { display: grid; gap: 8px; color: #e4d7d1; font-size: 14px; }
-input { width: 100%; padding: 12px 13px; color: #fff; background: #0e0b0d; border: 1px solid #47383e; border-radius: 10px; outline: none; }
-input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(224, 180, 92, .1); }
+input, select { width: 100%; padding: 12px 13px; color: #fff; background: #0e0b0d; border: 1px solid #47383e; border-radius: 10px; outline: none; }
+input:focus, select:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(224, 180, 92, .1); }
+input:disabled { color: #c8b7ad; background: #191417; }
 button { justify-self: end; padding: 14px 26px; border: 0; border-radius: 999px; color: #2b1700; background: linear-gradient(135deg, #f4d58b, #c58c2d); font-weight: 800; cursor: pointer; }
 button:disabled { opacity: .6; cursor: wait; }
+.library-status { margin: -5px 0 18px; color: #cdbfb8; }
+.character-picker { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: end; }
+.secondary-button { background: #3a232b; color: #ffe6aa; border: 1px solid var(--line); }
+.character-list { display: grid; gap: 14px; margin-top: 20px; }
+.character-card { padding: 20px; border: 1px solid #3b2e33; border-radius: 14px; background: #151114; }
+.character-card-heading { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.character-card-heading div { display: grid; gap: 4px; }
+.character-card-heading small { color: #aa9ca2; }
+.remove-button { padding: 8px 14px; color: #ffc7c7; background: transparent; border: 1px solid #6d3340; }
+.check-row { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 18px; }
+.check-row label { display: flex; align-items: center; gap: 8px; }
+.check-row input { width: auto; }
 pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 14px; color: #d9ffd9; background: #080708; }
-@media (max-width: 760px) { .project-grid, .field-grid { grid-template-columns: 1fr; } section { padding: 21px; } }
+@media (max-width: 760px) { .project-grid, .field-grid, .character-picker { grid-template-columns: 1fr; } section { padding: 21px; } }
