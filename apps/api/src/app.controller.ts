@@ -23,4 +23,9 @@ export class AppController {
   validateIntake(@Body() body: unknown) {
     return this.intakeService.validate(body);
   }
+
+  @Post("intake/submit")
+  submitIntake(@Body() body: unknown) {
+    return this.intakeService.submit(body);
+  }
 }

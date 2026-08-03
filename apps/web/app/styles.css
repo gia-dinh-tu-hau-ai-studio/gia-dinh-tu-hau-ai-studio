@@ -43,5 +43,10 @@ button:disabled { opacity: .6; cursor: wait; }
 .check-row { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 18px; }
 .check-row label { display: flex; align-items: center; gap: 8px; }
 .check-row input { width: auto; }
+.platform-field { margin: 18px 0 0; padding: 0; border: 0; }
+.platform-field legend { color: #e4d7d1; font-size: 14px; }
+.confirmation-panel { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; border-color: var(--gold); }
+.confirmation-panel p { margin: 8px 0 0; color: #cdbfb8; line-height: 1.55; }
+.creation-result { border-color: rgba(117, 214, 138, .5); }
 pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 14px; color: #d9ffd9; background: #080708; }
-@media (max-width: 760px) { .project-grid, .field-grid, .character-picker { grid-template-columns: 1fr; } section { padding: 21px; } }
+@media (max-width: 760px) { .project-grid, .field-grid, .character-picker, .confirmation-panel { grid-template-columns: 1fr; } section { padding: 21px; } }

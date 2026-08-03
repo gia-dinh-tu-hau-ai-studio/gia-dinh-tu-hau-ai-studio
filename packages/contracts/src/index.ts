@@ -85,6 +85,9 @@ export const CommonProjectInputSchema = z.object({
   project_name: z.string().trim().min(1, "Tên dự án là bắt buộc"),
   project_type: FormProjectTypeSchema,
   client_name: z.string().trim().min(1, "Khách hàng/đơn vị là bắt buộc"),
+  phone: z.string().trim().min(1, "Số điện thoại là bắt buộc"),
+  email: z.email("Email không hợp lệ"),
+  platforms: z.array(z.string().trim().min(1)).min(1, "Phải chọn ít nhất một nền tảng"),
   project_subtype: OptionalText,
   priority: OptionalText,
   execution_mode: OptionalText,
@@ -162,6 +165,15 @@ export type NormalizedProjectIntake = Omit<ProjectIntakeForm, "project_type"> & 
   project_type: z.infer<typeof BackendProjectTypeSchema>;
   project_subtype?: string;
 };
+
+export const AiMusicFactorySubmitRequestSchema = z.object({
+  submission_id: z.uuid(),
+  payload: z.unknown(),
+});
+
+export type AiMusicFactorySubmitRequest = z.infer<
+  typeof AiMusicFactorySubmitRequestSchema
+>;
 
 export function normalizeProjectIntake(input: unknown): NormalizedProjectIntake {
   const parsed = ProjectIntakeFormSchema.parse(input);

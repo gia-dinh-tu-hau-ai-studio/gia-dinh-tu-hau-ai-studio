@@ -5,6 +5,9 @@ import { normalizeProjectIntake } from "./index";
 const common = {
   project_name: "Pilot Gia Đình Tư Hậu",
   client_name: "Đoàn Lô Tô Tư Hậu",
+  phone: "0900000000",
+  email: "studio@example.com",
+  platforms: ["YOUTUBE"],
   language: "vi",
   content_rating: "T13",
   target_audience: "Đại chúng",

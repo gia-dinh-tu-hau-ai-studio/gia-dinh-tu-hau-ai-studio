@@ -28,6 +28,11 @@ type CharacterSelection = {
   original_video_file_id: string;
 };
 
+type ValidatedSubmission = {
+  submissionId: string;
+  payload: Record<string, unknown>;
+};
+
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string }> = [
   { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Tập phim 10–15 phút, kết thúc trọn vẹn." },
   { value: "MUSIC_VIDEO", label: "MV ca nhạc", description: "MV đầy đủ, lyrics, music và vocal." },
@@ -45,6 +50,7 @@ const performanceRoles = [
   "AUDIENCE",
   "EXTRA",
 ];
+const platformOptions = ["YOUTUBE", "TIKTOK", "FACEBOOK"];
 
 function TextField({ name, label, required = true, type = "text" }: { name: string; label: string; required?: boolean; type?: string }) {
   return (
@@ -63,6 +69,14 @@ export function ProjectIntakeForm() {
   const [libraryMessage, setLibraryMessage] = useState("Đang đọc 11_CHARACTER_LIBRARY…");
   const [result, setResult] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+  const [validatedSubmission, setValidatedSubmission] = useState<ValidatedSubmission | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [creationResult, setCreationResult] = useState<string>("");
+
+  function invalidateConfirmation() {
+    setValidatedSubmission(null);
+    setCreationResult("");
+  }
 
   useEffect(() => {
     void fetch("/api/characters/eligible")
@@ -89,6 +103,8 @@ export function ProjectIntakeForm() {
       return;
     }
 
+    invalidateConfirmation();
+
     setCharacters((current) => [
       ...current,
       {
@@ -104,6 +120,7 @@ export function ProjectIntakeForm() {
   }
 
   function updateCharacter(index: number, patch: Partial<CharacterSelection>) {
+    invalidateConfirmation();
     setCharacters((current) =>
       current.map((character, characterIndex) =>
         characterIndex === index ? { ...character, ...patch } : character,
@@ -115,12 +132,15 @@ export function ProjectIntakeForm() {
     event.preventDefault();
     setSubmitting(true);
     setResult("");
+    setValidatedSubmission(null);
+    setCreationResult("");
 
     const form = new FormData(event.currentTarget);
     const payload = {
       ...Object.fromEntries(
         [...form.entries()].filter(([, value]) => String(value).trim() !== ""),
       ),
+      platforms: form.getAll("platforms").map(String),
       characters: characters.map((character) => {
         const libraryCharacter = eligibleCharacters.find(
           (item) => item.character_id === character.character_id,
@@ -150,6 +170,16 @@ export function ProjectIntakeForm() {
       });
       const body = await response.json();
       setResult(JSON.stringify(body, null, 2));
+      if (
+        response.ok &&
+        body.validation_status === "PASSED" &&
+        typeof body.submission_id === "string"
+      ) {
+        setValidatedSubmission({
+          submissionId: body.submission_id,
+          payload,
+        });
+      }
     } catch {
       setResult("Không kết nối được API. Hãy thử lại hoặc liên hệ quản trị viên.");
     } finally {
@@ -157,8 +187,36 @@ export function ProjectIntakeForm() {
     }
   }
 
+  async function confirmCreation() {
+    if (!validatedSubmission) {
+      return;
+    }
+
+    setCreating(true);
+    setCreationResult("");
+    try {
+      const response = await fetch("/api/intake/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          submission_id: validatedSubmission.submissionId,
+          payload: validatedSubmission.payload,
+        }),
+      });
+      const body = await response.json();
+      setCreationResult(JSON.stringify(body, null, 2));
+      if (response.ok && body.project_id_created === true) {
+        setValidatedSubmission(null);
+      }
+    } catch {
+      setCreationResult("Không kết nối được AI_MUSIC_FACTORY. Không tự động gửi lại để tránh tạo trùng dự án.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
-    <form onSubmit={handleSubmit}>
+    <form onChange={invalidateConfirmation} onSubmit={handleSubmit}>
       <section>
         <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chỉ chọn một loại. Dữ liệu nhánh ẩn không đi vào payload.</p></div></div>
         <div className="project-grid">
@@ -183,6 +241,8 @@ export function ProjectIntakeForm() {
         <div className="field-grid">
           <TextField name="project_name" label="Tên dự án" />
           <TextField name="client_name" label="Khách hàng / đơn vị" />
+          <TextField name="phone" label="Số điện thoại" />
+          <TextField name="email" label="Email" type="email" />
           <TextField name="project_subtype" label="Phân loại phụ" required={false} />
           <TextField name="priority" label="Mức ưu tiên" required={false} />
           <TextField name="execution_mode" label="Chế độ thực thi" required={false} />
@@ -192,6 +252,16 @@ export function ProjectIntakeForm() {
           <TextField name="duration_target" label="Thời lượng mục tiêu" />
           <TextField name="aspect_ratio" label="Tỷ lệ khung hình" />
         </div>
+        <fieldset className="platform-field">
+          <legend>Nền tảng xuất bản *</legend>
+          <div className="check-row">
+            {platformOptions.map((platform) => (
+              <label key={platform}>
+                <input name="platforms" type="checkbox" value={platform} /> {platform}
+              </label>
+            ))}
+          </div>
+        </fieldset>
       </section>
 
       <section>
@@ -256,7 +326,10 @@ export function ProjectIntakeForm() {
                     <strong>{libraryCharacter?.character_name}</strong>
                     <small>{character.character_id}</small>
                   </div>
-                  <button className="remove-button" onClick={() => setCharacters((current) => current.filter((_, itemIndex) => itemIndex !== index))} type="button">Xóa</button>
+                  <button className="remove-button" onClick={() => {
+                    invalidateConfirmation();
+                    setCharacters((current) => current.filter((_, itemIndex) => itemIndex !== index));
+                  }} type="button">Xóa</button>
                 </div>
                 <div className="field-grid">
                   <label><span>Vai trò dự án *</span><select value={character.project_role} onChange={(event) => updateCharacter(index, { project_role: event.target.value })}>{projectRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
@@ -275,8 +348,23 @@ export function ProjectIntakeForm() {
         </div>
       </section>
 
-      <button disabled={submitting || characters.length === 0} type="submit">{submitting ? "Đang kiểm tra…" : "Kiểm tra payload"}</button>
+      <button disabled={submitting || characters.length === 0} type="submit">{submitting ? "Đang kiểm tra…" : "Kiểm tra dữ liệu"}</button>
       {result && <pre>{result}</pre>}
+      {validatedSubmission && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Xác nhận tạo dự án chính thức</h2>
+            <p>
+              AI_MUSIC_FACTORY sẽ tạo một project_id, cấu trúc Drive và đúng một
+              dòng trong 01_PROJECTS. Không đóng trang trong lúc đang xử lý.
+            </p>
+          </div>
+          <button disabled={creating} onClick={confirmCreation} type="button">
+            {creating ? "Đang tạo dự án…" : "Xác nhận và gửi AI_MUSIC_FACTORY"}
+          </button>
+        </section>
+      )}
+      {creationResult && <pre className="creation-result">{creationResult}</pre>}
     </form>
   );
 }

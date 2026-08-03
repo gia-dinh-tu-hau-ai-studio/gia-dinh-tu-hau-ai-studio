@@ -11,7 +11,7 @@
     "dev:api": "npm run dev --workspace @tu-hau/api",
     "dev:web": "npm run dev --workspace @tu-hau/web",
     "dev:worker": "npm run dev --workspace @tu-hau/worker",
-    "test": "npm run test --workspace @tu-hau/contracts",
+    "test": "npm run test --workspace @tu-hau/contracts && npm run test --workspace @tu-hau/api",
     "typecheck": "npm run typecheck --workspace @tu-hau/contracts && npm run typecheck --workspace @tu-hau/api && npm run typecheck --workspace @tu-hau/worker && npm run typecheck --workspace @tu-hau/web"
   },
   "engines": {
