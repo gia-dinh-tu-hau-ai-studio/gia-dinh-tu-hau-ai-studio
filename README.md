@@ -50,3 +50,11 @@ API hỗ trợ cổng `PORT` do Cloud Run cấp và có cấu hình build tại
 dùng Application Default Credentials và chỉ được chia sẻ quyền đọc spreadsheet
 cần thiết. Lần triển khai đầu tiên giữ dịch vụ ở chế độ yêu cầu xác thực; chỉ
 công khai sau khi lớp kiểm soát truy cập của ứng dụng được phê duyệt.
+
+## Cloud Run Web
+
+Web dùng các route nội bộ `/api/*` làm lớp trung gian để gọi API Cloud Run riêng
+tư bằng Service Account. Chỉ cấu hình `API_URL` ở runtime; không đưa URL API hoặc
+token xác thực vào JavaScript phía trình duyệt. Image được build bằng
+`infra/cloudrun/web.cloudbuild.yaml` và dịch vụ Web được bảo vệ trực tiếp bằng
+Identity-Aware Proxy (IAP).

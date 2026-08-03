@@ -1,0 +1,21 @@
+steps:
+  - id: build-web
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file
+      - infra/docker/web.Dockerfile
+      - --tag
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest
+
+substitutions:
+  _REGION: asia-southeast1
+  _REPOSITORY: tu-hau-ai
+  _SERVICE: ai-executor-web
+
+options:
+  logging: CLOUD_LOGGING_ONLY
