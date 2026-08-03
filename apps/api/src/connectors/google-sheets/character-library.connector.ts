@@ -124,9 +124,9 @@ export class CharacterLibraryConnector {
     const active = row.status === "ACTIVE";
     const imageReady = Boolean(row.face_reference_url && row.body_reference_url);
     const legalCleared =
-      row.consent_status === "APPROVED" &&
+      ["APPROVED", "CONFIRMED"].includes(row.consent_status) &&
       ["APPROVED", "CLEARED", "LEGAL_CLEARED"].includes(row.rights_status);
 
-    return active && imageReady && legalCleared && Boolean(row.default_costume_id);
+    return active && imageReady && legalCleared;
   }
 }
