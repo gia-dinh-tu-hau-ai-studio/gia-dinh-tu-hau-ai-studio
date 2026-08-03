@@ -129,8 +129,12 @@ export function ProjectIntakeForm() {
         );
         return {
           ...character,
-          selected_costume_ids: [libraryCharacter?.default_costume_id],
-          costume_approval_status: "APPROVED",
+          selected_costume_ids: libraryCharacter?.default_costume_id
+            ? [libraryCharacter.default_costume_id]
+            : [],
+          costume_approval_status: libraryCharacter?.default_costume_id
+            ? "APPROVED"
+            : undefined,
           voice_approval_status: character.voice_required ? "APPROVED" : undefined,
           original_video_file_id:
             character.identity_mode === "ORIGINAL_FACE_COMPOSITE"
@@ -259,7 +263,7 @@ export function ProjectIntakeForm() {
                 <div className="field-grid">
                   <label><span>Vai trò dự án *</span><select value={character.project_role} onChange={(event) => updateCharacter(index, { project_role: event.target.value })}>{projectRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
                   <label><span>Vai trò biểu diễn *</span><select value={character.performance_role} onChange={(event) => updateCharacter(index, { performance_role: event.target.value })}>{performanceRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
-                  <label><span>Trang phục APPROVED</span><input disabled value={libraryCharacter?.default_costume_id ?? ""} /></label>
+                  <label><span>Trang phục APPROVED</span><input disabled value={libraryCharacter?.default_costume_id || "Chưa chọn costume"} /></label>
                   <label><span>Chế độ danh tính *</span><select value={character.identity_mode} onChange={(event) => updateCharacter(index, { identity_mode: event.target.value as IdentityMode })}><option value="LIBRARY_MASTER">LIBRARY_MASTER</option><option value="ORIGINAL_FACE_COMPOSITE">ORIGINAL_FACE_COMPOSITE</option></select></label>
                   {character.identity_mode === "ORIGINAL_FACE_COMPOSITE" && <label><span>file_id video gốc *</span><input required value={character.original_video_file_id} onChange={(event) => updateCharacter(index, { original_video_file_id: event.target.value })} /></label>}
                 </div>

@@ -110,3 +110,25 @@ test("từ chối ORIGINAL_FACE_COMPOSITE khi thiếu file_id video gốc", () =
     }),
   );
 });
+
+test("chấp nhận nhân vật hợp lệ khi chưa chọn costume", () => {
+  const result = normalizeProjectIntake({
+    ...common,
+    characters: [
+      {
+        ...common.characters[0],
+        selected_costume_ids: [],
+        costume_approval_status: undefined,
+      },
+    ],
+    project_type: "SHORT_FILM",
+    story_idea: "Một câu chuyện hậu trường",
+    social_theme: "Tình thân",
+    story_genre: "Hài tình cảm",
+    primary_setting: "Đoàn Lô Tô",
+    ending_direction: "Kết thúc trọn vẹn",
+    dialogue_source: "AI_GENERATED",
+  });
+
+  assert.deepEqual(result.characters[0]?.selected_costume_ids, []);
+});

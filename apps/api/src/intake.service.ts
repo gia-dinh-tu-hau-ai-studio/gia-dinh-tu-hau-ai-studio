@@ -43,9 +43,11 @@ export class IntakeService {
         }
 
         if (
+          assignment.selected_costume_ids.length > 0 &&
+          (!libraryCharacter.default_costume_id ||
           assignment.selected_costume_ids.some(
             (costumeId) => costumeId !== libraryCharacter.default_costume_id,
-          )
+          ))
         ) {
           throw new BadRequestException({
             validation_status: "FAIL",
