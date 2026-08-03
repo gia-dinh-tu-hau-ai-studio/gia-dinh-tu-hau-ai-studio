@@ -37,8 +37,8 @@ export const CharacterAssignmentSchema = z
     character_id: z.string().trim().min(1),
     project_role: ProjectRoleSchema,
     performance_role: PerformanceRoleSchema,
-    selected_costume_ids: z.array(z.string().trim().min(1)).min(1),
-    costume_approval_status: z.literal("APPROVED"),
+    selected_costume_ids: z.array(z.string().trim().min(1)).default([]),
+    costume_approval_status: z.literal("APPROVED").optional(),
     voice_required: z.boolean(),
     voice_approval_status: z.literal("APPROVED").optional(),
     lip_sync_required: z.boolean(),
@@ -46,6 +46,17 @@ export const CharacterAssignmentSchema = z
     original_video_file_id: z.string().trim().min(1).optional(),
   })
   .superRefine((character, context) => {
+    if (
+      character.selected_costume_ids.length > 0 &&
+      character.costume_approval_status !== "APPROVED"
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Costume được sử dụng phải có trạng thái APPROVED",
+        path: ["costume_approval_status"],
+      });
+    }
+
     if (
       character.identity_mode === "ORIGINAL_FACE_COMPOSITE" &&
       !character.original_video_file_id
