@@ -8,6 +8,66 @@ export const FormProjectTypeSchema = z.enum([
 
 export const BackendProjectTypeSchema = z.enum(["SHORT_FILM", "MUSIC_VIDEO"]);
 
+export const ProjectRoleSchema = z.enum([
+  "MAIN",
+  "SUPPORTING",
+  "GUEST",
+  "CAMEO",
+  "BACKGROUND",
+]);
+
+export const PerformanceRoleSchema = z.enum([
+  "ACTOR",
+  "SINGER",
+  "DANCER",
+  "MC",
+  "COMEDIAN",
+  "BAND_MEMBER",
+  "AUDIENCE",
+  "EXTRA",
+]);
+
+export const IdentityModeSchema = z.enum([
+  "LIBRARY_MASTER",
+  "ORIGINAL_FACE_COMPOSITE",
+]);
+
+export const CharacterAssignmentSchema = z
+  .object({
+    character_id: z.string().trim().min(1),
+    project_role: ProjectRoleSchema,
+    performance_role: PerformanceRoleSchema,
+    selected_costume_ids: z.array(z.string().trim().min(1)).min(1),
+    costume_approval_status: z.literal("APPROVED"),
+    voice_required: z.boolean(),
+    voice_approval_status: z.literal("APPROVED").optional(),
+    lip_sync_required: z.boolean(),
+    identity_mode: IdentityModeSchema,
+    original_video_file_id: z.string().trim().min(1).optional(),
+  })
+  .superRefine((character, context) => {
+    if (
+      character.identity_mode === "ORIGINAL_FACE_COMPOSITE" &&
+      !character.original_video_file_id
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "ORIGINAL_FACE_COMPOSITE bắt buộc có file_id video gốc",
+        path: ["original_video_file_id"],
+      });
+    }
+
+    if (character.voice_required && character.voice_approval_status !== "APPROVED") {
+      context.addIssue({
+        code: "custom",
+        message: "Voice được sử dụng phải có trạng thái APPROVED",
+        path: ["voice_approval_status"],
+      });
+    }
+  });
+
+export type CharacterAssignment = z.infer<typeof CharacterAssignmentSchema>;
+
 const OptionalText = z.string().trim().min(1).optional();
 
 export const CommonProjectInputSchema = z.object({
@@ -22,6 +82,7 @@ export const CommonProjectInputSchema = z.object({
   target_audience: z.string().trim().min(1),
   duration_target: z.string().trim().min(1),
   aspect_ratio: z.string().trim().min(1),
+  characters: z.array(CharacterAssignmentSchema).min(1, "Phải chọn ít nhất một nhân vật"),
 });
 
 const ShortFilmBranchSchema = z.object({
