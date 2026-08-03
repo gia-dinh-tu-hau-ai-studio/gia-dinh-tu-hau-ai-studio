@@ -13,6 +13,8 @@ Mã nguồn nền cho sprint `AI_EXECUTOR-01`, bám theo `MASTER_PLAN_AI_ENTERTA
 - Khối `NHÂN VẬT & VAI TRÒ` chỉ đọc từ `11_CHARACTER_LIBRARY`, lọc
   `ACTIVE + IMAGE_READY + LEGAL_CLEARED` và không nhận tên nhân vật tự do.
 - Backend kiểm tra character, costume và voice trước khi chuyển sang `AI_MUSIC_FACTORY`.
+- Nhân vật chưa có costume vẫn được chọn; chỉ costume có trạng thái `APPROVED`
+  mới được đưa vào payload.
 - Docker Compose cho môi trường phát triển.
 
 Sprint này không thay đổi workflow 331, không thêm node và không thêm cột Google Sheets.
