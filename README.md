@@ -36,6 +36,9 @@ Sau khi chạy:
 Google Drive connector chỉ hoạt động sau khi cấu hình quyền và thông tin xác thực hợp lệ.
 
 Để đọc Character Library, cấu hình thêm `GOOGLE_SHEETS_DATABASE_ID`,
-`GOOGLE_SERVICE_ACCOUNT_JSON` và
-`CHARACTER_LIBRARY_SHEET_NAME=11_CHARACTER_LIBRARY`. Khi chưa cấu hình, API trả mã
-kiểm soát `CHARACTER_LIBRARY_NOT_CONFIGURED`.
+`CHARACTER_LIBRARY_SHEET_NAME=11_CHARACTER_LIBRARY` và một trong hai cơ chế xác thực:
+
+- Google Application Default Credentials (khuyến nghị cho Cloud Run, không dùng khóa).
+- `GOOGLE_SERVICE_ACCOUNT_JSON` cho môi trường cho phép quản lý khóa an toàn.
+
+Khi chưa cấu hình, API trả mã kiểm soát `CHARACTER_LIBRARY_NOT_CONFIGURED`.
