@@ -64,10 +64,8 @@ export function ProjectIntakeForm() {
   const [result, setResult] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-
   useEffect(() => {
-    void fetch(`${apiUrl}/v1/characters/eligible`)
+    void fetch("/api/characters/eligible")
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok) {
@@ -84,7 +82,7 @@ export function ProjectIntakeForm() {
       .catch((error: unknown) => {
         setLibraryMessage(error instanceof Error ? error.message : "Không đọc được thư viện nhân vật");
       });
-  }, [apiUrl]);
+  }, []);
 
   function addCharacter() {
     if (!characterToAdd || characters.some((item) => item.character_id === characterToAdd)) {
@@ -145,7 +143,7 @@ export function ProjectIntakeForm() {
     };
 
     try {
-      const response = await fetch(`${apiUrl}/v1/intake/validate`, {
+      const response = await fetch("/api/intake/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -153,7 +151,7 @@ export function ProjectIntakeForm() {
       const body = await response.json();
       setResult(JSON.stringify(body, null, 2));
     } catch {
-      setResult("Không kết nối được API. Hãy kiểm tra Docker hoặc tiến trình API.");
+      setResult("Không kết nối được API. Hãy thử lại hoặc liên hệ quản trị viên.");
     } finally {
       setSubmitting(false);
     }
