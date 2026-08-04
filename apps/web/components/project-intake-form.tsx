@@ -40,7 +40,8 @@ type CreatedProject = {
     | "APPROVE_CONTRACT"
     | "PREPARE_MV_PRODUCTION"
     | "APPROVE_MV_PRODUCTION_PLAN"
-    | "PREPARE_MV_ASSETS";
+    | "PREPARE_MV_ASSETS"
+    | "APPROVE_MV_ASSETS";
 };
 
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
@@ -89,6 +90,9 @@ export function ProjectIntakeForm() {
   const [preparationResult, setPreparationResult] = useState<string>("");
   const [approvingPlan, setApprovingPlan] = useState(false);
   const [planApprovalResult, setPlanApprovalResult] = useState<string>("");
+  const [instrumentalMasterFileId, setInstrumentalMasterFileId] = useState("");
+  const [preparingAssets, setPreparingAssets] = useState(false);
+  const [assetPreparationResult, setAssetPreparationResult] = useState("");
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -327,6 +331,40 @@ export function ProjectIntakeForm() {
     }
   }
 
+  async function prepareMvAssets() {
+    if (!createdProject || !instrumentalMasterFileId.trim()) return;
+
+    setPreparingAssets(true);
+    setAssetPreparationResult("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(createdProject.project_id)}/prepare-mv-assets`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instrumental_master_file_id: instrumentalMasterFileId.trim(),
+          }),
+        },
+      );
+      const body = await response.json();
+      setAssetPreparationResult(JSON.stringify(body, null, 2));
+      if (response.ok && body.approval_status === "PENDING") {
+        setCreatedProject({
+          project_id: body.project_id,
+          current_stage: body.current_stage,
+          next_action: body.next_action,
+        });
+      }
+    } catch {
+      setAssetPreparationResult(
+        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp manifest tài sản.",
+      );
+    } finally {
+      setPreparingAssets(false);
+    }
+  }
+
   return (
     <form onChange={invalidateConfirmation} onSubmit={handleSubmit}>
       <section>
@@ -528,10 +566,39 @@ export function ProjectIntakeForm() {
       {createdProject?.next_action === "PREPARE_MV_ASSETS" && (
         <section className="confirmation-panel">
           <div>
-            <h2>Kế hoạch MV đã được duyệt</h2>
+            <h2>Chuẩn bị tài sản MV đã khóa nguồn</h2>
             <p>
-              Dự án <strong>{createdProject.project_id}</strong> sẵn sàng chuẩn bị tài
-              sản MV. Chưa render và chưa gọi nhà cung cấp.
+              Nhập Drive ID hoặc link beat/instrumental master. Hệ thống chỉ kiểm tra
+              beat, lyrics và video gốc rồi tạo manifest chờ duyệt; không sao chép file,
+              không render và không gọi nhà cung cấp.
+            </p>
+            <label>
+              <span>Drive ID / link beat master *</span>
+              <input
+                onChange={(event) => setInstrumentalMasterFileId(event.target.value)}
+                placeholder="1k9sgXZfFwo42XY0Y0NoWKXUQ-CuA63M5"
+                type="text"
+                value={instrumentalMasterFileId}
+              />
+            </label>
+          </div>
+          <button
+            disabled={preparingAssets || !instrumentalMasterFileId.trim()}
+            onClick={prepareMvAssets}
+            type="button"
+          >
+            {preparingAssets ? "Đang kiểm tra tài sản…" : "Chuẩn bị tài sản MV để duyệt"}
+          </button>
+        </section>
+      )}
+      {assetPreparationResult && <pre className="creation-result">{assetPreparationResult}</pre>}
+      {createdProject?.next_action === "APPROVE_MV_ASSETS" && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Tài sản MV đang chờ duyệt</h2>
+            <p>
+              Beat, lyrics và video ORIGINAL_FACE_COMPOSITE đã được kiểm tra cho
+              <strong> {createdProject.project_id}</strong>. Render và provider vẫn bị khóa.
             </p>
           </div>
         </section>

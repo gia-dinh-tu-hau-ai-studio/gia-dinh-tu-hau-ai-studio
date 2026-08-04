@@ -32,6 +32,11 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
    `MV_PRODUCTION_PLAN_APPROVED` và chuyển `next_action` sang
    `PREPARE_MV_ASSETS`. Dự án vẫn ở `PRE_PRODUCTION`; bước này chưa render và
    chưa gọi provider. Gọi lại cùng dự án là idempotent.
+10. Endpoint `POST /v1/projects/:projectId/prepare-mv-assets` nhận Drive ID hoặc
+    link beat/instrumental master, kiểm tra beat, lyrics và video gốc
+    `ORIGINAL_FACE_COMPOSITE`, rồi tạo `MV_ASSET_MANIFEST_V1` ở trạng thái
+    `AWAITING_APPROVAL`/`APPROVE_MV_ASSETS`. File nguồn không bị sao chép; render
+    và provider vẫn bị khóa.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.
