@@ -323,6 +323,43 @@ export class IntakeService {
     }
   }
 
+  async prepareMvShotPlan(projectIdInput: string) {
+    const projectId = projectIdInput.trim();
+    if (!projectId) {
+      throw new BadRequestException({
+        code: "PROJECT_ID_REQUIRED",
+        message: "project_id là bắt buộc",
+      });
+    }
+
+    try {
+      return await this.projectRegistry.prepareMvShotPlan(projectId);
+    } catch (error) {
+      if (error instanceof ProjectRegistryProjectNotFoundError) {
+        throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
+      }
+      if (error instanceof ProjectRegistryInvalidStateError) {
+        throw new ConflictException({
+          code: "MV_SHOT_PLAN_PREPARATION_INVALID_STATE",
+          message: error.message,
+        });
+      }
+      if (error instanceof ProjectRegistryNotConfiguredError) {
+        throw new ServiceUnavailableException({
+          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
+          message: error.message,
+        });
+      }
+      if (error instanceof ProjectRegistryUnavailableError) {
+        throw new BadGatewayException({
+          code: "PROJECT_REGISTRY_UNAVAILABLE",
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  }
+
   private async validateContract(body: unknown) {
     const contract = normalizeProjectIntake(body);
     const eligibleCharacters = await this.characterLibrary.listEligibleCharacters();
