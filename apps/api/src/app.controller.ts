@@ -40,4 +40,9 @@ export class AppController {
   prepareMvProduction(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvProduction(projectId);
   }
+
+  @Post("projects/:projectId/approve-mv-production-plan")
+  approveMvProductionPlan(@Param("projectId") projectId: string) {
+    return this.intakeService.approveMvProductionPlan(projectId);
+  }
 }
