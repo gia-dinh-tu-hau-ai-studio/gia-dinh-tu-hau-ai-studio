@@ -31,9 +31,16 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.
 
-Yêu cầu cấu hình nằm trong `.env.example`. Runtime Cloud Run dùng Google Application
-Default Credentials; chỉ dùng `GOOGLE_SERVICE_ACCOUNT_JSON` cho môi trường ngoài Google
-Cloud khi thật sự cần.
+Yêu cầu cấu hình nằm trong `.env.example`.
+
+- Google Sheets dùng Application Default Credentials của service account Cloud Run;
+  `GOOGLE_SERVICE_ACCOUNT_JSON` chỉ dành cho môi trường ngoài Google Cloud.
+- Google Drive dùng OAuth của chủ sở hữu My Drive qua
+  `GOOGLE_DRIVE_OAUTH_CREDENTIALS_JSON`. Biến này chỉ nhận JSON
+  `type=authorized_user` và phải được gắn từ Secret Manager. Không đưa client secret
+  hoặc refresh token vào GitHub, image hay biến môi trường dạng văn bản thường.
+- Quy trình tạo và gắn secret được mô tả tại
+  [`infra/cloudrun/google-drive-oauth.md`](infra/cloudrun/google-drive-oauth.md).
 
 ## Chạy kiểm tra
 
