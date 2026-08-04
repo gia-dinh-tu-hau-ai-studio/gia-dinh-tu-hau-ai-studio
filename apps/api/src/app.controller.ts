@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { IntakeService } from "./intake.service";
 
 @Controller()
@@ -29,5 +29,10 @@ export class AppController {
   @Post("intake/submit")
   submitIntake(@Body() body: unknown) {
     return this.intakeService.submit(body);
+  }
+
+  @Post("projects/:projectId/approve-contract")
+  approveContract(@Param("projectId") projectId: string) {
+    return this.intakeService.approveContract(projectId);
   }
 }

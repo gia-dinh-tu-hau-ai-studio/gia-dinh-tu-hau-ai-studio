@@ -33,6 +33,12 @@ type ValidatedSubmission = {
   payload: Record<string, unknown>;
 };
 
+type CreatedProject = {
+  project_id: string;
+  current_stage: "CONTRACT";
+  next_action: "APPROVE_CONTRACT";
+};
+
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
   { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Tạm khóa; chỉ mở sau khi quy trình MV đạt.", disabled: true },
   { value: "MUSIC_VIDEO", label: "MV ca nhạc", description: "Ưu tiên hiện tại: MV người thật, lyrics, music và vocal." },
@@ -72,6 +78,9 @@ export function ProjectIntakeForm() {
   const [validatedSubmission, setValidatedSubmission] = useState<ValidatedSubmission | null>(null);
   const [creating, setCreating] = useState(false);
   const [creationResult, setCreationResult] = useState<string>("");
+  const [createdProject, setCreatedProject] = useState<CreatedProject | null>(null);
+  const [approving, setApproving] = useState(false);
+  const [approvalResult, setApprovalResult] = useState<string>("");
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -205,13 +214,44 @@ export function ProjectIntakeForm() {
       });
       const body = await response.json();
       setCreationResult(JSON.stringify(body, null, 2));
-      if (response.ok && body.project_id_created === true) {
+      if (
+        response.ok &&
+        body.project_id_created === true &&
+        typeof body.project?.project_id === "string"
+      ) {
         setValidatedSubmission(null);
+        setCreatedProject(body.project as CreatedProject);
       }
     } catch {
       setCreationResult("Không kết nối được kho dự án Gia Đình Tư Hậu. Không tự động gửi lại để tránh tạo trùng dự án.");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function approveContract() {
+    if (!createdProject) {
+      return;
+    }
+
+    setApproving(true);
+    setApprovalResult("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(createdProject.project_id)}/approve-contract`,
+        { method: "POST" },
+      );
+      const body = await response.json();
+      setApprovalResult(JSON.stringify(body, null, 2));
+      if (response.ok && body.approval_status === "APPROVED") {
+        setCreatedProject(null);
+      }
+    } catch {
+      setApprovalResult(
+        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp sự kiện duyệt.",
+      );
+    } finally {
+      setApproving(false);
     }
   }
 
@@ -366,6 +406,22 @@ export function ProjectIntakeForm() {
         </section>
       )}
       {creationResult && <pre className="creation-result">{creationResult}</pre>}
+      {createdProject && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Duyệt hợp đồng dự án</h2>
+            <p>
+              Duyệt project_id <strong>{createdProject.project_id}</strong> và chuyển
+              dự án từ CONTRACT sang PRE_PRODUCTION. Mỗi project_id chỉ được ghi một
+              sự kiện CONTRACT_APPROVED.
+            </p>
+          </div>
+          <button disabled={approving} onClick={approveContract} type="button">
+            {approving ? "Đang duyệt hợp đồng…" : "Duyệt hợp đồng và chuẩn bị sản xuất MV"}
+          </button>
+        </section>
+      )}
+      {approvalResult && <pre className="creation-result">{approvalResult}</pre>}
     </form>
   );
 }

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeProjectIntake } from "@tu-hau/contracts";
-import { buildProjectId } from "./project-registry.connector";
+import {
+  buildProjectId,
+  planContractApproval,
+  ProjectRegistryInvalidStateError,
+} from "./project-registry.connector";
 
 test("tạo mã dự án MV Gia Đình Tư Hậu", () => {
   const contract = normalizeProjectIntake({
@@ -21,4 +25,48 @@ test("tạo mã dự án MV Gia Đình Tư Hậu", () => {
   });
   assert.equal(buildProjectId(contract, new Date("2026-08-04T01:02:03.000Z"), "ABCD"),
     "GDTH-MV-20260804010203-ABCD");
+});
+
+function projectRow(overrides: Record<number, string> = {}) {
+  const row = Array.from({ length: 25 }, () => "");
+  row[0] = "submission-001";
+  row[1] = "GDTH-MV-20260804092100-63D8";
+  row[16] = "CONFIRMED";
+  row[17] = "PENDING";
+  row[18] = "CONTRACT";
+  row[19] = "APPROVE_CONTRACT";
+  Object.entries(overrides).forEach(([index, value]) => {
+    row[Number(index)] = value;
+  });
+  return row;
+}
+
+test("duyệt hợp đồng chuyển dự án MV sang PRE_PRODUCTION", () => {
+  const approvedAt = new Date("2026-08-04T09:30:00.000Z");
+  assert.deepEqual(planContractApproval(projectRow(), approvedAt), {
+    project_id: "GDTH-MV-20260804092100-63D8",
+    approval_status: "APPROVED",
+    current_stage: "PRE_PRODUCTION",
+    next_action: "PREPARE_MV_PRODUCTION",
+    approved_at: "2026-08-04T09:30:00.000Z",
+    idempotent_replay: false,
+  });
+});
+
+test("duyệt lại hợp đồng đã APPROVED là idempotent", () => {
+  const result = planContractApproval(projectRow({
+    17: "APPROVED",
+    18: "PRE_PRODUCTION",
+    19: "PREPARE_MV_PRODUCTION",
+    23: "2026-08-04T09:30:00.000Z",
+  }));
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.approved_at, "2026-08-04T09:30:00.000Z");
+});
+
+test("từ chối duyệt hợp đồng sai trạng thái", () => {
+  assert.throws(
+    () => planContractApproval(projectRow({ 16: "DRAFT" })),
+    ProjectRegistryInvalidStateError,
+  );
 });

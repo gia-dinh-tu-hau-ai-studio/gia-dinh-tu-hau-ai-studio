@@ -5,6 +5,8 @@ import { drive_v3, google, sheets_v4 } from "googleapis";
 
 export class ProjectRegistryNotConfiguredError extends Error {}
 export class ProjectRegistryUnavailableError extends Error {}
+export class ProjectRegistryProjectNotFoundError extends Error {}
+export class ProjectRegistryInvalidStateError extends Error {}
 
 export type RegisteredProject = {
   project_id: string;
@@ -16,6 +18,59 @@ export type RegisteredProject = {
   next_action: "APPROVE_CONTRACT";
   idempotent_replay: boolean;
 };
+
+export type ApprovedContract = {
+  project_id: string;
+  approval_status: "APPROVED";
+  current_stage: "PRE_PRODUCTION";
+  next_action: "PREPARE_MV_PRODUCTION";
+  approved_at: string;
+  idempotent_replay: boolean;
+};
+
+export function planContractApproval(
+  row: string[],
+  now = new Date(),
+): Omit<ApprovedContract, "idempotent_replay"> & { idempotent_replay: boolean } {
+  const projectId = String(row[1] ?? "").trim();
+  const contractStatus = String(row[16] ?? "").trim();
+  const approvalStatus = String(row[17] ?? "").trim();
+  const nextAction = String(row[19] ?? "").trim();
+  const approvedAt = String(row[23] ?? "").trim() || now.toISOString();
+
+  if (!projectId) {
+    throw new ProjectRegistryInvalidStateError("Dòng PROJECTS không có project_id");
+  }
+  if (contractStatus !== "CONFIRMED") {
+    throw new ProjectRegistryInvalidStateError(
+      `Hợp đồng ${projectId} chưa ở trạng thái CONFIRMED`,
+    );
+  }
+  if (approvalStatus === "APPROVED") {
+    return {
+      project_id: projectId,
+      approval_status: "APPROVED",
+      current_stage: "PRE_PRODUCTION",
+      next_action: "PREPARE_MV_PRODUCTION",
+      approved_at: approvedAt,
+      idempotent_replay: true,
+    };
+  }
+  if (approvalStatus !== "PENDING" || nextAction !== "APPROVE_CONTRACT") {
+    throw new ProjectRegistryInvalidStateError(
+      `Hợp đồng ${projectId} không thể duyệt từ ${approvalStatus || "EMPTY"}/${nextAction || "EMPTY"}`,
+    );
+  }
+
+  return {
+    project_id: projectId,
+    approval_status: "APPROVED",
+    current_stage: "PRE_PRODUCTION",
+    next_action: "PREPARE_MV_PRODUCTION",
+    approved_at: now.toISOString(),
+    idempotent_replay: false,
+  };
+}
 
 function requiredSetting(name: string) {
   const value = process.env[name]?.trim();
@@ -133,6 +188,76 @@ export class ProjectRegistryConnector {
       if (error instanceof ProjectRegistryNotConfiguredError) throw error;
       throw new ProjectRegistryUnavailableError(
         error instanceof Error ? error.message : "Không tạo được dự án Gia Đình Tư Hậu",
+      );
+    }
+  }
+
+  async approveContract(projectId: string): Promise<ApprovedContract> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+
+    try {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: "'PROJECTS'!A:Y",
+      });
+      const rows = response.data.values ?? [];
+      const rowIndex = rows.findIndex(
+        (row, index) => index > 0 && String(row[1] ?? "").trim() === projectId,
+      );
+      if (rowIndex < 0) {
+        throw new ProjectRegistryProjectNotFoundError(
+          `Không tìm thấy project_id ${projectId}`,
+        );
+      }
+
+      const transition = planContractApproval(rows[rowIndex].map(String));
+      if (transition.idempotent_replay) return transition;
+
+      const sheetRow = rowIndex + 1;
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: [
+            { range: `'PROJECTS'!R${sheetRow}`, values: [[transition.approval_status]] },
+            { range: `'PROJECTS'!S${sheetRow}`, values: [[transition.current_stage]] },
+            { range: `'PROJECTS'!T${sheetRow}`, values: [[transition.next_action]] },
+            { range: `'PROJECTS'!X${sheetRow}`, values: [[transition.approved_at]] },
+          ],
+        },
+      });
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: "'AUDIT_LOG'!A:H",
+        valueInputOption: "RAW",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: {
+          values: [[
+            randomUUID(),
+            transition.project_id,
+            String(rows[rowIndex][0] ?? ""),
+            "CONTRACT_APPROVED",
+            "SUCCEEDED",
+            "AI_EXECUTOR_WEB",
+            "Hợp đồng đã được duyệt; dự án chuyển sang chuẩn bị sản xuất MV.",
+            transition.approved_at,
+          ]],
+        },
+      });
+
+      return transition;
+    } catch (error) {
+      if (
+        error instanceof ProjectRegistryNotConfiguredError ||
+        error instanceof ProjectRegistryProjectNotFoundError ||
+        error instanceof ProjectRegistryInvalidStateError
+      ) {
+        throw error;
+      }
+      throw new ProjectRegistryUnavailableError(
+        error instanceof Error ? error.message : "Không duyệt được hợp đồng Gia Đình Tư Hậu",
       );
     }
   }
