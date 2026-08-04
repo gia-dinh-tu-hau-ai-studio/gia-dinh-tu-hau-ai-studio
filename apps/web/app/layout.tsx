@@ -3,7 +3,7 @@ import "./styles.css";
 
 export const metadata: Metadata = {
   title: "Gia Đình Tư Hậu — Project Intake",
-  description: "Form đầu vào dùng chung theo kiến trúc 331",
+  description: "Form khởi tạo hợp đồng riêng cho Dự Án Gia Đình Tư Hậu",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

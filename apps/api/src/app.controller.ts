@@ -10,7 +10,9 @@ export class AppController {
     return {
       service: "gia-dinh-tu-hau-ai-executor-api",
       status: "ok",
-      architecture: "331-compatible",
+      architecture: "gia-dinh-tu-hau-v1",
+      production_priority: "MUSIC_VIDEO_FIRST",
+      face_identity_pipeline: "ORIGINAL_FACE_COMPOSITE",
     };
   }
 

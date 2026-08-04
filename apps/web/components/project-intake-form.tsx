@@ -33,9 +33,9 @@ type ValidatedSubmission = {
   payload: Record<string, unknown>;
 };
 
-const projectTypes: Array<{ value: FormProjectType; label: string; description: string }> = [
-  { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Tập phim 10–15 phút, kết thúc trọn vẹn." },
-  { value: "MUSIC_VIDEO", label: "MV ca nhạc", description: "MV đầy đủ, lyrics, music và vocal." },
+const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
+  { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Tạm khóa; chỉ mở sau khi quy trình MV đạt.", disabled: true },
+  { value: "MUSIC_VIDEO", label: "MV ca nhạc", description: "Ưu tiên hiện tại: MV người thật, lyrics, music và vocal." },
   { value: "SHORT_MUSIC_CLIP", label: "Clip ca nhạc ngắn", description: "Đoạn biểu diễn 30 giây–3 phút." },
 ];
 
@@ -62,11 +62,11 @@ function TextField({ name, label, required = true, type = "text" }: { name: stri
 }
 
 export function ProjectIntakeForm() {
-  const [projectType, setProjectType] = useState<FormProjectType>("SHORT_FILM");
+  const [projectType, setProjectType] = useState<FormProjectType>("MUSIC_VIDEO");
   const [eligibleCharacters, setEligibleCharacters] = useState<EligibleCharacter[]>([]);
   const [characters, setCharacters] = useState<CharacterSelection[]>([]);
   const [characterToAdd, setCharacterToAdd] = useState("");
-  const [libraryMessage, setLibraryMessage] = useState("Đang đọc 11_CHARACTER_LIBRARY…");
+  const [libraryMessage, setLibraryMessage] = useState("Đang đọc CHARACTER_LIBRARY…");
   const [result, setResult] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [validatedSubmission, setValidatedSubmission] = useState<ValidatedSubmission | null>(null);
@@ -110,10 +110,10 @@ export function ProjectIntakeForm() {
       {
         character_id: characterToAdd,
         project_role: current.length === 0 ? "MAIN" : "SUPPORTING",
-        performance_role: projectType === "SHORT_FILM" ? "ACTOR" : "SINGER",
+        performance_role: "SINGER",
         voice_required: false,
         lip_sync_required: false,
-        identity_mode: "LIBRARY_MASTER",
+        identity_mode: "ORIGINAL_FACE_COMPOSITE",
         original_video_file_id: "",
       },
     ]);
@@ -209,7 +209,7 @@ export function ProjectIntakeForm() {
         setValidatedSubmission(null);
       }
     } catch {
-      setCreationResult("Không kết nối được AI_MUSIC_FACTORY. Không tự động gửi lại để tránh tạo trùng dự án.");
+      setCreationResult("Không kết nối được kho dự án Gia Đình Tư Hậu. Không tự động gửi lại để tránh tạo trùng dự án.");
     } finally {
       setCreating(false);
     }
@@ -221,9 +221,10 @@ export function ProjectIntakeForm() {
         <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chỉ chọn một loại. Dữ liệu nhánh ẩn không đi vào payload.</p></div></div>
         <div className="project-grid">
           {projectTypes.map((item) => (
-            <label className={`project-card ${projectType === item.value ? "selected" : ""}`} key={item.value}>
+            <label className={`project-card ${projectType === item.value ? "selected" : ""} ${item.disabled ? "locked" : ""}`} key={item.value}>
               <input
                 checked={projectType === item.value}
+                disabled={item.disabled}
                 name="project_type"
                 onChange={() => setProjectType(item.value)}
                 type="radio"
@@ -298,7 +299,7 @@ export function ProjectIntakeForm() {
       </section>
 
       <section>
-        <div className="section-heading"><span>04</span><div><h2>Nhân vật & vai trò</h2><p>Chỉ chọn từ 11_CHARACTER_LIBRARY; không cho nhập tên tự do.</p></div></div>
+        <div className="section-heading"><span>04</span><div><h2>Nhân vật & vai trò</h2><p>Chỉ chọn người thật đã duyệt từ CHARACTER_LIBRARY; dùng ORIGINAL_FACE_COMPOSITE khi cần giữ gương mặt.</p></div></div>
         <p className="library-status">{libraryMessage}</p>
         <div className="character-picker">
           <label>
@@ -355,12 +356,12 @@ export function ProjectIntakeForm() {
           <div>
             <h2>Xác nhận tạo dự án chính thức</h2>
             <p>
-              AI_MUSIC_FACTORY sẽ tạo một project_id, cấu trúc Drive và đúng một
-              dòng trong 01_PROJECTS. Không đóng trang trong lúc đang xử lý.
+              Hệ thống Gia Đình Tư Hậu sẽ tạo một project_id, cấu trúc Drive và
+              hợp đồng đầu vào trong bảng PROJECTS. Không đóng trang trong lúc xử lý.
             </p>
           </div>
           <button disabled={creating} onClick={confirmCreation} type="button">
-            {creating ? "Đang tạo dự án…" : "Xác nhận và gửi AI_MUSIC_FACTORY"}
+            {creating ? "Đang tạo dự án…" : "Xác nhận tạo dự án Gia Đình Tư Hậu"}
           </button>
         </section>
       )}
