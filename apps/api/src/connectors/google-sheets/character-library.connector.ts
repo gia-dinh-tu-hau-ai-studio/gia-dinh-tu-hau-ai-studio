@@ -52,7 +52,7 @@ export class CharacterLibraryNotConfiguredError extends Error {
 export class CharacterLibraryConnector {
   private createClient(): sheets_v4.Sheets {
     const rawCredentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-    const databaseId = process.env.GOOGLE_SHEETS_DATABASE_ID;
+    const databaseId = process.env.GIA_DINH_TU_HAU_DATABASE_ID;
 
     if (!databaseId) {
       throw new CharacterLibraryNotConfiguredError();
@@ -72,8 +72,8 @@ export class CharacterLibraryConnector {
 
   async listEligibleCharacters(): Promise<EligibleCharacter[]> {
     const sheets = this.createClient();
-    const spreadsheetId = process.env.GOOGLE_SHEETS_DATABASE_ID as string;
-    const sheetName = process.env.CHARACTER_LIBRARY_SHEET_NAME ?? "11_CHARACTER_LIBRARY";
+    const spreadsheetId = process.env.GIA_DINH_TU_HAU_DATABASE_ID as string;
+    const sheetName = process.env.CHARACTER_LIBRARY_SHEET_NAME ?? "CHARACTER_LIBRARY";
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `'${sheetName}'!A:U`,
@@ -91,7 +91,7 @@ export class CharacterLibraryConnector {
     );
 
     if (missingColumns.length > 0) {
-      throw new Error(`11_CHARACTER_LIBRARY thiếu cột: ${missingColumns.join(", ")}`);
+      throw new Error(`CHARACTER_LIBRARY thiếu cột: ${missingColumns.join(", ")}`);
     }
 
     return values

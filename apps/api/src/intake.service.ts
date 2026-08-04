@@ -4,10 +4,7 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import {
-  AiMusicFactorySubmitRequestSchema,
-  normalizeProjectIntake,
-} from "@tu-hau/contracts";
+import { normalizeProjectIntake, ProjectSubmitRequestSchema } from "@tu-hau/contracts";
 import { randomUUID } from "node:crypto";
 import { ZodError } from "zod";
 import {
@@ -15,17 +12,16 @@ import {
   CharacterLibraryNotConfiguredError,
 } from "./connectors/google-sheets/character-library.connector";
 import {
-  AiMusicFactoryConnector,
-  AiMusicFactoryInvalidResponseError,
-  AiMusicFactoryNotConfiguredError,
-  AiMusicFactoryUnavailableError,
-} from "./connectors/n8n/ai-music-factory.connector";
+  ProjectRegistryConnector,
+  ProjectRegistryNotConfiguredError,
+  ProjectRegistryUnavailableError,
+} from "./connectors/google-sheets/project-registry.connector";
 
 @Injectable()
 export class IntakeService {
   constructor(
     private readonly characterLibrary: CharacterLibraryConnector,
-    private readonly aiMusicFactory: AiMusicFactoryConnector,
+    private readonly projectRegistry: ProjectRegistryConnector,
   ) {}
 
   async listEligibleCharacters() {
@@ -42,7 +38,7 @@ export class IntakeService {
 
       return {
         validation_status: "PASSED",
-        next_system: "AI_MUSIC_FACTORY",
+        next_system: "GIA_DINH_TU_HAU_STUDIO",
         project_id_created: false,
         submission_id: randomUUID(),
         contract,
@@ -64,16 +60,16 @@ export class IntakeService {
 
   async submit(body: unknown) {
     try {
-      const request = AiMusicFactorySubmitRequestSchema.parse(body);
+      const request = ProjectSubmitRequestSchema.parse(body);
       const contract = await this.validateContract(request.payload);
-      const project = await this.aiMusicFactory.createProject(
+      const project = await this.projectRegistry.createProject(
         contract,
         request.submission_id,
       );
 
       return {
         submission_status: "ACCEPTED",
-        next_system: "AI_MUSIC_FACTORY",
+        next_system: "GIA_DINH_TU_HAU_STUDIO",
         project_id_created: true,
         submission_id: request.submission_id,
         project,
@@ -88,21 +84,15 @@ export class IntakeService {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      if (error instanceof AiMusicFactoryNotConfiguredError) {
+      if (error instanceof ProjectRegistryNotConfiguredError) {
         throw new ServiceUnavailableException({
-          code: "AI_MUSIC_FACTORY_NOT_CONFIGURED",
-          message: "Chưa cấu hình webhook AI_MUSIC_FACTORY.",
+          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
+          message: error.message,
         });
       }
-      if (error instanceof AiMusicFactoryInvalidResponseError) {
+      if (error instanceof ProjectRegistryUnavailableError) {
         throw new BadGatewayException({
-          code: "AI_MUSIC_FACTORY_INVALID_RESPONSE",
-          message: "AI_MUSIC_FACTORY chưa trả project_id hợp lệ.",
-        });
-      }
-      if (error instanceof AiMusicFactoryUnavailableError) {
-        throw new BadGatewayException({
-          code: "AI_MUSIC_FACTORY_UNAVAILABLE",
+          code: "PROJECT_REGISTRY_UNAVAILABLE",
           message: error.message,
         });
       }
@@ -160,7 +150,7 @@ export class IntakeService {
       throw new ServiceUnavailableException({
         code: "CHARACTER_LIBRARY_NOT_CONFIGURED",
         message:
-          "Cấu hình GOOGLE_SHEETS_DATABASE_ID và CHARACTER_LIBRARY_SHEET_NAME; runtime phải có Google Application Default Credentials hoặc GOOGLE_SERVICE_ACCOUNT_JSON.",
+          "Cấu hình GIA_DINH_TU_HAU_DATABASE_ID và CHARACTER_LIBRARY_SHEET_NAME; runtime phải có Google Application Default Credentials hoặc GOOGLE_SERVICE_ACCOUNT_JSON.",
       });
     }
 

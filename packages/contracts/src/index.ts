@@ -166,14 +166,12 @@ export type NormalizedProjectIntake = Omit<ProjectIntakeForm, "project_type"> & 
   project_subtype?: string;
 };
 
-export const AiMusicFactorySubmitRequestSchema = z.object({
+export const ProjectSubmitRequestSchema = z.object({
   submission_id: z.uuid(),
   payload: z.unknown(),
 });
 
-export type AiMusicFactorySubmitRequest = z.infer<
-  typeof AiMusicFactorySubmitRequestSchema
->;
+export type ProjectSubmitRequest = z.infer<typeof ProjectSubmitRequestSchema>;
 
 export function normalizeProjectIntake(input: unknown): NormalizedProjectIntake {
   const parsed = ProjectIntakeFormSchema.parse(input);
