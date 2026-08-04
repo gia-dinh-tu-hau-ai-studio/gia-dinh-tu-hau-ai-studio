@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeProjectIntake } from "@tu-hau/contracts";
 import {
+  applyMvAssetCharacterSafetyLocks,
   assertProjectFolderWithinRoot,
   buildProjectId,
   normalizeDriveFileIdInput,
   planContractApproval,
+  planMvAssetApproval,
   planMvAssetPreparation,
   planMvProductionPlanApproval,
   planMvProductionPreparation,
@@ -369,5 +371,100 @@ test("từ chối chuẩn bị tài sản nếu kế hoạch MV chưa APPROVED",
   assert.throws(
     () => planMvAssetPreparation(project, planJob, planApproval, undefined),
     ProjectRegistryInvalidStateError,
+  );
+});
+
+function pendingMvAssetRows() {
+  const project = approvedMvProjectRow();
+  project[19] = "APPROVE_MV_ASSETS";
+
+  const job = Array.from({ length: 14 }, () => "");
+  job[0] = "job-assets-001";
+  job[1] = "GDTH-MV-20260804092100-63D8";
+  job[2] = "PRE_PRODUCTION";
+  job[3] = "MV_ASSET_PREPARATION";
+  job[4] = "AWAITING_APPROVAL";
+  job[7] = '["asset-manifest-file-id"]';
+
+  const approval = Array.from({ length: 10 }, () => "");
+  approval[0] = "approval-assets-001";
+  approval[1] = "GDTH-MV-20260804092100-63D8";
+  approval[2] = "MV_ASSET_PREPARATION";
+  approval[3] = "job-assets-001";
+  approval[4] = "PENDING";
+
+  return { project, job, approval };
+}
+
+test("duyệt tài sản MV và chuyển sang lập shot plan", () => {
+  const { project, job, approval } = pendingMvAssetRows();
+  assert.deepEqual(
+    planMvAssetApproval(
+      project,
+      job,
+      approval,
+      new Date("2026-08-04T16:00:00.000Z"),
+    ),
+    {
+      submission_id: "submission-001",
+      project_id: "GDTH-MV-20260804092100-63D8",
+      current_stage: "PRE_PRODUCTION",
+      next_action: "PREPARE_MV_SHOT_PLAN",
+      job_id: "job-assets-001",
+      job_status: "APPROVED",
+      approval_id: "approval-assets-001",
+      approval_status: "APPROVED",
+      approved_at: "2026-08-04T16:00:00.000Z",
+      idempotent_replay: false,
+    },
+  );
+});
+
+test("duyệt lại tài sản MV đã APPROVED là idempotent", () => {
+  const { project, job, approval } = pendingMvAssetRows();
+  project[19] = "PREPARE_MV_SHOT_PLAN";
+  job[4] = "APPROVED";
+  approval[4] = "APPROVED";
+  approval[6] = "2026-08-04T16:00:00.000Z";
+  const result = planMvAssetApproval(project, job, approval);
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.approved_at, "2026-08-04T16:00:00.000Z");
+});
+
+test("từ chối duyệt tài sản MV nếu job và approval không đồng bộ", () => {
+  const { project, job, approval } = pendingMvAssetRows();
+  job[4] = "APPROVED";
+  assert.throws(
+    () => planMvAssetApproval(project, job, approval),
+    ProjectRegistryInvalidStateError,
+  );
+});
+
+test("luôn khóa cận mặt nguồn tạm Tường Vy", () => {
+  assert.deepEqual(
+    applyMvAssetCharacterSafetyLocks([
+      {
+        character_id: "GDTH-CHAR-001",
+        temporary_source: false,
+        close_up_allowed: true,
+      },
+      {
+        character_id: "GDTH-CHAR-002",
+        temporary_source: false,
+        close_up_allowed: true,
+      },
+    ]),
+    [
+      {
+        character_id: "GDTH-CHAR-001",
+        temporary_source: true,
+        close_up_allowed: false,
+      },
+      {
+        character_id: "GDTH-CHAR-002",
+        temporary_source: false,
+        close_up_allowed: true,
+      },
+    ],
   );
 });
