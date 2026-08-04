@@ -4,7 +4,9 @@ import { normalizeProjectIntake } from "@tu-hau/contracts";
 import {
   assertProjectFolderWithinRoot,
   buildProjectId,
+  normalizeDriveFileIdInput,
   planContractApproval,
+  planMvAssetPreparation,
   planMvProductionPlanApproval,
   planMvProductionPreparation,
   ProjectRegistryInvalidStateError,
@@ -272,6 +274,100 @@ test("từ chối duyệt kế hoạch MV nếu job và approval không đồng 
   job[4] = "APPROVED";
   assert.throws(
     () => planMvProductionPlanApproval(project, job, approval),
+    ProjectRegistryInvalidStateError,
+  );
+});
+
+test("chuẩn hóa Drive ID của beat từ link hoặc ID", () => {
+  assert.equal(
+    normalizeDriveFileIdInput(
+      "https://drive.google.com/file/d/1k9sgXZfFwo42XY0Y0NoWKXUQ-CuA63M5/view?usp=sharing",
+    ),
+    "1k9sgXZfFwo42XY0Y0NoWKXUQ-CuA63M5",
+  );
+  assert.equal(
+    normalizeDriveFileIdInput("1k9sgXZfFwo42XY0Y0NoWKXUQ-CuA63M5"),
+    "1k9sgXZfFwo42XY0Y0NoWKXUQ-CuA63M5",
+  );
+  assert.throws(
+    () => normalizeDriveFileIdInput("bad"),
+    ProjectRegistryInvalidStateError,
+  );
+});
+
+function approvedMvPlanForAssetPreparation() {
+  const project = approvedMvProjectRow({
+    lyrics: "https://docs.google.com/document/d/lyrics-master-file-id/edit",
+  });
+  project[19] = "PREPARE_MV_ASSETS";
+
+  const planJob = Array.from({ length: 14 }, () => "");
+  planJob[0] = "job-preprod-001";
+  planJob[1] = "GDTH-MV-20260804092100-63D8";
+  planJob[2] = "PRE_PRODUCTION";
+  planJob[3] = "MV_PRODUCTION_PLAN";
+  planJob[4] = "APPROVED";
+  planJob[7] = '["plan-manifest-file-id"]';
+
+  const planApproval = Array.from({ length: 10 }, () => "");
+  planApproval[0] = "approval-preprod-001";
+  planApproval[1] = "GDTH-MV-20260804092100-63D8";
+  planApproval[2] = "MV_PRODUCTION_PLAN";
+  planApproval[3] = "job-preprod-001";
+  planApproval[4] = "APPROVED";
+
+  return { project, planJob, planApproval };
+}
+
+test("chuẩn bị tài sản MV sau khi kế hoạch đã duyệt", () => {
+  const { project, planJob, planApproval } = approvedMvPlanForAssetPreparation();
+  assert.deepEqual(
+    planMvAssetPreparation(
+      project,
+      planJob,
+      planApproval,
+      undefined,
+      new Date("2026-08-04T15:00:00.000Z"),
+      "job-assets-001",
+    ),
+    {
+      project_id: "GDTH-MV-20260804092100-63D8",
+      submission_id: "submission-001",
+      project_name: "Gia Đình Tư Hậu",
+      project_folder_id: "project-folder-id",
+      contract: JSON.parse(project[24]),
+      job_id: "job-assets-001",
+      prepared_at: "2026-08-04T15:00:00.000Z",
+      idempotent_replay: false,
+    },
+  );
+});
+
+test("chuẩn bị lại tài sản đang chờ duyệt là idempotent", () => {
+  const { project, planJob, planApproval } = approvedMvPlanForAssetPreparation();
+  project[19] = "APPROVE_MV_ASSETS";
+  const assetJob = Array.from({ length: 14 }, () => "");
+  assetJob[0] = "job-assets-001";
+  assetJob[1] = "GDTH-MV-20260804092100-63D8";
+  assetJob[3] = "MV_ASSET_PREPARATION";
+  assetJob[4] = "AWAITING_APPROVAL";
+  assetJob[12] = "2026-08-04T15:00:00.000Z";
+
+  const result = planMvAssetPreparation(
+    project,
+    planJob,
+    planApproval,
+    assetJob,
+  );
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.job_id, "job-assets-001");
+});
+
+test("từ chối chuẩn bị tài sản nếu kế hoạch MV chưa APPROVED", () => {
+  const { project, planJob, planApproval } = approvedMvPlanForAssetPreparation();
+  planJob[4] = "AWAITING_APPROVAL";
+  assert.throws(
+    () => planMvAssetPreparation(project, planJob, planApproval, undefined),
     ProjectRegistryInvalidStateError,
   );
 });

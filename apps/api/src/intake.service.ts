@@ -225,6 +225,64 @@ export class IntakeService {
     }
   }
 
+  async prepareMvAssets(projectIdInput: string, body: unknown) {
+    const projectId = projectIdInput.trim();
+    if (!projectId) {
+      throw new BadRequestException({
+        code: "PROJECT_ID_REQUIRED",
+        message: "project_id là bắt buộc",
+      });
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new BadRequestException({
+        code: "INSTRUMENTAL_MASTER_FILE_ID_REQUIRED",
+        message: "instrumental_master_file_id là bắt buộc",
+      });
+    }
+    const instrumentalMasterFileId = String(
+      (body as Record<string, unknown>).instrumental_master_file_id ?? "",
+    ).trim();
+    if (!instrumentalMasterFileId) {
+      throw new BadRequestException({
+        code: "INSTRUMENTAL_MASTER_FILE_ID_REQUIRED",
+        message: "instrumental_master_file_id là bắt buộc",
+      });
+    }
+
+    try {
+      return await this.projectRegistry.prepareMvAssets(
+        projectId,
+        instrumentalMasterFileId,
+      );
+    } catch (error) {
+      if (error instanceof ProjectRegistryProjectNotFoundError) {
+        throw new NotFoundException({
+          code: "PROJECT_NOT_FOUND",
+          message: error.message,
+        });
+      }
+      if (error instanceof ProjectRegistryInvalidStateError) {
+        throw new ConflictException({
+          code: "MV_ASSET_PREPARATION_INVALID_STATE",
+          message: error.message,
+        });
+      }
+      if (error instanceof ProjectRegistryNotConfiguredError) {
+        throw new ServiceUnavailableException({
+          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
+          message: error.message,
+        });
+      }
+      if (error instanceof ProjectRegistryUnavailableError) {
+        throw new BadGatewayException({
+          code: "PROJECT_REGISTRY_UNAVAILABLE",
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  }
+
   private async validateContract(body: unknown) {
     const contract = normalizeProjectIntake(body);
     const eligibleCharacters = await this.characterLibrary.listEligibleCharacters();
