@@ -27,6 +27,11 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
    một dòng `APPROVALS/PENDING`, ghi audit `MV_PRODUCTION_PLAN_PREPARED` và đổi
    `next_action` thành `APPROVE_MV_PRODUCTION_PLAN`. Gọi lại cùng dự án không tạo
    thêm job, approval hoặc manifest.
+9. Endpoint duyệt kế hoạch cập nhật đúng job thành `APPROVED`, dòng
+   `APPROVALS/APPROVED`, approval gate trong manifest, ghi audit
+   `MV_PRODUCTION_PLAN_APPROVED` và chuyển `next_action` sang
+   `PREPARE_MV_ASSETS`. Dự án vẫn ở `PRE_PRODUCTION`; bước này chưa render và
+   chưa gọi provider. Gọi lại cùng dự án là idempotent.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.

@@ -36,7 +36,11 @@ type ValidatedSubmission = {
 type CreatedProject = {
   project_id: string;
   current_stage: "CONTRACT" | "PRE_PRODUCTION";
-  next_action: "APPROVE_CONTRACT" | "PREPARE_MV_PRODUCTION" | "APPROVE_MV_PRODUCTION_PLAN";
+  next_action:
+    | "APPROVE_CONTRACT"
+    | "PREPARE_MV_PRODUCTION"
+    | "APPROVE_MV_PRODUCTION_PLAN"
+    | "PREPARE_MV_ASSETS";
 };
 
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
@@ -83,6 +87,8 @@ export function ProjectIntakeForm() {
   const [approvalResult, setApprovalResult] = useState<string>("");
   const [preparing, setPreparing] = useState(false);
   const [preparationResult, setPreparationResult] = useState<string>("");
+  const [approvingPlan, setApprovingPlan] = useState(false);
+  const [planApprovalResult, setPlanApprovalResult] = useState<string>("");
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -291,6 +297,36 @@ export function ProjectIntakeForm() {
     }
   }
 
+  async function approveMvProductionPlan() {
+    if (!createdProject) {
+      return;
+    }
+
+    setApprovingPlan(true);
+    setPlanApprovalResult("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(createdProject.project_id)}/approve-mv-production-plan`,
+        { method: "POST" },
+      );
+      const body = await response.json();
+      setPlanApprovalResult(JSON.stringify(body, null, 2));
+      if (response.ok && body.approval_status === "APPROVED") {
+        setCreatedProject({
+          project_id: body.project_id,
+          current_stage: body.current_stage,
+          next_action: body.next_action,
+        });
+      }
+    } catch {
+      setPlanApprovalResult(
+        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp sự kiện duyệt kế hoạch.",
+      );
+    } finally {
+      setApprovingPlan(false);
+    }
+  }
+
   return (
     <form onChange={invalidateConfirmation} onSubmit={handleSubmit}>
       <section>
@@ -481,6 +517,21 @@ export function ProjectIntakeForm() {
             <p>
               Manifest đã được lập cho <strong>{createdProject.project_id}</strong>.
               Chưa có render hoặc lệnh gọi nhà cung cấp nào được phép chạy.
+            </p>
+          </div>
+          <button disabled={approvingPlan} onClick={approveMvProductionPlan} type="button">
+            {approvingPlan ? "Đang duyệt kế hoạch…" : "Duyệt kế hoạch sản xuất MV"}
+          </button>
+        </section>
+      )}
+      {planApprovalResult && <pre className="creation-result">{planApprovalResult}</pre>}
+      {createdProject?.next_action === "PREPARE_MV_ASSETS" && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Kế hoạch MV đã được duyệt</h2>
+            <p>
+              Dự án <strong>{createdProject.project_id}</strong> sẵn sàng chuẩn bị tài
+              sản MV. Chưa render và chưa gọi nhà cung cấp.
             </p>
           </div>
         </section>
