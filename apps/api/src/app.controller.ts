@@ -35,4 +35,9 @@ export class AppController {
   approveContract(@Param("projectId") projectId: string) {
     return this.intakeService.approveContract(projectId);
   }
+
+  @Post("projects/:projectId/prepare-mv-production")
+  prepareMvProduction(@Param("projectId") projectId: string) {
+    return this.intakeService.prepareMvProduction(projectId);
+  }
 }

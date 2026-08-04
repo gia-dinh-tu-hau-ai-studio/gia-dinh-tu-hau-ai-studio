@@ -20,6 +20,16 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
 6. Nút duyệt hợp đồng cập nhật đúng dòng theo `project_id`, ghi sự kiện
    `CONTRACT_APPROVED`, rồi chuyển sang `PRE_PRODUCTION` với hành động
    `PREPARE_MV_PRODUCTION`. Gọi lại cùng `project_id` không ghi lặp sự kiện.
+7. Nút lập kế hoạch PRE_PRODUCTION kiểm tra hợp đồng MV đã duyệt, video gốc của
+   từng nhân vật và `ORIGINAL_FACE_COMPOSITE`; sau đó tạo
+   `MV_PRODUCTION_PLAN_V1_<project_id>.json` trong `02_SAN_XUAT_MV`.
+8. Kế hoạch được ghi vào `PRODUCTION_JOBS` ở trạng thái `AWAITING_APPROVAL`, tạo
+   một dòng `APPROVALS/PENDING`, ghi audit `MV_PRODUCTION_PLAN_PREPARED` và đổi
+   `next_action` thành `APPROVE_MV_PRODUCTION_PLAN`. Gọi lại cùng dự án không tạo
+   thêm job, approval hoặc manifest.
+
+Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
+dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.
 
 Yêu cầu cấu hình nằm trong `.env.example`. Runtime Cloud Run dùng Google Application
 Default Credentials; chỉ dùng `GOOGLE_SERVICE_ACCOUNT_JSON` cho môi trường ngoài Google

@@ -35,8 +35,8 @@ type ValidatedSubmission = {
 
 type CreatedProject = {
   project_id: string;
-  current_stage: "CONTRACT";
-  next_action: "APPROVE_CONTRACT";
+  current_stage: "CONTRACT" | "PRE_PRODUCTION";
+  next_action: "APPROVE_CONTRACT" | "PREPARE_MV_PRODUCTION" | "APPROVE_MV_PRODUCTION_PLAN";
 };
 
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
@@ -81,6 +81,8 @@ export function ProjectIntakeForm() {
   const [createdProject, setCreatedProject] = useState<CreatedProject | null>(null);
   const [approving, setApproving] = useState(false);
   const [approvalResult, setApprovalResult] = useState<string>("");
+  const [preparing, setPreparing] = useState(false);
+  const [preparationResult, setPreparationResult] = useState<string>("");
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -244,7 +246,11 @@ export function ProjectIntakeForm() {
       const body = await response.json();
       setApprovalResult(JSON.stringify(body, null, 2));
       if (response.ok && body.approval_status === "APPROVED") {
-        setCreatedProject(null);
+        setCreatedProject({
+          project_id: body.project_id,
+          current_stage: body.current_stage,
+          next_action: body.next_action,
+        });
       }
     } catch {
       setApprovalResult(
@@ -252,6 +258,36 @@ export function ProjectIntakeForm() {
       );
     } finally {
       setApproving(false);
+    }
+  }
+
+  async function prepareMvProduction() {
+    if (!createdProject) {
+      return;
+    }
+
+    setPreparing(true);
+    setPreparationResult("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(createdProject.project_id)}/prepare-mv-production`,
+        { method: "POST" },
+      );
+      const body = await response.json();
+      setPreparationResult(JSON.stringify(body, null, 2));
+      if (response.ok && body.approval_status === "PENDING") {
+        setCreatedProject({
+          project_id: body.project_id,
+          current_stage: body.current_stage,
+          next_action: body.next_action,
+        });
+      }
+    } catch {
+      setPreparationResult(
+        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp kế hoạch.",
+      );
+    } finally {
+      setPreparing(false);
     }
   }
 
@@ -406,7 +442,7 @@ export function ProjectIntakeForm() {
         </section>
       )}
       {creationResult && <pre className="creation-result">{creationResult}</pre>}
-      {createdProject && (
+      {createdProject?.next_action === "APPROVE_CONTRACT" && (
         <section className="confirmation-panel">
           <div>
             <h2>Duyệt hợp đồng dự án</h2>
@@ -422,6 +458,33 @@ export function ProjectIntakeForm() {
         </section>
       )}
       {approvalResult && <pre className="creation-result">{approvalResult}</pre>}
+      {createdProject?.next_action === "PREPARE_MV_PRODUCTION" && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Lập kế hoạch PRE_PRODUCTION</h2>
+            <p>
+              Tạo manifest MV cho <strong>{createdProject.project_id}</strong>, khóa
+              người thật và ORIGINAL_FACE_COMPOSITE, rồi đưa kế hoạch vào trạng thái
+              chờ duyệt. Bước này không render và không gọi nhà cung cấp.
+            </p>
+          </div>
+          <button disabled={preparing} onClick={prepareMvProduction} type="button">
+            {preparing ? "Đang lập kế hoạch…" : "Lập kế hoạch MV để duyệt"}
+          </button>
+        </section>
+      )}
+      {preparationResult && <pre className="creation-result">{preparationResult}</pre>}
+      {createdProject?.next_action === "APPROVE_MV_PRODUCTION_PLAN" && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Kế hoạch PRE_PRODUCTION đang chờ duyệt</h2>
+            <p>
+              Manifest đã được lập cho <strong>{createdProject.project_id}</strong>.
+              Chưa có render hoặc lệnh gọi nhà cung cấp nào được phép chạy.
+            </p>
+          </div>
+        </section>
+      )}
     </form>
   );
 }
