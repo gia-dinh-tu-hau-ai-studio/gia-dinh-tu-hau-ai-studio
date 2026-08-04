@@ -42,7 +42,8 @@ type CreatedProject = {
     | "APPROVE_MV_PRODUCTION_PLAN"
     | "PREPARE_MV_ASSETS"
     | "APPROVE_MV_ASSETS"
-    | "PREPARE_MV_SHOT_PLAN";
+    | "PREPARE_MV_SHOT_PLAN"
+    | "APPROVE_MV_SHOT_PLAN";
 };
 
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
@@ -96,6 +97,8 @@ export function ProjectIntakeForm() {
   const [assetPreparationResult, setAssetPreparationResult] = useState("");
   const [approvingAssets, setApprovingAssets] = useState(false);
   const [assetApprovalResult, setAssetApprovalResult] = useState("");
+  const [preparingShotPlan, setPreparingShotPlan] = useState(false);
+  const [shotPlanPreparationResult, setShotPlanPreparationResult] = useState("");
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -396,6 +399,34 @@ export function ProjectIntakeForm() {
     }
   }
 
+  async function prepareMvShotPlan() {
+    if (!createdProject) return;
+
+    setPreparingShotPlan(true);
+    setShotPlanPreparationResult("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(createdProject.project_id)}/prepare-mv-shot-plan`,
+        { method: "POST" },
+      );
+      const body = await response.json();
+      setShotPlanPreparationResult(JSON.stringify(body, null, 2));
+      if (response.ok && body.approval_status === "PENDING") {
+        setCreatedProject({
+          project_id: body.project_id,
+          current_stage: body.current_stage,
+          next_action: body.next_action,
+        });
+      }
+    } catch {
+      setShotPlanPreparationResult(
+        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp shot plan.",
+      );
+    } finally {
+      setPreparingShotPlan(false);
+    }
+  }
+
   return (
     <form onChange={invalidateConfirmation} onSubmit={handleSubmit}>
       <section>
@@ -647,6 +678,24 @@ export function ProjectIntakeForm() {
             <p>
               Tài sản của <strong>{createdProject.project_id}</strong> đã khóa nguồn tạm
               Tường Vy và sẵn sàng lập shot plan. Chưa render và chưa gọi nhà cung cấp.
+            </p>
+          </div>
+          <button disabled={preparingShotPlan} onClick={prepareMvShotPlan} type="button">
+            {preparingShotPlan ? "Đang lập shot plan…" : "Lập shot plan MV để duyệt"}
+          </button>
+        </section>
+      )}
+      {shotPlanPreparationResult && (
+        <pre className="creation-result">{shotPlanPreparationResult}</pre>
+      )}
+      {createdProject?.next_action === "APPROVE_MV_SHOT_PLAN" && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Shot plan MV đang chờ duyệt</h2>
+            <p>
+              Shot plan của <strong>{createdProject.project_id}</strong> đã bám lyrics
+              master và giữ khóa cận mặt Tường Vy. Timecode vẫn chờ căn theo beat;
+              chưa render và chưa gọi nhà cung cấp.
             </p>
           </div>
         </section>
