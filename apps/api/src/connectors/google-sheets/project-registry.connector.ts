@@ -3,6 +3,11 @@ import type { NormalizedProjectIntake } from "@tu-hau/contracts";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { drive_v3, google, sheets_v4 } from "googleapis";
+import {
+  createDriveOAuthClient,
+  createServiceAuth,
+  GoogleDriveOAuthConfigurationError,
+} from "../../google/google-auth";
 
 export class ProjectRegistryNotConfiguredError extends Error {}
 export class ProjectRegistryUnavailableError extends Error {}
@@ -52,6 +57,13 @@ type MvProductionPreparationTransition = {
   job_id: string;
   prepared_at: string;
   idempotent_replay: boolean;
+};
+
+type DriveFolderMetadata = {
+  id?: string | null;
+  mimeType?: string | null;
+  parents?: string[] | null;
+  trashed?: boolean | null;
 };
 
 const MV_PRODUCTION_PLAN_JOB_TYPE = "MV_PRODUCTION_PLAN";
@@ -237,22 +249,28 @@ export function planMvProductionPreparation(
   };
 }
 
+export function assertProjectFolderWithinRoot(
+  folder: DriveFolderMetadata,
+  projectsRootFolderId: string,
+  projectId: string,
+) {
+  if (
+    folder.mimeType !== "application/vnd.google-apps.folder" ||
+    folder.trashed === true ||
+    !folder.parents?.includes(projectsRootFolderId)
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Thư mục Drive của ${projectId} nằm ngoài GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID`,
+    );
+  }
+}
+
 function requiredSetting(name: string) {
   const value = process.env[name]?.trim();
   if (!value) {
     throw new ProjectRegistryNotConfiguredError(`Thiếu cấu hình ${name}`);
   }
   return value;
-}
-
-function createAuth(scopes: string[]) {
-  const rawCredentials = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  return rawCredentials
-    ? new google.auth.GoogleAuth({
-        credentials: JSON.parse(rawCredentials) as Record<string, unknown>,
-        scopes,
-      })
-    : new google.auth.GoogleAuth({ scopes });
 }
 
 function projectTypeCode(contract: NormalizedProjectIntake) {
@@ -278,15 +296,22 @@ export class ProjectRegistryConnector {
   private createSheetsClient(): sheets_v4.Sheets {
     return google.sheets({
       version: "v4",
-      auth: createAuth(["https://www.googleapis.com/auth/spreadsheets"]),
+      auth: createServiceAuth(["https://www.googleapis.com/auth/spreadsheets"]),
     });
   }
 
   private createDriveClient(): drive_v3.Drive {
-    return google.drive({
-      version: "v3",
-      auth: createAuth(["https://www.googleapis.com/auth/drive"]),
-    });
+    try {
+      return google.drive({
+        version: "v3",
+        auth: createDriveOAuthClient(),
+      });
+    } catch (error) {
+      if (error instanceof GoogleDriveOAuthConfigurationError) {
+        throw new ProjectRegistryNotConfiguredError(error.message);
+      }
+      throw error;
+    }
   }
 
   async createProject(
@@ -429,6 +454,7 @@ export class ProjectRegistryConnector {
 
   async prepareMvProduction(projectId: string): Promise<PreparedMvProductionPlan> {
     const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const projectsRootFolderId = requiredSetting("GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID");
     const sheets = this.createSheetsClient();
     const drive = this.createDriveClient();
 
@@ -483,6 +509,17 @@ export class ProjectRegistryConnector {
           approvalsResponse.data.values ?? [],
         );
       }
+
+      const projectFolder = await drive.files.get({
+        fileId: transition.project_folder_id,
+        fields: "id,mimeType,parents,trashed",
+        supportsAllDrives: true,
+      });
+      assertProjectFolderWithinRoot(
+        projectFolder.data,
+        projectsRootFolderId,
+        transition.project_id,
+      );
 
       const productionFolder = await this.findChildFolder(
         drive,

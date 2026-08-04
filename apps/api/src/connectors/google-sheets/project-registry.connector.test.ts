@@ -2,11 +2,44 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeProjectIntake } from "@tu-hau/contracts";
 import {
+  assertProjectFolderWithinRoot,
   buildProjectId,
   planContractApproval,
   planMvProductionPreparation,
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
+
+test("chỉ cho phép project folder nằm trong projects root", () => {
+  assert.doesNotThrow(() =>
+    assertProjectFolderWithinRoot(
+      {
+        id: "project-folder-id",
+        mimeType: "application/vnd.google-apps.folder",
+        parents: ["projects-root-id"],
+        trashed: false,
+      },
+      "projects-root-id",
+      "GDTH-MV-20260804092100-63D8",
+    ),
+  );
+});
+
+test("từ chối project folder nằm ngoài projects root", () => {
+  assert.throws(
+    () =>
+      assertProjectFolderWithinRoot(
+        {
+          id: "other-folder-id",
+          mimeType: "application/vnd.google-apps.folder",
+          parents: ["other-root-id"],
+          trashed: false,
+        },
+        "projects-root-id",
+        "GDTH-MV-20260804092100-63D8",
+      ),
+    ProjectRegistryInvalidStateError,
+  );
+});
 
 test("tạo mã dự án MV Gia Đình Tư Hậu", () => {
   const contract = normalizeProjectIntake({
