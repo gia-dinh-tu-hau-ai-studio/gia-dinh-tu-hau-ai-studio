@@ -37,6 +37,10 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
     `ORIGINAL_FACE_COMPOSITE`, rồi tạo `MV_ASSET_MANIFEST_V1` ở trạng thái
     `AWAITING_APPROVAL`/`APPROVE_MV_ASSETS`. File nguồn không bị sao chép; render
     và provider vẫn bị khóa.
+11. Endpoint `POST /v1/projects/:projectId/approve-mv-assets` duyệt manifest tài
+    sản, khóa nguồn Tường Vy là tạm thời với `close_up_allowed=false`, ghi audit
+    `MV_ASSETS_APPROVED` và chuyển `next_action` sang `PREPARE_MV_SHOT_PLAN`.
+    Dự án vẫn ở `PRE_PRODUCTION`; render và provider tiếp tục bị khóa.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.

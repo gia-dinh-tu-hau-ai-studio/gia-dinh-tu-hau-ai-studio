@@ -41,7 +41,8 @@ type CreatedProject = {
     | "PREPARE_MV_PRODUCTION"
     | "APPROVE_MV_PRODUCTION_PLAN"
     | "PREPARE_MV_ASSETS"
-    | "APPROVE_MV_ASSETS";
+    | "APPROVE_MV_ASSETS"
+    | "PREPARE_MV_SHOT_PLAN";
 };
 
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
@@ -93,6 +94,8 @@ export function ProjectIntakeForm() {
   const [instrumentalMasterFileId, setInstrumentalMasterFileId] = useState("");
   const [preparingAssets, setPreparingAssets] = useState(false);
   const [assetPreparationResult, setAssetPreparationResult] = useState("");
+  const [approvingAssets, setApprovingAssets] = useState(false);
+  const [assetApprovalResult, setAssetApprovalResult] = useState("");
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -365,6 +368,34 @@ export function ProjectIntakeForm() {
     }
   }
 
+  async function approveMvAssets() {
+    if (!createdProject) return;
+
+    setApprovingAssets(true);
+    setAssetApprovalResult("");
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(createdProject.project_id)}/approve-mv-assets`,
+        { method: "POST" },
+      );
+      const body = await response.json();
+      setAssetApprovalResult(JSON.stringify(body, null, 2));
+      if (response.ok && body.approval_status === "APPROVED") {
+        setCreatedProject({
+          project_id: body.project_id,
+          current_stage: body.current_stage,
+          next_action: body.next_action,
+        });
+      }
+    } catch {
+      setAssetApprovalResult(
+        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp sự kiện duyệt tài sản.",
+      );
+    } finally {
+      setApprovingAssets(false);
+    }
+  }
+
   return (
     <form onChange={invalidateConfirmation} onSubmit={handleSubmit}>
       <section>
@@ -598,7 +629,24 @@ export function ProjectIntakeForm() {
             <h2>Tài sản MV đang chờ duyệt</h2>
             <p>
               Beat, lyrics và video ORIGINAL_FACE_COMPOSITE đã được kiểm tra cho
-              <strong> {createdProject.project_id}</strong>. Render và provider vẫn bị khóa.
+              <strong> {createdProject.project_id}</strong>. Khi duyệt, hệ thống buộc
+              nguồn Tường Vy ở trạng thái tạm thời và khóa cận mặt. Render và provider
+              vẫn bị khóa.
+            </p>
+          </div>
+          <button disabled={approvingAssets} onClick={approveMvAssets} type="button">
+            {approvingAssets ? "Đang duyệt tài sản…" : "Duyệt tài sản MV"}
+          </button>
+        </section>
+      )}
+      {assetApprovalResult && <pre className="creation-result">{assetApprovalResult}</pre>}
+      {createdProject?.next_action === "PREPARE_MV_SHOT_PLAN" && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Tài sản MV đã được duyệt an toàn</h2>
+            <p>
+              Tài sản của <strong>{createdProject.project_id}</strong> đã khóa nguồn tạm
+              Tường Vy và sẵn sàng lập shot plan. Chưa render và chưa gọi nhà cung cấp.
             </p>
           </div>
         </section>

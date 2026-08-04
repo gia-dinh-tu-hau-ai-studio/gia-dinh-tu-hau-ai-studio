@@ -50,4 +50,9 @@ export class AppController {
   prepareMvAssets(@Param("projectId") projectId: string, @Body() body: unknown) {
     return this.intakeService.prepareMvAssets(projectId, body);
   }
+
+  @Post("projects/:projectId/approve-mv-assets")
+  approveMvAssets(@Param("projectId") projectId: string) {
+    return this.intakeService.approveMvAssets(projectId);
+  }
 }
