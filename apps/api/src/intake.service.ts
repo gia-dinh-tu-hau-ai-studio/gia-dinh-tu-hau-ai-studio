@@ -1,7 +1,9 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   Injectable,
+  NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { normalizeProjectIntake, ProjectSubmitRequestSchema } from "@tu-hau/contracts";
@@ -13,7 +15,9 @@ import {
 } from "./connectors/google-sheets/character-library.connector";
 import {
   ProjectRegistryConnector,
+  ProjectRegistryInvalidStateError,
   ProjectRegistryNotConfiguredError,
+  ProjectRegistryProjectNotFoundError,
   ProjectRegistryUnavailableError,
 } from "./connectors/google-sheets/project-registry.connector";
 
@@ -97,6 +101,46 @@ export class IntakeService {
         });
       }
       this.handleLibraryError(error);
+      throw error;
+    }
+  }
+
+  async approveContract(projectIdInput: string) {
+    const projectId = projectIdInput.trim();
+    if (!projectId) {
+      throw new BadRequestException({
+        code: "PROJECT_ID_REQUIRED",
+        message: "project_id là bắt buộc",
+      });
+    }
+
+    try {
+      return await this.projectRegistry.approveContract(projectId);
+    } catch (error) {
+      if (error instanceof ProjectRegistryProjectNotFoundError) {
+        throw new NotFoundException({
+          code: "PROJECT_NOT_FOUND",
+          message: error.message,
+        });
+      }
+      if (error instanceof ProjectRegistryInvalidStateError) {
+        throw new ConflictException({
+          code: "CONTRACT_APPROVAL_INVALID_STATE",
+          message: error.message,
+        });
+      }
+      if (error instanceof ProjectRegistryNotConfiguredError) {
+        throw new ServiceUnavailableException({
+          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
+          message: error.message,
+        });
+      }
+      if (error instanceof ProjectRegistryUnavailableError) {
+        throw new BadGatewayException({
+          code: "PROJECT_REGISTRY_UNAVAILABLE",
+          message: error.message,
+        });
+      }
       throw error;
     }
   }
