@@ -1,0 +1,72 @@
+name: Deploy Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-cloud-run-production
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: tu-hau-ai-music
+  GCP_REGION: asia-southeast1
+  ARTIFACT_REPOSITORY: tu-hau-ai
+  API_SERVICE: ai-executor-api
+  WEB_SERVICE: ai-executor-web
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/618104708054/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: github-cloud-run-deployer@tu-hau-ai-music.iam.gserviceaccount.com
+
+      - name: Configure Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build API image
+        run: gcloud builds submit --project="$GCP_PROJECT_ID" --config=infra/cloudrun/api.cloudbuild.yaml .
+
+      - name: Deploy API
+        run: |
+          gcloud run services update "$API_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --image="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$API_SERVICE:latest" \
+            --quiet
+
+      - name: Build web image
+        run: gcloud builds submit --project="$GCP_PROJECT_ID" --config=infra/cloudrun/web.cloudbuild.yaml .
+
+      - name: Deploy web
+        run: |
+          gcloud run services update "$WEB_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --image="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$WEB_SERVICE:latest" \
+            --quiet
+
+      - name: Report deployed services
+        run: |
+          gcloud run services describe "$API_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format='value(status.latestReadyRevisionName,status.url)'
+          gcloud run services describe "$WEB_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format='value(status.latestReadyRevisionName,status.url)'
