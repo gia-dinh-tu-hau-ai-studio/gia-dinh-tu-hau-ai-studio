@@ -3,6 +3,7 @@ import test from "node:test";
 import { normalizeProjectIntake } from "@tu-hau/contracts";
 import {
   applyMvAssetCharacterSafetyLocks,
+  buildMvTimecodeAlignmentManifest,
   assertProjectFolderWithinRoot,
   buildProjectId,
   normalizeDriveFileIdInput,
@@ -14,6 +15,30 @@ import {
   planMvShotPlanApproval,
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
+
+test("timecode MV phủ đủ 06:11.62, liên tục và giữ khóa Tường Vy", () => {
+  const manifest = buildMvTimecodeAlignmentManifest(
+    "GDTH-MV-20260804092100-63D8",
+    "Gia Đình Tư Hậu",
+    "beat-master-file-id",
+    "shot-plan-file-id",
+    [{ character_id: "GDTH-CHAR-001", close_up_allowed: false }],
+    "2026-08-06T10:30:00.000Z",
+  );
+  assert.equal(manifest.sections.length, 6);
+  assert.equal(manifest.cues.length, 15);
+  assert.equal(manifest.cues[0].start_seconds, 0);
+  assert.equal(manifest.cues.at(-1)?.end_seconds, 371.62);
+  for (let index = 1; index < manifest.cues.length; index += 1) {
+    assert.equal(manifest.cues[index].start_seconds, manifest.cues[index - 1].end_seconds);
+  }
+  const tuongVyCues = manifest.cues.filter((cue) => cue.performer === "TUONG_VY_EM");
+  assert.ok(tuongVyCues.length > 0);
+  assert.ok(tuongVyCues.every((cue) => cue.framing_constraints?.close_up_allowed === false));
+  assert.equal(manifest.provider_execution_allowed, false);
+  assert.equal(manifest.render_allowed, false);
+  assert.equal(manifest.approval_gate.approval_status, "PENDING");
+});
 
 test("chỉ cho phép project folder nằm trong projects root", () => {
   assert.doesNotThrow(() =>
