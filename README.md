@@ -53,6 +53,9 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
 14. Endpoint `POST /v1/projects/:projectId/prepare-mv-render-execution` tạo hồ sơ
     thực thi cho đúng 15 render units và chuyển sang `APPROVE_MV_RENDER_EXECUTION`.
     Tất cả units vẫn khóa chờ duyệt; chưa gọi provider và chưa render.
+15. Endpoint `POST /v1/projects/:projectId/approve-mv-render-execution` ghi nhận
+    quyền thực thi và chuyển sang `PREPARE_MV_PROVIDER_SUBMISSION`. Provider và
+    render vẫn khóa cho đến bước chuẩn bị submission riêng.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.
