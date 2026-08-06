@@ -67,6 +67,10 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
     cảnh song ca `RP015` dài 9.62 giây để đánh giá hai gương mặt. Pilot Aleph 2.0
     dự toán tối đa 270 credit (~2.70 USD), giữ khóa Tường Vy và vẫn chờ media,
     prompt cùng duyệt ngân sách; chưa gọi Runway, chưa upload và chưa tiêu credit.
+19. Endpoint `POST /v1/projects/:projectId/prepare-mv-duet-base-composite` lập kế
+    hoạch ghép hai video nguồn riêng của Tường Vy và Phương An thành base song ca
+    RP015 dài 9.62 giây. Manifest giữ khóa không cận Tường Vy và giữ microphone;
+    chưa chạy composite, chưa upload Runway và chưa tiêu credit.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.

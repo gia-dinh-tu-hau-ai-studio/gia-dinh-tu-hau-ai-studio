@@ -110,4 +110,9 @@ export class AppController {
   prepareMvProviderPilot(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvProviderPilot(projectId);
   }
+
+  @Post("projects/:projectId/prepare-mv-duet-base-composite")
+  prepareMvDuetBaseComposite(@Param("projectId") projectId: string) {
+    return this.intakeService.prepareMvDuetBaseComposite(projectId);
+  }
 }

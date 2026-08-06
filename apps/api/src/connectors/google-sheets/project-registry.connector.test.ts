@@ -7,6 +7,7 @@ import {
   buildMvRenderExecutionManifest,
   buildMvProviderSubmissionManifest,
   buildMvProviderPilotManifest,
+  buildMvDuetBaseCompositeManifest,
   buildMvTimecodeAlignmentManifest,
   assertProjectFolderWithinRoot,
   buildProjectId,
@@ -255,6 +256,50 @@ test("provider pilot chỉ chọn một clip song ca RP015", () => {
   assert.equal(result.provider_tasks[0].render_allowed, false);
   assert.equal(result.input_readiness, "BLOCKED_MISSING_MEDIA_AND_PROMPT");
   assert.equal(result.approval_gate.next_action, "APPROVE_MV_PROVIDER_PILOT");
+});
+
+test("base composite dùng đúng hai nguồn riêng và giữ khóa Tường Vy", () => {
+  const pendingPlan = buildMvRenderPlanManifest(
+    "GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "timecode-file",
+    approvedTimecodeManifest(), "2026-08-06T12:00:00.000Z",
+  );
+  const approvedPlan = { ...pendingPlan, render_plan_status: "APPROVED", render_units: pendingPlan.render_units.map((unit) => ({ ...unit, execution_status: "BLOCKED_PENDING_EXECUTION_PREPARATION" })) };
+  const pendingExecution = buildMvRenderExecutionManifest("GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "plan-file", approvedPlan, "2026-08-06T14:00:00.000Z");
+  const approvedExecution = { ...pendingExecution, execution_status: "APPROVED", execution_authorized: true, render_units: pendingExecution.render_units.map((unit) => ({ ...unit, execution_status: "BLOCKED_PENDING_PROVIDER_SUBMISSION" })) };
+  const pendingSubmission = buildMvProviderSubmissionManifest("GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "execution-file", approvedExecution, "2026-08-06T15:00:00.000Z");
+  const approvedSubmission = { ...pendingSubmission, submission_status: "APPROVED", provider_submission_authorized: true, provider_payloads: pendingSubmission.provider_payloads.map((payload) => ({ ...payload, submission_status: "READY_PENDING_EXPLICIT_SUBMIT" })) };
+  const pilot = buildMvProviderPilotManifest("GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "submission-file", approvedSubmission, "2026-08-06T15:30:00.000Z");
+  const assets = {
+    project_id: "GDTH-MV-20260804092100-63D8",
+    source_assets: { character_sources: [
+      { character_id: "GDTH-CHAR-001", character_name: "Tường Vy", file_id: "tuong-vy-video", mime_type: "video/mp4" },
+      { character_id: "GDTH-CHAR-002", character_name: "Phương An", file_id: "phuong-an-video", mime_type: "video/mp4" },
+    ] },
+  };
+  const result = buildMvDuetBaseCompositeManifest("GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "pilot-file", pilot, "asset-file", assets, "2026-08-06T16:00:00.000Z");
+  assert.equal(result.source_videos.length, 2);
+  assert.equal(result.target.source_render_unit_id, "RP015");
+  assert.equal(result.target.duration_seconds, 9.62);
+  assert.equal(result.source_videos[0].character_id, "GDTH-CHAR-001");
+  assert.equal(result.source_videos[0].close_up_allowed, false);
+  assert.equal(result.source_videos[0].preserve_microphone, true);
+  assert.equal(result.composite_execution_allowed, false);
+  assert.equal(result.provider_execution_allowed, false);
+  assert.equal(result.render_allowed, false);
+  assert.equal(result.approval_gate.next_action, "APPROVE_MV_DUET_BASE_COMPOSITE");
+});
+
+test("từ chối base composite khi hai nhân vật dùng cùng một file nguồn", () => {
+  const pilot = {
+    project_id: "GDTH-MV-20260804092100-63D8", pilot_status: "AWAITING_APPROVAL",
+    provider_execution_allowed: false, render_allowed: false,
+    provider_tasks: [{ source_render_unit_id: "RP015", performer: "SONG_CA", duration_seconds: 9.62, input_video_status: "REQUIRED_NOT_UPLOADED", framing_constraints: { close_up_allowed: false, preserve_microphone: true } }],
+  };
+  const assets = { project_id: "GDTH-MV-20260804092100-63D8", source_assets: { character_sources: [
+    { character_id: "GDTH-CHAR-001", file_id: "same-video", mime_type: "video/mp4" },
+    { character_id: "GDTH-CHAR-002", file_id: "same-video", mime_type: "video/mp4" },
+  ] } };
+  assert.throws(() => buildMvDuetBaseCompositeManifest("GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "pilot-file", pilot, "asset-file", assets, "2026-08-06T16:00:00.000Z"), ProjectRegistryInvalidStateError);
 });
 
 test("render plan khóa cận mặt Tường Vy trong cảnh riêng và song ca", () => {
