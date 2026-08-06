@@ -56,6 +56,10 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
 15. Endpoint `POST /v1/projects/:projectId/approve-mv-render-execution` ghi nhận
     quyền thực thi và chuyển sang `PREPARE_MV_PROVIDER_SUBMISSION`. Provider và
     render vẫn khóa cho đến bước chuẩn bị submission riêng.
+16. Endpoint `POST /v1/projects/:projectId/prepare-mv-provider-submission` kiểm tra
+    hồ sơ thực thi đã duyệt, tạo đúng 15 payload Runway ở trạng thái bị khóa và
+    chuyển sang `APPROVE_MV_PROVIDER_SUBMISSION`. Bước này không gọi API Runway,
+    không truyền tài sản ra ngoài và chưa render.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.
