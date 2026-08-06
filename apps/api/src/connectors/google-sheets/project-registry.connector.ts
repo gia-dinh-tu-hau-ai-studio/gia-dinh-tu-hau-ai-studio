@@ -232,6 +232,20 @@ export type PreparedMvProviderPilot = {
   idempotent_replay: boolean;
 };
 
+export type PreparedMvDuetBaseComposite = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "APPROVE_MV_DUET_BASE_COMPOSITE";
+  job_id: string;
+  job_status: "AWAITING_APPROVAL";
+  approval_id: string;
+  approval_status: "PENDING";
+  manifest_file_id: string;
+  manifest_file_url: string;
+  prepared_at: string;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -277,6 +291,8 @@ const MV_PROVIDER_SUBMISSION_JOB_TYPE = "MV_PROVIDER_SUBMISSION";
 const MV_PROVIDER_SUBMISSION_FILE_PREFIX = "MV_PROVIDER_SUBMISSION_V1";
 const MV_PROVIDER_PILOT_JOB_TYPE = "MV_PROVIDER_PILOT";
 const MV_PROVIDER_PILOT_FILE_PREFIX = "MV_PROVIDER_PILOT_V1";
+const MV_DUET_BASE_COMPOSITE_JOB_TYPE = "MV_DUET_BASE_COMPOSITE";
+const MV_DUET_BASE_COMPOSITE_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_V1";
 const TEMPORARY_CLOSE_UP_LOCK_CHARACTER_IDS = new Set(["GDTH-CHAR-001"]);
 
 export function buildMvRenderExecutionManifest(
@@ -439,6 +455,94 @@ export function buildMvProviderPilotManifest(
     render_allowed: false,
     provider_tasks: [task],
     approval_gate: { approval_status: "PENDING", next_action: "APPROVE_MV_PROVIDER_PILOT" },
+    prepared_at: preparedAt,
+  };
+}
+
+export function buildMvDuetBaseCompositeManifest(
+  projectId: string,
+  projectName: string,
+  pilotFileId: string,
+  pilot: Record<string, unknown>,
+  assetFileId: string,
+  assets: Record<string, unknown>,
+  preparedAt: string,
+) {
+  const tasks = Array.isArray(pilot.provider_tasks)
+    ? pilot.provider_tasks as Array<Record<string, unknown>>
+    : [];
+  const task = tasks[0];
+  const framing = (task?.framing_constraints ?? {}) as Record<string, unknown>;
+  const sourceAssets = (assets.source_assets ?? {}) as Record<string, unknown>;
+  const characterSources = Array.isArray(sourceAssets.character_sources)
+    ? sourceAssets.character_sources as Array<Record<string, unknown>>
+    : [];
+  const tuongVy = characterSources.find((source) => String(source.character_id) === "GDTH-CHAR-001");
+  const phuongAn = characterSources.find((source) => String(source.character_id) === "GDTH-CHAR-002");
+  const validSource = (source: Record<string, unknown> | undefined) =>
+    Boolean(source && String(source.file_id ?? "").trim() && String(source.mime_type ?? "").startsWith("video/"));
+  if (
+    String(pilot.project_id) !== projectId ||
+    String(pilot.pilot_status) !== "AWAITING_APPROVAL" ||
+    tasks.length !== 1 || !task ||
+    String(task.source_render_unit_id) !== "RP015" ||
+    String(task.performer) !== "SONG_CA" ||
+    Number(task.duration_seconds) !== 9.62 ||
+    String(task.input_video_status) !== "REQUIRED_NOT_UPLOADED" ||
+    pilot.provider_execution_allowed !== false || pilot.render_allowed !== false ||
+    framing.close_up_allowed !== false || framing.preserve_microphone !== true ||
+    String(assets.project_id) !== projectId ||
+    !validSource(tuongVy) || !validSource(phuongAn) ||
+    String(tuongVy?.file_id) === String(phuongAn?.file_id)
+  ) {
+    throw new ProjectRegistryInvalidStateError("Nguồn song ca chưa an toàn để lập base composite RP015");
+  }
+  return {
+    schema_version: "1.0",
+    project_id: projectId,
+    project_name: projectName,
+    stage: "PRE_PRODUCTION",
+    source_references: {
+      provider_pilot_file_id: pilotFileId,
+      approved_asset_manifest_file_id: assetFileId,
+    },
+    target: {
+      source_render_unit_id: "RP015",
+      performer: "SONG_CA",
+      duration_seconds: 9.62,
+      aspect_ratio: "16:9",
+    },
+    composite_status: "AWAITING_APPROVAL",
+    pipeline: "ORIGINAL_FACE_COMPOSITE",
+    layout: {
+      mode: "DUET_SPLIT_STAGE_COMPOSITE",
+      canvas_width: 1920,
+      canvas_height: 1080,
+      output_duration_seconds: 9.62,
+    },
+    source_videos: [
+      {
+        character_id: "GDTH-CHAR-001", character_name: tuongVy?.character_name,
+        file_id: tuongVy?.file_id, mime_type: tuongVy?.mime_type,
+        layout_role: "LEFT", allowed_framing: ["MEDIUM", "FULL_BODY"],
+        close_up_allowed: false, preserve_microphone: true,
+      },
+      {
+        character_id: "GDTH-CHAR-002", character_name: phuongAn?.character_name,
+        file_id: phuongAn?.file_id, mime_type: phuongAn?.mime_type,
+        layout_role: "RIGHT", allowed_framing: ["MEDIUM", "FULL_BODY"],
+        close_up_allowed: true, preserve_microphone: false,
+      },
+    ],
+    audio_policy: "MASTER_AUDIO_ATTACHED_AFTER_PROVIDER_RESULT",
+    output_readiness: "BLOCKED_PENDING_COMPOSITE_APPROVAL",
+    composite_execution_allowed: false,
+    provider_execution_allowed: false,
+    render_allowed: false,
+    approval_gate: {
+      approval_status: "PENDING",
+      next_action: "APPROVE_MV_DUET_BASE_COMPOSITE",
+    },
     prepared_at: preparedAt,
   };
 }
@@ -3260,6 +3364,65 @@ export class ProjectRegistryConnector {
     } catch (error) {
       if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không lập được provider pilot MV");
+    }
+  }
+
+  async prepareMvDuetBaseComposite(projectId: string): Promise<PreparedMvDuetBaseComposite> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const projectsRootFolderId = requiredSetting("GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID");
+    const sheets = this.createSheetsClient(); const drive = this.createDriveClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+      ]);
+      const projects = projectsResponse.data.values ?? []; const jobs = jobsResponse.data.values ?? []; const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId);
+      if (projectIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const projectRow = projects[projectIndex].map(String);
+      const existing = jobs.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_DUET_BASE_COMPOSITE_JOB_TYPE)?.map(String);
+      if (existing) {
+        const existingApproval = approvals.find((row, index) => index > 0 && String(row[2] ?? "").trim() === MV_DUET_BASE_COMPOSITE_JOB_TYPE && String(row[3] ?? "").trim() === String(existing[0] ?? "").trim())?.map(String);
+        const fileId = parseStringArray(existing[7])[0];
+        if (String(projectRow[19] ?? "").trim() !== "APPROVE_MV_DUET_BASE_COMPOSITE" || String(existing[4] ?? "").trim() !== "AWAITING_APPROVAL" || String(existingApproval?.[4] ?? "").trim() !== "PENDING" || !fileId) throw new ProjectRegistryInvalidStateError(`Base composite của ${projectId} đã tồn tại nhưng không chờ duyệt`);
+        const metadata = await drive.files.get({ fileId, fields: "id,webViewLink,trashed", supportsAllDrives: true });
+        if (metadata.data.trashed) throw new ProjectRegistryInvalidStateError(`Base composite ${fileId} đã bị xóa`);
+        return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "APPROVE_MV_DUET_BASE_COMPOSITE", job_id: String(existing[0]), job_status: "AWAITING_APPROVAL", approval_id: String(existingApproval?.[0] ?? ""), approval_status: "PENDING", manifest_file_id: fileId, manifest_file_url: metadata.data.webViewLink ?? `https://drive.google.com/file/d/${fileId}/view`, prepared_at: String(existing[12] ?? ""), idempotent_replay: true };
+      }
+      if (String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" || String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION" || String(projectRow[19] ?? "").trim() !== "APPROVE_MV_PROVIDER_PILOT") throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không thể lập base composite từ ${String(projectRow[19] ?? "EMPTY")}`);
+      const projectFolderId = String(projectRow[20] ?? "").trim();
+      const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
+      assertProjectFolderWithinRoot(projectFolder.data, projectsRootFolderId, projectId);
+      const pilotJob = jobs.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_PROVIDER_PILOT_JOB_TYPE)?.map(String);
+      const pilotApproval = approvals.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[2] ?? "").trim() === MV_PROVIDER_PILOT_JOB_TYPE && String(row[3] ?? "").trim() === String(pilotJob?.[0] ?? "").trim())?.map(String);
+      if (!pilotJob || String(pilotJob[4] ?? "").trim() !== "AWAITING_APPROVAL" || !pilotApproval || String(pilotApproval[4] ?? "").trim() !== "PENDING") throw new ProjectRegistryInvalidStateError(`Provider pilot của ${projectId} không ở trạng thái chờ nguồn composite`);
+      const pilotFileId = parseStringArray(pilotJob[7])[0];
+      const pilotResponse = await drive.files.get({ fileId: pilotFileId, alt: "media", supportsAllDrives: true }, { responseType: "text" });
+      const pilot = typeof pilotResponse.data === "string" ? parseObject(pilotResponse.data, "MV_PROVIDER_PILOT manifest") : pilotResponse.data as Record<string, unknown>;
+      const assetJob = jobs.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_ASSET_PREPARATION_JOB_TYPE)?.map(String);
+      const assetApproval = approvals.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[2] ?? "").trim() === MV_ASSET_PREPARATION_JOB_TYPE && String(row[3] ?? "").trim() === String(assetJob?.[0] ?? "").trim())?.map(String);
+      if (!assetJob || String(assetJob[4] ?? "").trim() !== "APPROVED" || !assetApproval || String(assetApproval[4] ?? "").trim() !== "APPROVED") throw new ProjectRegistryInvalidStateError(`Tài sản nguồn của ${projectId} chưa được duyệt`);
+      const assetFileId = parseStringArray(assetJob[7])[0];
+      const assets = await this.readApprovedMvAssetManifest(drive, projectFolderId, assetJob, projectId);
+      const preparedAt = new Date().toISOString();
+      const manifest = buildMvDuetBaseCompositeManifest(projectId, String(projectRow[2] ?? ""), pilotFileId, pilot, assetFileId, assets, preparedAt);
+      const productionFolder = await this.findChildFolder(drive, projectFolderId, "02_SAN_XUAT_MV");
+      const manifestFile = await this.createOrReuseJsonFile(drive, productionFolder.id, `${MV_DUET_BASE_COMPOSITE_FILE_PREFIX}_${projectId}.json`, manifest);
+      const jobId = randomUUID(); const approvalId = randomUUID();
+      const projectSheetRow = projectIndex + 1; const jobSheetRow = jobs.length + 1; const approvalSheetRow = approvals.length + 1; const auditSheetRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
+        { range: `'PROJECTS'!S${projectSheetRow}:T${projectSheetRow}`, values: [["PRE_PRODUCTION", "APPROVE_MV_DUET_BASE_COMPOSITE"]] },
+        { range: `'PROJECTS'!X${projectSheetRow}`, values: [[preparedAt]] },
+        { range: `'PRODUCTION_JOBS'!A${jobSheetRow}:N${jobSheetRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_DUET_BASE_COMPOSITE_JOB_TYPE, "AWAITING_APPROVAL", "ORIGINAL_FACE_COMPOSITE", JSON.stringify([pilotFileId, assetFileId]), JSON.stringify([manifestFile.id]), "", 0, preparedAt, "", preparedAt, preparedAt]] },
+        { range: `'APPROVALS'!A${approvalSheetRow}:J${approvalSheetRow}`, values: [[approvalId, projectId, MV_DUET_BASE_COMPOSITE_JOB_TYPE, jobId, "PENDING", "", "", "Chờ duyệt kế hoạch ghép hai nguồn riêng thành base song ca RP015/9.62 giây. Chưa chạy composite, chưa gọi Runway và chưa tiêu credit.", preparedAt, preparedAt]] },
+        { range: `'AUDIT_LOG'!A${auditSheetRow}:H${auditSheetRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_DUET_BASE_COMPOSITE_PREPARED", "SUCCEEDED", "AI_EXECUTOR_WEB", "Đã lập kế hoạch base composite từ hai nguồn riêng; giữ khóa Tường Vy; chưa xử lý media và chưa gọi Runway.", preparedAt]] },
+      ] } });
+      return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "APPROVE_MV_DUET_BASE_COMPOSITE", job_id: jobId, job_status: "AWAITING_APPROVAL", approval_id: approvalId, approval_status: "PENDING", manifest_file_id: manifestFile.id, manifest_file_url: manifestFile.webViewLink, prepared_at: preparedAt, idempotent_replay: false };
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không lập được base composite song ca MV");
     }
   }
 
