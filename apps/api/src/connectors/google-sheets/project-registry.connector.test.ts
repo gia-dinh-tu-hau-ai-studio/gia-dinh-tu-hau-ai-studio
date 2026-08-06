@@ -13,8 +13,51 @@ import {
   planMvProductionPlanApproval,
   planMvProductionPreparation,
   planMvShotPlanApproval,
+  planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
+
+function pendingMvTimecodeRows() {
+  const project = approvedMvProjectRow();
+  project[19] = "APPROVE_MV_TIMECODE_ALIGNMENT";
+  const job = Array.from({ length: 14 }, () => "");
+  job[0] = "job-timecode-001";
+  job[1] = project[1];
+  job[2] = "PRE_PRODUCTION";
+  job[3] = "MV_TIMECODE_ALIGNMENT";
+  job[4] = "AWAITING_APPROVAL";
+  job[7] = '["timecode-manifest-file-id"]';
+  const approval = Array.from({ length: 10 }, () => "");
+  approval[0] = "approval-timecode-001";
+  approval[1] = project[1];
+  approval[2] = "MV_TIMECODE_ALIGNMENT";
+  approval[3] = job[0];
+  approval[4] = "PENDING";
+  return { project, job, approval };
+}
+
+test("duyệt timecode MV chuyển sang chuẩn bị render plan nhưng chưa render", () => {
+  const { project, job, approval } = pendingMvTimecodeRows();
+  const result = planMvTimecodeAlignmentApproval(project, job, approval, new Date("2026-08-06T11:30:00.000Z"));
+  assert.equal(result.next_action, "PREPARE_MV_RENDER_PLAN");
+  assert.equal(result.approval_status, "APPROVED");
+  assert.equal(result.idempotent_replay, false);
+});
+
+test("duyệt lại timecode MV đã APPROVED là idempotent", () => {
+  const { project, job, approval } = pendingMvTimecodeRows();
+  project[19] = "PREPARE_MV_RENDER_PLAN";
+  job[4] = "APPROVED";
+  approval[4] = "APPROVED";
+  approval[6] = "2026-08-06T11:30:00.000Z";
+  assert.equal(planMvTimecodeAlignmentApproval(project, job, approval).idempotent_replay, true);
+});
+
+test("từ chối duyệt timecode MV khi job và approval không đồng bộ", () => {
+  const { project, job, approval } = pendingMvTimecodeRows();
+  job[4] = "APPROVED";
+  assert.throws(() => planMvTimecodeAlignmentApproval(project, job, approval), ProjectRegistryInvalidStateError);
+});
 
 test("timecode MV phủ đủ 06:11.62, liên tục và giữ khóa Tường Vy", () => {
   const manifest = buildMvTimecodeAlignmentManifest(
