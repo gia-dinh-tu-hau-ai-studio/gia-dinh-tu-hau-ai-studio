@@ -6,6 +6,7 @@ import {
   buildMvRenderPlanManifest,
   buildMvRenderExecutionManifest,
   buildMvProviderSubmissionManifest,
+  buildMvProviderPilotManifest,
   buildMvTimecodeAlignmentManifest,
   assertProjectFolderWithinRoot,
   buildProjectId,
@@ -230,6 +231,30 @@ test("provider submission từ chối mở cận mặt Tường Vy", () => {
     { ...pending, execution_status: "APPROVED", execution_authorized: true, render_units: units },
     "2026-08-06T15:00:00.000Z",
   ), ProjectRegistryInvalidStateError);
+});
+
+test("provider pilot chỉ chọn một clip song ca RP015", () => {
+  const pendingPlan = buildMvRenderPlanManifest(
+    "GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "timecode-file",
+    approvedTimecodeManifest(), "2026-08-06T12:00:00.000Z",
+  );
+  const approvedPlan = { ...pendingPlan, render_plan_status: "APPROVED", render_units: pendingPlan.render_units.map((unit) => ({ ...unit, execution_status: "BLOCKED_PENDING_EXECUTION_PREPARATION" })) };
+  const pendingExecution = buildMvRenderExecutionManifest("GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "plan-file", approvedPlan, "2026-08-06T14:00:00.000Z");
+  const approvedExecution = { ...pendingExecution, execution_status: "APPROVED", execution_authorized: true, render_units: pendingExecution.render_units.map((unit) => ({ ...unit, execution_status: "BLOCKED_PENDING_PROVIDER_SUBMISSION" })) };
+  const pendingSubmission = buildMvProviderSubmissionManifest("GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "execution-file", approvedExecution, "2026-08-06T15:00:00.000Z");
+  const approvedSubmission = { ...pendingSubmission, submission_status: "APPROVED", provider_submission_authorized: true, provider_payloads: pendingSubmission.provider_payloads.map((payload) => ({ ...payload, submission_status: "READY_PENDING_EXPLICIT_SUBMIT" })) };
+  const result = buildMvProviderPilotManifest("GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "submission-file", approvedSubmission, "2026-08-06T15:30:00.000Z");
+  assert.equal(result.provider.model, "aleph2");
+  assert.equal(result.provider_tasks.length, 1);
+  assert.equal(result.provider_tasks[0].source_render_unit_id, "RP015");
+  assert.equal(result.provider_tasks[0].performer, "SONG_CA");
+  assert.equal(result.provider_tasks[0].duration_seconds, 9.62);
+  assert.equal(result.estimated_credits, 270);
+  assert.equal(result.estimated_cost_usd, 2.7);
+  assert.equal(result.provider_tasks[0].provider_execution_allowed, false);
+  assert.equal(result.provider_tasks[0].render_allowed, false);
+  assert.equal(result.input_readiness, "BLOCKED_MISSING_MEDIA_AND_PROMPT");
+  assert.equal(result.approval_gate.next_action, "APPROVE_MV_PROVIDER_PILOT");
 });
 
 test("render plan khóa cận mặt Tường Vy trong cảnh riêng và song ca", () => {
