@@ -204,6 +204,18 @@ export type PreparedMvProviderSubmission = {
   idempotent_replay: boolean;
 };
 
+export type ApprovedMvProviderSubmission = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "SUBMIT_MV_PROVIDER_JOBS";
+  job_id: string;
+  job_status: "APPROVED";
+  approval_id: string;
+  approval_status: "APPROVED";
+  approved_at: string;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -341,6 +353,37 @@ export function buildMvProviderSubmissionManifest(
     approval_gate: { approval_status: "PENDING", next_action: "APPROVE_MV_PROVIDER_SUBMISSION" },
     prepared_at: preparedAt,
   };
+}
+
+export function planMvProviderSubmissionApproval(
+  projectRow: string[],
+  jobRow: string[] | undefined,
+  approvalRow: string[] | undefined,
+  now = new Date(),
+): ApprovedMvProviderSubmission & { submission_id: string } {
+  const submissionId = String(projectRow[0] ?? "").trim();
+  const projectId = String(projectRow[1] ?? "").trim();
+  const nextAction = String(projectRow[19] ?? "").trim();
+  if (!projectId || String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" || String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION") {
+    throw new ProjectRegistryInvalidStateError(`Dự án ${projectId || "EMPTY"} chưa đủ điều kiện duyệt provider submission`);
+  }
+  if (!jobRow || String(jobRow[1] ?? "").trim() !== projectId || String(jobRow[3] ?? "").trim() !== MV_PROVIDER_SUBMISSION_JOB_TYPE) {
+    throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} chưa có provider submission hợp lệ`);
+  }
+  const jobId = String(jobRow[0] ?? "").trim();
+  if (!approvalRow || String(approvalRow[1] ?? "").trim() !== projectId || String(approvalRow[2] ?? "").trim() !== MV_PROVIDER_SUBMISSION_JOB_TYPE || String(approvalRow[3] ?? "").trim() !== jobId) {
+    throw new ProjectRegistryInvalidStateError(`Approval provider submission của ${projectId} không hợp lệ`);
+  }
+  const jobStatus = String(jobRow[4] ?? "").trim();
+  const approvalStatus = String(approvalRow[4] ?? "").trim();
+  const approvedAt = String(approvalRow[6] ?? "").trim() || now.toISOString();
+  if (nextAction === "SUBMIT_MV_PROVIDER_JOBS" && jobStatus === "APPROVED" && approvalStatus === "APPROVED") {
+    return { submission_id: submissionId, project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "SUBMIT_MV_PROVIDER_JOBS", job_id: jobId, job_status: "APPROVED", approval_id: String(approvalRow[0]), approval_status: "APPROVED", approved_at: approvedAt, idempotent_replay: true };
+  }
+  if (nextAction !== "APPROVE_MV_PROVIDER_SUBMISSION" || jobStatus !== "AWAITING_APPROVAL" || approvalStatus !== "PENDING") {
+    throw new ProjectRegistryInvalidStateError(`Không thể duyệt provider submission từ ${nextAction || "EMPTY"}/${jobStatus || "EMPTY"}/${approvalStatus || "EMPTY"}`);
+  }
+  return { submission_id: submissionId, project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "SUBMIT_MV_PROVIDER_JOBS", job_id: jobId, job_status: "APPROVED", approval_id: String(approvalRow[0]), approval_status: "APPROVED", approved_at: now.toISOString(), idempotent_replay: false };
 }
 
 export function planMvRenderExecutionApproval(
@@ -3036,6 +3079,57 @@ export class ProjectRegistryConnector {
       if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không chuẩn bị được provider submission MV");
     }
+  }
+
+  async approveMvProviderSubmission(projectId: string): Promise<ApprovedMvProviderSubmission> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient(); const drive = this.createDriveClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+      ]);
+      const projects = projectsResponse.data.values ?? []; const jobs = jobsResponse.data.values ?? []; const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId);
+      if (projectIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const jobIndex = jobs.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_PROVIDER_SUBMISSION_JOB_TYPE);
+      const jobId = jobIndex > 0 ? String(jobs[jobIndex][0] ?? "").trim() : "";
+      const approvalIndex = approvals.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[2] ?? "").trim() === MV_PROVIDER_SUBMISSION_JOB_TYPE && String(row[3] ?? "").trim() === jobId);
+      const transition = planMvProviderSubmissionApproval(projects[projectIndex].map(String), jobIndex > 0 ? jobs[jobIndex].map(String) : undefined, approvalIndex > 0 ? approvals[approvalIndex].map(String) : undefined);
+      const result: ApprovedMvProviderSubmission = { project_id: transition.project_id, current_stage: transition.current_stage, next_action: transition.next_action, job_id: transition.job_id, job_status: transition.job_status, approval_id: transition.approval_id, approval_status: transition.approval_status, approved_at: transition.approved_at, idempotent_replay: transition.idempotent_replay };
+      if (transition.idempotent_replay) return result;
+      await this.markMvProviderSubmissionManifestApproved(drive, jobs[jobIndex].map(String), transition);
+      const projectRow = projectIndex + 1; const jobRow = jobIndex + 1; const approvalRow = approvalIndex + 1; const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
+        { range: `'PROJECTS'!S${projectRow}:T${projectRow}`, values: [["PRE_PRODUCTION", transition.next_action]] },
+        { range: `'PROJECTS'!X${projectRow}`, values: [[transition.approved_at]] },
+        { range: `'PRODUCTION_JOBS'!E${jobRow}`, values: [[transition.job_status]] },
+        { range: `'PRODUCTION_JOBS'!L${jobRow}:N${jobRow}`, values: [[transition.approved_at, String(jobs[jobIndex][12] ?? ""), transition.approved_at]] },
+        { range: `'APPROVALS'!E${approvalRow}:H${approvalRow}`, values: [[transition.approval_status, "PROJECT_OWNER", transition.approved_at, "Đã duyệt gói 15 payload. Chưa gửi Runway; chờ lệnh submit riêng."]] },
+        { range: `'APPROVALS'!J${approvalRow}`, values: [[transition.approved_at]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, transition.submission_id, "MV_PROVIDER_SUBMISSION_APPROVED", "SUCCEEDED", "AI_EXECUTOR_WEB", "Đã duyệt provider submission; chưa gọi Runway và chưa render.", transition.approved_at]] },
+      ] } });
+      return result;
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không duyệt được provider submission MV");
+    }
+  }
+
+  private async markMvProviderSubmissionManifestApproved(drive: drive_v3.Drive, jobRow: string[], transition: ApprovedMvProviderSubmission) {
+    const fileId = parseStringArray(jobRow[7])[0];
+    if (!fileId) throw new ProjectRegistryInvalidStateError(`Job ${transition.job_id} chưa có provider submission manifest`);
+    const response = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "text" });
+    const manifest = typeof response.data === "string" ? parseObject(response.data, "MV_PROVIDER_SUBMISSION manifest") : response.data as Record<string, unknown>;
+    const payloads = Array.isArray(manifest.provider_payloads) ? manifest.provider_payloads as Array<Record<string, unknown>> : [];
+    const safe = payloads.length === 15 && payloads.every((payload) => String(payload.submission_status) === "BLOCKED_PENDING_PROVIDER_APPROVAL" && payload.provider_execution_allowed === false && payload.render_allowed === false);
+    if (String(manifest.project_id) !== transition.project_id || String(manifest.submission_status) !== "AWAITING_APPROVAL" || manifest.provider_execution_allowed !== false || manifest.render_allowed !== false || !safe) {
+      throw new ProjectRegistryInvalidStateError(`Provider submission của ${transition.project_id} chưa an toàn để duyệt`);
+    }
+    const approved = { ...manifest, submission_status: "APPROVED", provider_submission_authorized: true, provider_execution_allowed: false, render_allowed: false, provider_payloads: payloads.map((payload) => ({ ...payload, submission_status: "READY_PENDING_EXPLICIT_SUBMIT", provider_execution_allowed: false, render_allowed: false })), approval_gate: { approval_status: "APPROVED", reviewer: "PROJECT_OWNER", approved_at: transition.approved_at, next_action: transition.next_action } };
+    await drive.files.update({ fileId, media: { mimeType: "application/json", body: Readable.from([`${JSON.stringify(approved, null, 2)}\n`]) }, fields: "id,modifiedTime", supportsAllDrives: true });
   }
 
   private async markMvRenderExecutionManifestApproved(drive: drive_v3.Drive, jobRow: string[], transition: ApprovedMvRenderExecution) {
