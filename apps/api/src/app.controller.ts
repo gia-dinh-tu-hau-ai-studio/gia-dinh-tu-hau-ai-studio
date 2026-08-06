@@ -80,4 +80,9 @@ export class AppController {
   prepareMvRenderPlan(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvRenderPlan(projectId);
   }
+
+  @Post("projects/:projectId/approve-mv-render-plan")
+  approveMvRenderPlan(@Param("projectId") projectId: string) {
+    return this.intakeService.approveMvRenderPlan(projectId);
+  }
 }

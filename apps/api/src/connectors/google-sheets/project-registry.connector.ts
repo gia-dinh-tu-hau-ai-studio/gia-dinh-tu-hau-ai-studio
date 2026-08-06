@@ -152,6 +152,18 @@ export type PreparedMvRenderPlan = {
   idempotent_replay: boolean;
 };
 
+export type ApprovedMvRenderPlan = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "PREPARE_MV_RENDER_EXECUTION";
+  job_id: string;
+  job_status: "APPROVED";
+  approval_id: string;
+  approval_status: "APPROVED";
+  approved_at: string;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -282,6 +294,102 @@ export function buildMvRenderPlanManifest(
       next_action: "APPROVE_MV_RENDER_PLAN",
     },
     prepared_at: preparedAt,
+  };
+}
+
+export function planMvRenderPlanApproval(
+  projectRow: string[],
+  jobRow: string[] | undefined,
+  approvalRow: string[] | undefined,
+  now = new Date(),
+): ApprovedMvRenderPlan & { submission_id: string } {
+  const submissionId = String(projectRow[0] ?? "").trim();
+  const projectId = String(projectRow[1] ?? "").trim();
+  const nextAction = String(projectRow[19] ?? "").trim();
+  if (
+    !projectId ||
+    String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" ||
+    String(projectRow[16] ?? "").trim() !== "CONFIRMED" ||
+    String(projectRow[17] ?? "").trim() !== "APPROVED" ||
+    String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Dự án ${projectId || "EMPTY"} chưa đủ điều kiện duyệt render plan MV`,
+    );
+  }
+  if (!jobRow) {
+    throw new ProjectRegistryInvalidStateError(
+      `Dự án ${projectId} chưa có PRODUCTION_JOBS/MV_RENDER_PLAN`,
+    );
+  }
+  const jobId = String(jobRow[0] ?? "").trim();
+  const jobStatus = String(jobRow[4] ?? "").trim();
+  if (
+    !jobId ||
+    String(jobRow[1] ?? "").trim() !== projectId ||
+    String(jobRow[2] ?? "").trim() !== "PRE_PRODUCTION" ||
+    String(jobRow[3] ?? "").trim() !== MV_RENDER_PLAN_JOB_TYPE
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `PRODUCTION_JOBS của ${projectId} không khớp render plan MV`,
+    );
+  }
+  if (!approvalRow) {
+    throw new ProjectRegistryInvalidStateError(
+      `Render plan MV ${jobId} chưa có dòng APPROVALS`,
+    );
+  }
+  const approvalId = String(approvalRow[0] ?? "").trim();
+  const approvalStatus = String(approvalRow[4] ?? "").trim();
+  const approvedAt = String(approvalRow[6] ?? "").trim() || now.toISOString();
+  if (
+    !approvalId ||
+    String(approvalRow[1] ?? "").trim() !== projectId ||
+    String(approvalRow[2] ?? "").trim() !== MV_RENDER_PLAN_JOB_TYPE ||
+    String(approvalRow[3] ?? "").trim() !== jobId
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `APPROVALS của ${projectId} không khớp render plan MV ${jobId}`,
+    );
+  }
+  if (
+    nextAction === "PREPARE_MV_RENDER_EXECUTION" &&
+    jobStatus === "APPROVED" &&
+    approvalStatus === "APPROVED"
+  ) {
+    return {
+      submission_id: submissionId,
+      project_id: projectId,
+      current_stage: "PRE_PRODUCTION",
+      next_action: "PREPARE_MV_RENDER_EXECUTION",
+      job_id: jobId,
+      job_status: "APPROVED",
+      approval_id: approvalId,
+      approval_status: "APPROVED",
+      approved_at: approvedAt,
+      idempotent_replay: true,
+    };
+  }
+  if (
+    nextAction !== "APPROVE_MV_RENDER_PLAN" ||
+    jobStatus !== "AWAITING_APPROVAL" ||
+    approvalStatus !== "PENDING"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Render plan MV ${jobId} không thể duyệt từ ${nextAction || "EMPTY"}/${jobStatus || "EMPTY"}/${approvalStatus || "EMPTY"}`,
+    );
+  }
+  return {
+    submission_id: submissionId,
+    project_id: projectId,
+    current_stage: "PRE_PRODUCTION",
+    next_action: "PREPARE_MV_RENDER_EXECUTION",
+    job_id: jobId,
+    job_status: "APPROVED",
+    approval_id: approvalId,
+    approval_status: "APPROVED",
+    approved_at: now.toISOString(),
+    idempotent_replay: false,
   };
 }
 
@@ -2604,6 +2712,124 @@ export class ProjectRegistryConnector {
     }
   }
 
+  async approveMvRenderPlan(projectId: string): Promise<ApprovedMvRenderPlan> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    const drive = this.createDriveClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] =
+        await Promise.all([
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+        ]);
+      const projectRows = projectsResponse.data.values ?? [];
+      const projectRowIndex = projectRows.findIndex(
+        (row, index) => index > 0 && String(row[1] ?? "").trim() === projectId,
+      );
+      if (projectRowIndex < 0) {
+        throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      }
+      const jobRows = jobsResponse.data.values ?? [];
+      const jobRowIndex = jobRows.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[3] ?? "").trim() === MV_RENDER_PLAN_JOB_TYPE,
+      );
+      const jobId =
+        jobRowIndex > 0 ? String(jobRows[jobRowIndex][0] ?? "").trim() : "";
+      const approvalRows = approvalsResponse.data.values ?? [];
+      const approvalRowIndex = approvalRows.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[2] ?? "").trim() === MV_RENDER_PLAN_JOB_TYPE &&
+          String(row[3] ?? "").trim() === jobId,
+      );
+      const transition = planMvRenderPlanApproval(
+        projectRows[projectRowIndex].map(String),
+        jobRowIndex > 0 ? jobRows[jobRowIndex].map(String) : undefined,
+        approvalRowIndex > 0 ? approvalRows[approvalRowIndex].map(String) : undefined,
+      );
+      const result: ApprovedMvRenderPlan = {
+        project_id: transition.project_id,
+        current_stage: transition.current_stage,
+        next_action: transition.next_action,
+        job_id: transition.job_id,
+        job_status: transition.job_status,
+        approval_id: transition.approval_id,
+        approval_status: transition.approval_status,
+        approved_at: transition.approved_at,
+        idempotent_replay: transition.idempotent_replay,
+      };
+      if (transition.idempotent_replay) return result;
+      await this.markMvRenderPlanManifestApproved(
+        drive,
+        String(projectRows[projectRowIndex][20] ?? "").trim(),
+        jobRows[jobRowIndex].map(String),
+        transition,
+      );
+      const projectSheetRow = projectRowIndex + 1;
+      const jobSheetRow = jobRowIndex + 1;
+      const approvalSheetRow = approvalRowIndex + 1;
+      const auditSheetRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: [
+            {
+              range: `'PROJECTS'!S${projectSheetRow}:T${projectSheetRow}`,
+              values: [[transition.current_stage, transition.next_action]],
+            },
+            { range: `'PROJECTS'!X${projectSheetRow}`, values: [[transition.approved_at]] },
+            { range: `'PRODUCTION_JOBS'!E${jobSheetRow}`, values: [[transition.job_status]] },
+            { range: `'PRODUCTION_JOBS'!L${jobSheetRow}`, values: [[transition.approved_at]] },
+            { range: `'PRODUCTION_JOBS'!N${jobSheetRow}`, values: [[transition.approved_at]] },
+            {
+              range: `'APPROVALS'!E${approvalSheetRow}:G${approvalSheetRow}`,
+              values: [[transition.approval_status, "PROJECT_OWNER", transition.approved_at]],
+            },
+            {
+              range: `'APPROVALS'!H${approvalSheetRow}`,
+              values: [[
+                "Đã duyệt render plan 15 cue; tiếp theo chuẩn bị thực thi render. Provider và render vẫn bị khóa.",
+              ]],
+            },
+            { range: `'APPROVALS'!J${approvalSheetRow}`, values: [[transition.approved_at]] },
+            {
+              range: `'AUDIT_LOG'!A${auditSheetRow}:H${auditSheetRow}`,
+              values: [[
+                randomUUID(),
+                transition.project_id,
+                transition.submission_id,
+                "MV_RENDER_PLAN_APPROVED",
+                "SUCCEEDED",
+                "AI_EXECUTOR_WEB",
+                "Render plan MV đã được chủ dự án duyệt; tiếp theo chuẩn bị thực thi; chưa render và chưa gọi provider.",
+                transition.approved_at,
+              ]],
+            },
+          ],
+        },
+      });
+      return result;
+    } catch (error) {
+      if (
+        error instanceof ProjectRegistryNotConfiguredError ||
+        error instanceof ProjectRegistryProjectNotFoundError ||
+        error instanceof ProjectRegistryInvalidStateError
+      ) throw error;
+      throw new ProjectRegistryUnavailableError(
+        error instanceof Error
+          ? error.message
+          : "Không duyệt được render plan MV Gia Đình Tư Hậu",
+      );
+    }
+  }
+
   async approveMvShotPlan(projectId: string): Promise<ApprovedMvShotPlan> {
     const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
     const sheets = this.createSheetsClient();
@@ -2856,6 +3082,143 @@ export class ProjectRegistryConnector {
           : "Không duyệt được tài sản MV Gia Đình Tư Hậu",
       );
     }
+  }
+
+  private async markMvRenderPlanManifestApproved(
+    drive: drive_v3.Drive,
+    projectFolderId: string,
+    jobRow: string[],
+    transition: ApprovedMvRenderPlan,
+  ) {
+    if (!projectFolderId) {
+      throw new ProjectRegistryInvalidStateError(
+        `Dự án ${transition.project_id} chưa có thư mục Drive`,
+      );
+    }
+    const productionFolder = await this.findChildFolder(
+      drive,
+      projectFolderId,
+      "02_SAN_XUAT_MV",
+    );
+    const manifestFileId = parseStringArray(jobRow[7])[0];
+    if (!manifestFileId) {
+      throw new ProjectRegistryInvalidStateError(
+        `Render plan MV ${transition.job_id} chưa có manifest`,
+      );
+    }
+    const metadata = await drive.files.get({
+      fileId: manifestFileId,
+      fields: "id,mimeType,parents,trashed",
+      supportsAllDrives: true,
+    });
+    if (
+      metadata.data.mimeType !== "application/json" ||
+      metadata.data.trashed === true ||
+      !metadata.data.parents?.includes(productionFolder.id)
+    ) {
+      throw new ProjectRegistryInvalidStateError(
+        `Manifest render plan ${manifestFileId} không nằm đúng thư mục 02_SAN_XUAT_MV`,
+      );
+    }
+    const response = await drive.files.get(
+      { fileId: manifestFileId, alt: "media", supportsAllDrives: true },
+      { responseType: "text" },
+    );
+    const manifest =
+      typeof response.data === "string"
+        ? parseObject(response.data, "MV_RENDER_PLAN manifest")
+        : (response.data as Record<string, unknown>);
+    const approvalGate =
+      manifest.approval_gate &&
+      typeof manifest.approval_gate === "object" &&
+      !Array.isArray(manifest.approval_gate)
+        ? (manifest.approval_gate as Record<string, unknown>)
+        : {};
+    const units = Array.isArray(manifest.render_units)
+      ? (manifest.render_units as Array<Record<string, unknown>>)
+      : [];
+    const continuous =
+      units.length === 15 &&
+      units.every((unit, index) => {
+        const start = Number(unit.start_seconds);
+        const expected = index === 0 ? 0 : Number(units[index - 1].end_seconds);
+        return Number.isFinite(start) && Math.abs(start - expected) <= 0.001;
+      }) &&
+      Math.abs(Number(units.at(-1)?.end_seconds) - 371.62) <= 0.001;
+    const allBlocked = units.every(
+      (unit) =>
+        String(unit.execution_status ?? "") === "BLOCKED_PENDING_APPROVAL" &&
+        unit.provider_execution_allowed === false &&
+        unit.render_allowed === false,
+    );
+    const tuongVyUnits = units.filter((unit) => {
+      const performer = String(unit.performer ?? "");
+      return performer === "TUONG_VY_EM" || performer === "SONG_CA";
+    });
+    const tuongVySafe =
+      tuongVyUnits.length > 0 &&
+      tuongVyUnits.every((unit) => {
+        const framing =
+          unit.framing_constraints &&
+          typeof unit.framing_constraints === "object" &&
+          !Array.isArray(unit.framing_constraints)
+            ? (unit.framing_constraints as Record<string, unknown>)
+            : {};
+        const allowed = Array.isArray(framing.allowed_framings)
+          ? framing.allowed_framings.map(String)
+          : [];
+        return (
+          framing.close_up_allowed === false &&
+          framing.preserve_microphone === true &&
+          allowed.length === 2 &&
+          allowed.every((value) => value === "MEDIUM" || value === "FULL_BODY")
+        );
+      });
+    if (
+      String(manifest.project_id ?? "").trim() !== transition.project_id ||
+      String(manifest.stage ?? "").trim() !== "PRE_PRODUCTION" ||
+      String(manifest.production_priority ?? "").trim() !== "MUSIC_VIDEO_FIRST" ||
+      String(manifest.face_identity_pipeline ?? "").trim() !== "ORIGINAL_FACE_COMPOSITE" ||
+      manifest.provider_execution_allowed !== false ||
+      manifest.render_allowed !== false ||
+      String(manifest.render_plan_status ?? "").trim() !== "AWAITING_APPROVAL" ||
+      String(approvalGate.approval_status ?? "").trim() !== "PENDING" ||
+      Number(manifest.target_duration_seconds) !== 371.62 ||
+      !continuous ||
+      !allBlocked ||
+      !tuongVySafe
+    ) {
+      throw new ProjectRegistryInvalidStateError(
+        `Manifest render plan của ${transition.project_id} chưa ở trạng thái an toàn để duyệt`,
+      );
+    }
+    const approvedManifest = {
+      ...manifest,
+      provider_execution_allowed: false,
+      render_allowed: false,
+      render_plan_status: "APPROVED",
+      render_units: units.map((unit) => ({
+        ...unit,
+        execution_status: "BLOCKED_PENDING_EXECUTION_PREPARATION",
+        provider_execution_allowed: false,
+        render_allowed: false,
+      })),
+      approval_gate: {
+        approval_status: transition.approval_status,
+        reviewer: "PROJECT_OWNER",
+        approved_at: transition.approved_at,
+        next_action: transition.next_action,
+      },
+    };
+    await drive.files.update({
+      fileId: manifestFileId,
+      media: {
+        mimeType: "application/json",
+        body: Readable.from([`${JSON.stringify(approvedManifest, null, 2)}\n`]),
+      },
+      fields: "id,modifiedTime",
+      supportsAllDrives: true,
+    });
   }
 
   private async readApprovedMvTimecodeManifest(
