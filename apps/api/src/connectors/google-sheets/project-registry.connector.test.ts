@@ -4,6 +4,7 @@ import { normalizeProjectIntake } from "@tu-hau/contracts";
 import {
   applyMvAssetCharacterSafetyLocks,
   buildMvRenderPlanManifest,
+  buildMvRenderExecutionManifest,
   buildMvTimecodeAlignmentManifest,
   assertProjectFolderWithinRoot,
   buildProjectId,
@@ -116,6 +117,25 @@ test("render plan MV tạo đủ 15 đơn vị và vẫn khóa provider/render",
   assert.equal(manifest.render_allowed, false);
   assert.equal(manifest.approval_gate.approval_status, "PENDING");
   assert.equal(manifest.approval_gate.next_action, "APPROVE_MV_RENDER_PLAN");
+});
+
+test("hồ sơ thực thi render tạo đủ 15 units và tiếp tục khóa provider/render", () => {
+  const pending = buildMvRenderPlanManifest(
+    "GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "timecode-file",
+    approvedTimecodeManifest(), "2026-08-06T12:00:00.000Z",
+  );
+  const approved = {
+    ...pending,
+    render_plan_status: "APPROVED",
+    render_units: pending.render_units.map((unit) => ({ ...unit, execution_status: "BLOCKED_PENDING_EXECUTION_PREPARATION" })),
+  };
+  const result = buildMvRenderExecutionManifest(
+    "GDTH-MV-20260804092100-63D8", "Gia Đình Tư Hậu", "render-plan-file", approved,
+    "2026-08-06T14:00:00.000Z",
+  );
+  assert.equal(result.render_units.length, 15);
+  assert.ok(result.render_units.every((unit) => unit.execution_status === "BLOCKED_PENDING_EXECUTION_APPROVAL" && unit.provider_execution_allowed === false && unit.render_allowed === false));
+  assert.equal(result.approval_gate.next_action, "APPROVE_MV_RENDER_EXECUTION");
 });
 
 test("render plan khóa cận mặt Tường Vy trong cảnh riêng và song ca", () => {

@@ -50,6 +50,9 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
     manifest 15 render units, cập nhật job/approval/audit và chuyển sang
     `PREPARE_MV_RENDER_EXECUTION`. Các unit vẫn bị chặn chờ chuẩn bị thực thi;
     provider và render tiếp tục là `false`.
+14. Endpoint `POST /v1/projects/:projectId/prepare-mv-render-execution` tạo hồ sơ
+    thực thi cho đúng 15 render units và chuyển sang `APPROVE_MV_RENDER_EXECUTION`.
+    Tất cả units vẫn khóa chờ duyệt; chưa gọi provider và chưa render.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.
