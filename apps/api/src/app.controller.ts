@@ -95,4 +95,9 @@ export class AppController {
   approveMvRenderExecution(@Param("projectId") projectId: string) {
     return this.intakeService.approveMvRenderExecution(projectId);
   }
+
+  @Post("projects/:projectId/prepare-mv-provider-submission")
+  prepareMvProviderSubmission(@Param("projectId") projectId: string) {
+    return this.intakeService.prepareMvProviderSubmission(projectId);
+  }
 }
