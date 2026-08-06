@@ -65,4 +65,9 @@ export class AppController {
   approveMvShotPlan(@Param("projectId") projectId: string) {
     return this.intakeService.approveMvShotPlan(projectId);
   }
+
+  @Post("projects/:projectId/prepare-mv-timecode-alignment")
+  prepareMvTimecodeAlignment(@Param("projectId") projectId: string) {
+    return this.intakeService.prepareMvTimecodeAlignment(projectId);
+  }
 }
