@@ -39,8 +39,14 @@ jobs:
       - name: Configure Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Build API image
-        run: gcloud builds submit --project="$GCP_PROJECT_ID" --config=infra/cloudrun/api.cloudbuild.yaml .
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push API image
+        run: |
+          API_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$API_SERVICE:latest"
+          docker build --file infra/docker/api.Dockerfile --tag "$API_IMAGE" .
+          docker push "$API_IMAGE"
 
       - name: Deploy API
         run: |
@@ -50,8 +56,11 @@ jobs:
             --image="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$API_SERVICE:latest" \
             --quiet
 
-      - name: Build web image
-        run: gcloud builds submit --project="$GCP_PROJECT_ID" --config=infra/cloudrun/web.cloudbuild.yaml .
+      - name: Build and push web image
+        run: |
+          WEB_IMAGE="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$WEB_SERVICE:latest"
+          docker build --file infra/docker/web.Dockerfile --tag "$WEB_IMAGE" .
+          docker push "$WEB_IMAGE"
 
       - name: Deploy web
         run: |
