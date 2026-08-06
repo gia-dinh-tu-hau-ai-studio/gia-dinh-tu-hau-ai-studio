@@ -46,6 +46,10 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
     đủ 371.62 giây. Mỗi unit ở trạng thái `BLOCKED_PENDING_APPROVAL`; cảnh có
     Tường Vy tiếp tục cấm cận mặt, chỉ `MEDIUM/FULL_BODY` và giữ microphone.
     Render Plan chuyển sang `APPROVE_MV_RENDER_PLAN`; provider và render vẫn khóa.
+13. Endpoint `POST /v1/projects/:projectId/approve-mv-render-plan` duyệt đúng
+    manifest 15 render units, cập nhật job/approval/audit và chuyển sang
+    `PREPARE_MV_RENDER_EXECUTION`. Các unit vẫn bị chặn chờ chuẩn bị thực thi;
+    provider và render tiếp tục là `false`.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.

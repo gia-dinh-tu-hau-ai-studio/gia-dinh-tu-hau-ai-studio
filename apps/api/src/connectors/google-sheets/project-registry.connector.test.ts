@@ -13,10 +13,64 @@ import {
   planMvAssetPreparation,
   planMvProductionPlanApproval,
   planMvProductionPreparation,
+  planMvRenderPlanApproval,
   planMvShotPlanApproval,
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
+
+function pendingMvRenderPlanRows() {
+  const project = approvedMvProjectRow();
+  project[19] = "APPROVE_MV_RENDER_PLAN";
+  const job = Array.from({ length: 14 }, () => "");
+  job[0] = "job-render-plan-001";
+  job[1] = project[1];
+  job[2] = "PRE_PRODUCTION";
+  job[3] = "MV_RENDER_PLAN";
+  job[4] = "AWAITING_APPROVAL";
+  job[7] = '["render-plan-manifest-file-id"]';
+  const approval = Array.from({ length: 10 }, () => "");
+  approval[0] = "approval-render-plan-001";
+  approval[1] = project[1];
+  approval[2] = "MV_RENDER_PLAN";
+  approval[3] = job[0];
+  approval[4] = "PENDING";
+  return { project, job, approval };
+}
+
+test("duyệt render plan chuyển sang chuẩn bị thực thi nhưng chưa render", () => {
+  const { project, job, approval } = pendingMvRenderPlanRows();
+  const result = planMvRenderPlanApproval(
+    project,
+    job,
+    approval,
+    new Date("2026-08-06T12:45:00.000Z"),
+  );
+  assert.equal(result.next_action, "PREPARE_MV_RENDER_EXECUTION");
+  assert.equal(result.job_status, "APPROVED");
+  assert.equal(result.approval_status, "APPROVED");
+  assert.equal(result.idempotent_replay, false);
+});
+
+test("duyệt lại render plan đã APPROVED là idempotent", () => {
+  const { project, job, approval } = pendingMvRenderPlanRows();
+  project[19] = "PREPARE_MV_RENDER_EXECUTION";
+  job[4] = "APPROVED";
+  approval[4] = "APPROVED";
+  approval[6] = "2026-08-06T12:45:00.000Z";
+  const result = planMvRenderPlanApproval(project, job, approval);
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.approved_at, "2026-08-06T12:45:00.000Z");
+});
+
+test("từ chối duyệt render plan khi job và approval không đồng bộ", () => {
+  const { project, job, approval } = pendingMvRenderPlanRows();
+  job[4] = "APPROVED";
+  assert.throws(
+    () => planMvRenderPlanApproval(project, job, approval),
+    ProjectRegistryInvalidStateError,
+  );
+});
 
 function approvedTimecodeManifest() {
   const manifest = buildMvTimecodeAlignmentManifest(
