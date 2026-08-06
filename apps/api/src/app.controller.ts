@@ -75,4 +75,9 @@ export class AppController {
   approveMvTimecodeAlignment(@Param("projectId") projectId: string) {
     return this.intakeService.approveMvTimecodeAlignment(projectId);
   }
+
+  @Post("projects/:projectId/prepare-mv-render-plan")
+  prepareMvRenderPlan(@Param("projectId") projectId: string) {
+    return this.intakeService.prepareMvRenderPlan(projectId);
+  }
 }
