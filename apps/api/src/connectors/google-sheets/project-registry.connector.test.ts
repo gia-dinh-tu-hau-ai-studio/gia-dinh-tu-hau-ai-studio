@@ -3,6 +3,7 @@ import test from "node:test";
 import { normalizeProjectIntake } from "@tu-hau/contracts";
 import {
   applyMvAssetCharacterSafetyLocks,
+  buildMvRenderPlanManifest,
   buildMvTimecodeAlignmentManifest,
   assertProjectFolderWithinRoot,
   buildProjectId,
@@ -16,6 +17,92 @@ import {
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
+
+function approvedTimecodeManifest() {
+  const manifest = buildMvTimecodeAlignmentManifest(
+    "GDTH-MV-20260804092100-63D8",
+    "Gia Đình Tư Hậu",
+    "beat-master-file-id",
+    "shot-plan-file-id",
+    [{ character_id: "GDTH-CHAR-001", close_up_allowed: false }],
+    "2026-08-06T10:30:00.000Z",
+  );
+  return {
+    ...manifest,
+    alignment_status: "APPROVED",
+    approval_gate: {
+      approval_status: "APPROVED",
+      reviewer: "PROJECT_OWNER",
+      approved_at: "2026-08-06T11:50:00.000Z",
+      next_action: "PREPARE_MV_RENDER_PLAN",
+    },
+  };
+}
+
+test("render plan MV tạo đủ 15 đơn vị và vẫn khóa provider/render", () => {
+  const manifest = buildMvRenderPlanManifest(
+    "GDTH-MV-20260804092100-63D8",
+    "Gia Đình Tư Hậu",
+    "timecode-manifest-file-id",
+    approvedTimecodeManifest(),
+    "2026-08-06T12:00:00.000Z",
+  );
+  assert.equal(manifest.render_units.length, 15);
+  assert.equal(manifest.render_units[0].start_seconds, 0);
+  assert.equal(manifest.render_units.at(-1)?.end_seconds, 371.62);
+  assert.ok(
+    manifest.render_units.every(
+      (unit) =>
+        unit.execution_status === "BLOCKED_PENDING_APPROVAL" &&
+        unit.provider_execution_allowed === false &&
+        unit.render_allowed === false,
+    ),
+  );
+  assert.equal(manifest.provider_execution_allowed, false);
+  assert.equal(manifest.render_allowed, false);
+  assert.equal(manifest.approval_gate.approval_status, "PENDING");
+  assert.equal(manifest.approval_gate.next_action, "APPROVE_MV_RENDER_PLAN");
+});
+
+test("render plan khóa cận mặt Tường Vy trong cảnh riêng và song ca", () => {
+  const manifest = buildMvRenderPlanManifest(
+    "GDTH-MV-20260804092100-63D8",
+    "Gia Đình Tư Hậu",
+    "timecode-manifest-file-id",
+    approvedTimecodeManifest(),
+    "2026-08-06T12:00:00.000Z",
+  );
+  const tuongVyUnits = manifest.render_units.filter(
+    (unit) => unit.performer === "TUONG_VY_EM" || unit.performer === "SONG_CA",
+  );
+  assert.ok(tuongVyUnits.length > 0);
+  assert.ok(
+    tuongVyUnits.every(
+      (unit) =>
+        unit.framing_constraints.close_up_allowed === false &&
+        unit.framing_constraints.preserve_microphone === true &&
+        unit.framing_constraints.allowed_framings.every(
+          (framing) => framing === "MEDIUM" || framing === "FULL_BODY",
+        ),
+    ),
+  );
+});
+
+test("render plan từ chối timecode bị hở", () => {
+  const timecode = approvedTimecodeManifest();
+  timecode.cues[1].start_seconds = 50;
+  assert.throws(
+    () =>
+      buildMvRenderPlanManifest(
+        "GDTH-MV-20260804092100-63D8",
+        "Gia Đình Tư Hậu",
+        "timecode-manifest-file-id",
+        timecode,
+        "2026-08-06T12:00:00.000Z",
+      ),
+    ProjectRegistryInvalidStateError,
+  );
+});
 
 function pendingMvTimecodeRows() {
   const project = approvedMvProjectRow();
