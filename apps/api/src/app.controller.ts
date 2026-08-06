@@ -60,4 +60,9 @@ export class AppController {
   prepareMvShotPlan(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvShotPlan(projectId);
   }
+
+  @Post("projects/:projectId/approve-mv-shot-plan")
+  approveMvShotPlan(@Param("projectId") projectId: string) {
+    return this.intakeService.approveMvShotPlan(projectId);
+  }
 }

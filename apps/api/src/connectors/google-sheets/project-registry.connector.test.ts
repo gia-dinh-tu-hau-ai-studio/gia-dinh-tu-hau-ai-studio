@@ -11,6 +11,7 @@ import {
   planMvAssetPreparation,
   planMvProductionPlanApproval,
   planMvProductionPreparation,
+  planMvShotPlanApproval,
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
 
@@ -466,5 +467,71 @@ test("luôn khóa cận mặt nguồn tạm Tường Vy", () => {
         close_up_allowed: true,
       },
     ],
+  );
+});
+
+function pendingMvShotPlanRows() {
+  const project = approvedMvProjectRow();
+  project[19] = "APPROVE_MV_SHOT_PLAN";
+
+  const job = Array.from({ length: 14 }, () => "");
+  job[0] = "job-shot-plan-001";
+  job[1] = "GDTH-MV-20260804092100-63D8";
+  job[2] = "PRE_PRODUCTION";
+  job[3] = "MV_SHOT_PLAN";
+  job[4] = "AWAITING_APPROVAL";
+  job[7] = '["shot-plan-manifest-file-id"]';
+
+  const approval = Array.from({ length: 10 }, () => "");
+  approval[0] = "approval-shot-plan-001";
+  approval[1] = "GDTH-MV-20260804092100-63D8";
+  approval[2] = "MV_SHOT_PLAN";
+  approval[3] = "job-shot-plan-001";
+  approval[4] = "PENDING";
+
+  return { project, job, approval };
+}
+
+test("duyệt shot plan MV và chuyển sang căn timecode", () => {
+  const { project, job, approval } = pendingMvShotPlanRows();
+  assert.deepEqual(
+    planMvShotPlanApproval(
+      project,
+      job,
+      approval,
+      new Date("2026-08-06T06:30:00.000Z"),
+    ),
+    {
+      submission_id: "submission-001",
+      project_id: "GDTH-MV-20260804092100-63D8",
+      current_stage: "PRE_PRODUCTION",
+      next_action: "PREPARE_MV_TIMECODE_ALIGNMENT",
+      job_id: "job-shot-plan-001",
+      job_status: "APPROVED",
+      approval_id: "approval-shot-plan-001",
+      approval_status: "APPROVED",
+      approved_at: "2026-08-06T06:30:00.000Z",
+      idempotent_replay: false,
+    },
+  );
+});
+
+test("duyệt lại shot plan MV đã APPROVED là idempotent", () => {
+  const { project, job, approval } = pendingMvShotPlanRows();
+  project[19] = "PREPARE_MV_TIMECODE_ALIGNMENT";
+  job[4] = "APPROVED";
+  approval[4] = "APPROVED";
+  approval[6] = "2026-08-06T06:30:00.000Z";
+  const result = planMvShotPlanApproval(project, job, approval);
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.approved_at, "2026-08-06T06:30:00.000Z");
+});
+
+test("từ chối duyệt shot plan nếu job và approval không đồng bộ", () => {
+  const { project, job, approval } = pendingMvShotPlanRows();
+  job[4] = "APPROVED";
+  assert.throws(
+    () => planMvShotPlanApproval(project, job, approval),
+    ProjectRegistryInvalidStateError,
   );
 });
