@@ -15,6 +15,7 @@ import {
   planMvProductionPlanApproval,
   planMvProductionPreparation,
   planMvRenderPlanApproval,
+  planMvRenderExecutionApproval,
   planMvShotPlanApproval,
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
@@ -71,6 +72,15 @@ test("từ chối duyệt render plan khi job và approval không đồng bộ",
     () => planMvRenderPlanApproval(project, job, approval),
     ProjectRegistryInvalidStateError,
   );
+});
+
+test("duyệt thực thi render chuyển sang chuẩn bị provider nhưng chưa gọi provider", () => {
+  const project = approvedMvProjectRow(); project[19] = "APPROVE_MV_RENDER_EXECUTION";
+  const job = Array.from({ length: 14 }, () => ""); Object.assign(job, { 0: "job-exec", 1: project[1], 2: "PRE_PRODUCTION", 3: "MV_RENDER_EXECUTION", 4: "AWAITING_APPROVAL" });
+  const approval = Array.from({ length: 10 }, () => ""); Object.assign(approval, { 0: "approval-exec", 1: project[1], 2: "MV_RENDER_EXECUTION", 3: "job-exec", 4: "PENDING" });
+  const result = planMvRenderExecutionApproval(project, job, approval, new Date("2026-08-06T14:30:00.000Z"));
+  assert.equal(result.next_action, "PREPARE_MV_PROVIDER_SUBMISSION");
+  assert.equal(result.job_status, "APPROVED"); assert.equal(result.approval_status, "APPROVED");
 });
 
 function approvedTimecodeManifest() {
