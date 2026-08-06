@@ -60,6 +60,9 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
     hồ sơ thực thi đã duyệt, tạo đúng 15 payload Runway ở trạng thái bị khóa và
     chuyển sang `APPROVE_MV_PROVIDER_SUBMISSION`. Bước này không gọi API Runway,
     không truyền tài sản ra ngoài và chưa render.
+17. Endpoint `POST /v1/projects/:projectId/approve-mv-provider-submission` duyệt
+    gói 15 payload và chuyển sang `SUBMIT_MV_PROVIDER_JOBS`. Việc duyệt không tự
+    gọi Runway; provider và render vẫn khóa cho đến lệnh submit riêng.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.

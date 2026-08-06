@@ -17,6 +17,7 @@ import {
   planMvProductionPreparation,
   planMvRenderPlanApproval,
   planMvRenderExecutionApproval,
+  planMvProviderSubmissionApproval,
   planMvShotPlanApproval,
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
@@ -82,6 +83,39 @@ test("duyệt thực thi render chuyển sang chuẩn bị provider nhưng chưa
   const result = planMvRenderExecutionApproval(project, job, approval, new Date("2026-08-06T14:30:00.000Z"));
   assert.equal(result.next_action, "PREPARE_MV_PROVIDER_SUBMISSION");
   assert.equal(result.job_status, "APPROVED"); assert.equal(result.approval_status, "APPROVED");
+});
+
+function pendingMvProviderSubmissionRows() {
+  const project = approvedMvProjectRow(); project[19] = "APPROVE_MV_PROVIDER_SUBMISSION";
+  const job = Array.from({ length: 14 }, () => "");
+  Object.assign(job, { 0: "job-provider", 1: project[1], 2: "PRE_PRODUCTION", 3: "MV_PROVIDER_SUBMISSION", 4: "AWAITING_APPROVAL" });
+  const approval = Array.from({ length: 10 }, () => "");
+  Object.assign(approval, { 0: "approval-provider", 1: project[1], 2: "MV_PROVIDER_SUBMISSION", 3: job[0], 4: "PENDING" });
+  return { project, job, approval };
+}
+
+test("duyệt provider submission chỉ mở bước submit riêng", () => {
+  const { project, job, approval } = pendingMvProviderSubmissionRows();
+  const result = planMvProviderSubmissionApproval(project, job, approval, new Date("2026-08-06T15:10:00.000Z"));
+  assert.equal(result.next_action, "SUBMIT_MV_PROVIDER_JOBS");
+  assert.equal(result.job_status, "APPROVED");
+  assert.equal(result.approval_status, "APPROVED");
+  assert.equal(result.idempotent_replay, false);
+});
+
+test("duyệt lại provider submission đã APPROVED là idempotent", () => {
+  const { project, job, approval } = pendingMvProviderSubmissionRows();
+  project[19] = "SUBMIT_MV_PROVIDER_JOBS"; job[4] = "APPROVED"; approval[4] = "APPROVED";
+  approval[6] = "2026-08-06T15:10:00.000Z";
+  const result = planMvProviderSubmissionApproval(project, job, approval);
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.approved_at, "2026-08-06T15:10:00.000Z");
+});
+
+test("từ chối duyệt provider submission khi job và approval lệch trạng thái", () => {
+  const { project, job, approval } = pendingMvProviderSubmissionRows();
+  job[4] = "APPROVED";
+  assert.throws(() => planMvProviderSubmissionApproval(project, job, approval), ProjectRegistryInvalidStateError);
 });
 
 function approvedTimecodeManifest() {
