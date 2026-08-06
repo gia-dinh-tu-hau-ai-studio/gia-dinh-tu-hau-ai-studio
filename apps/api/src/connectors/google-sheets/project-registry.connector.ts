@@ -164,6 +164,20 @@ export type ApprovedMvRenderPlan = {
   idempotent_replay: boolean;
 };
 
+export type PreparedMvRenderExecution = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "APPROVE_MV_RENDER_EXECUTION";
+  job_id: string;
+  job_status: "AWAITING_APPROVAL";
+  approval_id: string;
+  approval_status: "PENDING";
+  manifest_file_id: string;
+  manifest_file_url: string;
+  prepared_at: string;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -203,7 +217,51 @@ const MV_TIMECODE_ALIGNMENT_JOB_TYPE = "MV_TIMECODE_ALIGNMENT";
 const MV_TIMECODE_ALIGNMENT_FILE_PREFIX = "MV_TIMECODE_ALIGNMENT_V1";
 const MV_RENDER_PLAN_JOB_TYPE = "MV_RENDER_PLAN";
 const MV_RENDER_PLAN_FILE_PREFIX = "MV_RENDER_PLAN_V1";
+const MV_RENDER_EXECUTION_JOB_TYPE = "MV_RENDER_EXECUTION";
+const MV_RENDER_EXECUTION_FILE_PREFIX = "MV_RENDER_EXECUTION_V1";
 const TEMPORARY_CLOSE_UP_LOCK_CHARACTER_IDS = new Set(["GDTH-CHAR-001"]);
+
+export function buildMvRenderExecutionManifest(
+  projectId: string,
+  projectName: string,
+  renderPlanFileId: string,
+  renderPlan: Record<string, unknown>,
+  preparedAt: string,
+) {
+  const units = Array.isArray(renderPlan.render_units)
+    ? (renderPlan.render_units as Array<Record<string, unknown>>)
+    : [];
+  const safe = units.length === 15 && units.every((unit, index) => {
+    const framing = (unit.framing_constraints ?? {}) as Record<string, unknown>;
+    const performer = String(unit.performer ?? "");
+    const tuongVy = performer === "TUONG_VY_EM" || performer === "SONG_CA";
+    return Number(unit.cue_order) === index + 1 &&
+      String(unit.execution_status) === "BLOCKED_PENDING_EXECUTION_PREPARATION" &&
+      unit.provider_execution_allowed === false && unit.render_allowed === false &&
+      (!tuongVy || (framing.close_up_allowed === false && framing.preserve_microphone === true));
+  });
+  if (!safe || String(renderPlan.render_plan_status) !== "APPROVED") {
+    throw new ProjectRegistryInvalidStateError("Render plan đã duyệt không an toàn để chuẩn bị thực thi");
+  }
+  return {
+    schema_version: "1.0",
+    project_id: projectId,
+    project_name: projectName,
+    stage: "PRE_PRODUCTION",
+    source_references: { approved_render_plan_file_id: renderPlanFileId },
+    execution_status: "AWAITING_APPROVAL",
+    provider_execution_allowed: false,
+    render_allowed: false,
+    render_units: units.map((unit) => ({
+      ...unit,
+      execution_status: "BLOCKED_PENDING_EXECUTION_APPROVAL",
+      provider_execution_allowed: false,
+      render_allowed: false,
+    })),
+    approval_gate: { approval_status: "PENDING", next_action: "APPROVE_MV_RENDER_EXECUTION" },
+    prepared_at: preparedAt,
+  };
+}
 
 export function buildMvRenderPlanManifest(
   projectId: string,
@@ -2709,6 +2767,71 @@ export class ProjectRegistryConnector {
           ? error.message
           : "Không lập được render plan MV Gia Đình Tư Hậu",
       );
+    }
+  }
+
+  async prepareMvRenderExecution(projectId: string): Promise<PreparedMvRenderExecution> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const projectsRootFolderId = requiredSetting("GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID");
+    const sheets = this.createSheetsClient();
+    const drive = this.createDriveClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+      ]);
+      const projectRows = projectsResponse.data.values ?? [];
+      const projectRowIndex = projectRows.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId);
+      if (projectRowIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const projectRow = projectRows[projectRowIndex].map(String);
+      if (String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" || String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION") {
+        throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} chưa đủ điều kiện chuẩn bị thực thi render`);
+      }
+      const jobs = jobsResponse.data.values ?? [];
+      const approvals = approvalsResponse.data.values ?? [];
+      const renderPlanJob = jobs.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RENDER_PLAN_JOB_TYPE)?.map(String);
+      const planJobId = String(renderPlanJob?.[0] ?? "").trim();
+      const planApproval = approvals.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[2] ?? "").trim() === MV_RENDER_PLAN_JOB_TYPE && String(row[3] ?? "").trim() === planJobId)?.map(String);
+      if (!renderPlanJob || String(renderPlanJob[4] ?? "").trim() !== "APPROVED" || !planApproval || String(planApproval[4] ?? "").trim() !== "APPROVED") {
+        throw new ProjectRegistryInvalidStateError(`Render plan của ${projectId} chưa được duyệt`);
+      }
+      const existing = jobs.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RENDER_EXECUTION_JOB_TYPE)?.map(String);
+      if (existing) {
+        const existingApproval = approvals.find((row, index) => index > 0 && String(row[3] ?? "").trim() === String(existing[0] ?? "").trim())?.map(String);
+        const fileId = parseStringArray(existing[7])[0];
+        if (String(projectRow[19] ?? "").trim() !== "APPROVE_MV_RENDER_EXECUTION" || String(existing[4] ?? "").trim() !== "AWAITING_APPROVAL" || String(existingApproval?.[4] ?? "").trim() !== "PENDING" || !fileId) {
+          throw new ProjectRegistryInvalidStateError(`Hồ sơ thực thi render của ${projectId} đã tồn tại nhưng không chờ duyệt`);
+        }
+        const metadata = await drive.files.get({ fileId, fields: "id,webViewLink,trashed", supportsAllDrives: true });
+        if (metadata.data.trashed) throw new ProjectRegistryInvalidStateError(`Manifest thực thi ${fileId} đã bị xóa`);
+        return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "APPROVE_MV_RENDER_EXECUTION", job_id: String(existing[0]), job_status: "AWAITING_APPROVAL", approval_id: String(existingApproval?.[0] ?? ""), approval_status: "PENDING", manifest_file_id: fileId, manifest_file_url: metadata.data.webViewLink ?? `https://drive.google.com/file/d/${fileId}/view`, prepared_at: String(existing[12] ?? ""), idempotent_replay: true };
+      }
+      if (String(projectRow[19] ?? "").trim() !== "PREPARE_MV_RENDER_EXECUTION") throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không thể chuẩn bị thực thi từ ${String(projectRow[19] ?? "EMPTY")}`);
+      const projectFolderId = String(projectRow[20] ?? "").trim();
+      const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
+      assertProjectFolderWithinRoot(projectFolder.data, projectsRootFolderId, projectId);
+      const planFileId = parseStringArray(renderPlanJob[7])[0];
+      const planResponse = await drive.files.get({ fileId: planFileId, alt: "media", supportsAllDrives: true }, { responseType: "text" });
+      const renderPlan = typeof planResponse.data === "string" ? parseObject(planResponse.data, "MV_RENDER_PLAN manifest") : planResponse.data as Record<string, unknown>;
+      const preparedAt = new Date().toISOString();
+      const manifest = buildMvRenderExecutionManifest(projectId, String(projectRow[2] ?? ""), planFileId, renderPlan, preparedAt);
+      const productionFolder = await this.findChildFolder(drive, projectFolderId, "02_SAN_XUAT_MV");
+      const manifestFile = await this.createOrReuseJsonFile(drive, productionFolder.id, `${MV_RENDER_EXECUTION_FILE_PREFIX}_${projectId}.json`, manifest);
+      const jobId = randomUUID(); const approvalId = randomUUID();
+      const projectSheetRow = projectRowIndex + 1; const jobSheetRow = jobs.length + 1; const approvalSheetRow = approvals.length + 1; const auditSheetRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
+        { range: `'PROJECTS'!S${projectSheetRow}:T${projectSheetRow}`, values: [["PRE_PRODUCTION", "APPROVE_MV_RENDER_EXECUTION"]] },
+        { range: `'PROJECTS'!X${projectSheetRow}`, values: [[preparedAt]] },
+        { range: `'PRODUCTION_JOBS'!A${jobSheetRow}:N${jobSheetRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RENDER_EXECUTION_JOB_TYPE, "AWAITING_APPROVAL", "", JSON.stringify([planFileId]), JSON.stringify([manifestFile.id]), "", 0, preparedAt, "", preparedAt, preparedAt]] },
+        { range: `'APPROVALS'!A${approvalSheetRow}:J${approvalSheetRow}`, values: [[approvalId, projectId, MV_RENDER_EXECUTION_JOB_TYPE, jobId, "PENDING", "", "", "Chờ duyệt thực thi 15 render units. Provider và render vẫn bị khóa.", preparedAt, preparedAt]] },
+        { range: `'AUDIT_LOG'!A${auditSheetRow}:H${auditSheetRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RENDER_EXECUTION_PREPARED", "SUCCEEDED", "AI_EXECUTOR_WEB", "Đã chuẩn bị hồ sơ thực thi render; chưa gọi provider và chưa render.", preparedAt]] },
+      ] } });
+      return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "APPROVE_MV_RENDER_EXECUTION", job_id: jobId, job_status: "AWAITING_APPROVAL", approval_id: approvalId, approval_status: "PENDING", manifest_file_id: manifestFile.id, manifest_file_url: manifestFile.webViewLink, prepared_at: preparedAt, idempotent_replay: false };
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không chuẩn bị được thực thi render MV");
     }
   }
 
