@@ -63,6 +63,10 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
 17. Endpoint `POST /v1/projects/:projectId/approve-mv-provider-submission` duyệt
     gói 15 payload và chuyển sang `SUBMIT_MV_PROVIDER_JOBS`. Việc duyệt không tự
     gọi Runway; provider và render vẫn khóa cho đến lệnh submit riêng.
+18. Endpoint `POST /v1/projects/:projectId/prepare-mv-provider-pilot` chỉ chọn
+    cảnh song ca `RP015` dài 9.62 giây để đánh giá hai gương mặt. Pilot Aleph 2.0
+    dự toán tối đa 270 credit (~2.70 USD), giữ khóa Tường Vy và vẫn chờ media,
+    prompt cùng duyệt ngân sách; chưa gọi Runway, chưa upload và chưa tiêu credit.
 
 Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
 dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.
