@@ -105,4 +105,9 @@ export class AppController {
   approveMvProviderSubmission(@Param("projectId") projectId: string) {
     return this.intakeService.approveMvProviderSubmission(projectId);
   }
+
+  @Post("projects/:projectId/prepare-mv-provider-pilot")
+  prepareMvProviderPilot(@Param("projectId") projectId: string) {
+    return this.intakeService.prepareMvProviderPilot(projectId);
+  }
 }
