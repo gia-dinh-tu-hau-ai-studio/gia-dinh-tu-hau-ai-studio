@@ -32,6 +32,7 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
+          project_id: tu-hau-ai-music
           workload_identity_provider: projects/165444056513/locations/global/workloadIdentityPools/github-actions/providers/github
           service_account: github-cloud-run-deployer@tu-hau-ai-music.iam.gserviceaccount.com
 
