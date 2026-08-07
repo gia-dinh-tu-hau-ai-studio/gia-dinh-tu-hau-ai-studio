@@ -54,6 +54,9 @@ jobs:
             --project="$GCP_PROJECT_ID" \
             --region="$GCP_REGION" \
             --image="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$API_SERVICE:latest" \
+            --memory=2Gi \
+            --timeout=900 \
+            --concurrency=1 \
             --quiet
 
       - name: Build and push web image
