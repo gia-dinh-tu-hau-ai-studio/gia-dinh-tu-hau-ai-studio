@@ -30,7 +30,9 @@ import {
   buildMvDuetBaseCompositeFfmpegArgs,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
+  RP015_PHUONG_AN_SOURCE_START_SECONDS,
   RP015_START_SECONDS,
+  RP015_TUONG_VY_SOURCE_START_SECONDS,
 } from "../../media/mv-duet-base-composite.executor";
 
 function pendingMvRenderPlanRows() {
@@ -1068,7 +1070,11 @@ test("FFmpeg chỉ dựng RP015 9.62 giây, không gắn audio và xuất 1920x1
     "/tmp/phuong-an",
     "/tmp/rp015.mp4",
   );
-  assert.ok(args.includes(String(RP015_START_SECONDS)));
+  const firstSeek = args.indexOf("-ss");
+  const secondSeek = args.indexOf("-ss", firstSeek + 1);
+  assert.equal(args[firstSeek + 1], String(RP015_TUONG_VY_SOURCE_START_SECONDS));
+  assert.equal(args[secondSeek + 1], String(RP015_PHUONG_AN_SOURCE_START_SECONDS));
+  assert.ok(!args.includes(String(RP015_START_SECONDS)));
   assert.ok(args.includes(String(RP015_DURATION_SECONDS)));
   assert.ok(args.includes("-an"));
   const filterIndex = args.indexOf("-filter_complex");

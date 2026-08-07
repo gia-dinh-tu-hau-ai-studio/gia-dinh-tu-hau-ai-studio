@@ -278,6 +278,14 @@ export type ExecutedMvDuetBaseComposite = {
   duration_seconds: number;
   width: number;
   height: number;
+  source_offsets?: {
+    tuong_vy_start_seconds: number;
+    phuong_an_start_seconds: number;
+  };
+  source_durations?: {
+    tuong_vy_seconds: number;
+    phuong_an_seconds: number;
+  };
   provider_execution_allowed: false;
   render_allowed: false;
   executed_at: string;
@@ -3853,6 +3861,8 @@ export class ProjectRegistryConnector {
         duration_seconds: probe.duration_seconds,
         width: probe.width,
         height: probe.height,
+        source_offsets: probe.source_offsets,
+        source_durations: probe.source_durations,
         provider_execution_allowed: false,
         render_allowed: false,
         executed_at: executedAt,
@@ -3872,6 +3882,13 @@ export class ProjectRegistryConnector {
           width: probe.width,
           height: probe.height,
           duration_seconds: probe.duration_seconds,
+          source_offsets: probe.source_offsets,
+          source_durations: probe.source_durations,
+          master_timeline: {
+            render_unit_id: "RP015",
+            start_seconds: 362,
+            duration_seconds: probe.duration_seconds,
+          },
         },
         review_gate: {
           review_status: "PENDING",
