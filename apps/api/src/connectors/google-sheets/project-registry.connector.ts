@@ -3657,6 +3657,8 @@ export class ProjectRegistryConnector {
     const sheets = this.createSheetsClient();
     const drive = this.createDriveClient();
     let temporaryDirectory = "";
+    const executionStartedAt = Date.now();
+    let executionStage = "INITIALIZING";
     try {
       const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] =
         await Promise.all([
@@ -3760,10 +3762,23 @@ export class ProjectRegistryConnector {
         );
         await pipeline(response.data as Readable, createWriteStream(destination));
       };
+      executionStage = "DOWNLOADING_SOURCES";
+      console.log(JSON.stringify({
+        event: "MV_DUET_BASE_COMPOSITE_DOWNLOAD_STARTED",
+        project_id: transition.project_id,
+        render_unit_id: "RP015",
+      }));
       await Promise.all([
         download(String(tuongVy.file_id), tuongVyPath),
         download(String(phuongAn.file_id), phuongAnPath),
       ]);
+      console.log(JSON.stringify({
+        event: "MV_DUET_BASE_COMPOSITE_DOWNLOAD_COMPLETED",
+        project_id: transition.project_id,
+        render_unit_id: "RP015",
+        elapsed_ms: Date.now() - executionStartedAt,
+      }));
+      executionStage = "RUNNING_FFMPEG";
       const probe = await executeMvDuetBaseComposite(
         tuongVyPath,
         phuongAnPath,
@@ -3790,6 +3805,12 @@ export class ProjectRegistryConnector {
         includeItemsFromAllDrives: true,
       });
       const existingFile = existingOutput.data.files?.[0];
+      executionStage = "UPLOADING_OUTPUT";
+      console.log(JSON.stringify({
+        event: "MV_DUET_BASE_COMPOSITE_UPLOAD_STARTED",
+        project_id: transition.project_id,
+        render_unit_id: "RP015",
+      }));
       const outputFile = existingFile?.id
         ? await drive.files.update({
             fileId: existingFile.id,
@@ -3808,6 +3829,12 @@ export class ProjectRegistryConnector {
             supportsAllDrives: true,
           });
       const outputFileId = String(outputFile.data.id ?? "");
+      console.log(JSON.stringify({
+        event: "MV_DUET_BASE_COMPOSITE_UPLOAD_COMPLETED",
+        project_id: transition.project_id,
+        render_unit_id: "RP015",
+        elapsed_ms: Date.now() - executionStartedAt,
+      }));
       if (!outputFileId) {
         throw new ProjectRegistryInvalidStateError("Drive không trả output file ID RP015");
       }
@@ -3869,6 +3896,7 @@ export class ProjectRegistryConnector {
         transition.manifest_file_id,
         outputFileId,
       ];
+      executionStage = "PERSISTING_RESULT";
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId,
         requestBody: {
@@ -3913,8 +3941,27 @@ export class ProjectRegistryConnector {
           ],
         },
       });
+      executionStage = "COMPLETED";
+      console.log(JSON.stringify({
+        event: "MV_DUET_BASE_COMPOSITE_COMPLETED",
+        project_id: transition.project_id,
+        render_unit_id: "RP015",
+        elapsed_ms: Date.now() - executionStartedAt,
+      }));
       return result;
     } catch (error) {
+      const detail = (error instanceof Error ? error.message : String(error))
+        .replace(/\/tmp\/[^\s'"]+/g, "<temporary-file>")
+        .replace(/\s+/g, " ")
+        .slice(0, 2_000);
+      console.error(JSON.stringify({
+        event: "MV_DUET_BASE_COMPOSITE_FAILED",
+        project_id: projectId,
+        render_unit_id: "RP015",
+        stage: executionStage,
+        elapsed_ms: Date.now() - executionStartedAt,
+        error: detail,
+      }));
       if (
         error instanceof ProjectRegistryNotConfiguredError ||
         error instanceof ProjectRegistryProjectNotFoundError ||
