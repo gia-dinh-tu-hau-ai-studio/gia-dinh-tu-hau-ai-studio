@@ -326,6 +326,23 @@ export type PreparedMvDuetBaseCompositeRollout = {
   idempotent_replay: boolean;
 };
 
+export type ApprovedMvDuetBaseCompositeRollout = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT";
+  job_id: string;
+  job_status: "APPROVED";
+  approval_id: string;
+  approval_status: "APPROVED";
+  total_render_units: 15;
+  pilot_reference_unit_id: "RP015";
+  composite_execution_allowed: true;
+  provider_execution_allowed: false;
+  render_allowed: false;
+  approved_at: string;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -2128,6 +2145,90 @@ export function planMvDuetBaseCompositeReviewApproval(
     review_status: "APPROVED",
     output_file_id: outputFileId,
     output_file_url: outputFileUrl,
+    provider_execution_allowed: false,
+    render_allowed: false,
+    approved_at: now.toISOString(),
+    manifest_file_id: manifestFileId,
+    idempotent_replay: false,
+  };
+}
+
+export function planMvDuetBaseCompositeRolloutApproval(
+  projectRow: string[],
+  jobRow: string[] | undefined,
+  approvalRow: string[] | undefined,
+  now = new Date(),
+): ApprovedMvDuetBaseCompositeRollout & { submission_id: string; manifest_file_id: string } {
+  const submissionId = String(projectRow[0] ?? "").trim();
+  const projectId = String(projectRow[1] ?? "").trim();
+  const nextAction = String(projectRow[19] ?? "").trim();
+  const jobId = String(jobRow?.[0] ?? "").trim();
+  const jobStatus = String(jobRow?.[4] ?? "").trim();
+  const approvalId = String(approvalRow?.[0] ?? "").trim();
+  const approvalStatus = String(approvalRow?.[4] ?? "").trim();
+  const manifestFileId = parseStringArray(jobRow?.[7])[0] ?? "";
+  if (
+    !projectId ||
+    String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" ||
+    String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION" ||
+    !jobRow ||
+    String(jobRow[1] ?? "").trim() !== projectId ||
+    String(jobRow[3] ?? "").trim() !== MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE ||
+    !approvalRow ||
+    String(approvalRow[1] ?? "").trim() !== projectId ||
+    String(approvalRow[2] ?? "").trim() !== MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE ||
+    String(approvalRow[3] ?? "").trim() !== jobId ||
+    !manifestFileId
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Rollout plan của ${projectId || "EMPTY"} không hợp lệ để duyệt`,
+    );
+  }
+  if (
+    nextAction === "EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT" &&
+    jobStatus === "APPROVED" &&
+    approvalStatus === "APPROVED"
+  ) {
+    return {
+      submission_id: submissionId,
+      project_id: projectId,
+      current_stage: "PRE_PRODUCTION",
+      next_action: "EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT",
+      job_id: jobId,
+      job_status: "APPROVED",
+      approval_id: approvalId,
+      approval_status: "APPROVED",
+      total_render_units: 15,
+      pilot_reference_unit_id: "RP015",
+      composite_execution_allowed: true,
+      provider_execution_allowed: false,
+      render_allowed: false,
+      approved_at: String(approvalRow[6] ?? ""),
+      manifest_file_id: manifestFileId,
+      idempotent_replay: true,
+    };
+  }
+  if (
+    nextAction !== "APPROVE_MV_DUET_BASE_COMPOSITE_ROLLOUT" ||
+    jobStatus !== "AWAITING_APPROVAL" ||
+    approvalStatus !== "PENDING"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Rollout plan ${jobId || "EMPTY"} không thể duyệt từ ${nextAction || "EMPTY"}/${jobStatus || "EMPTY"}/${approvalStatus || "EMPTY"}`,
+    );
+  }
+  return {
+    submission_id: submissionId,
+    project_id: projectId,
+    current_stage: "PRE_PRODUCTION",
+    next_action: "EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT",
+    job_id: jobId,
+    job_status: "APPROVED",
+    approval_id: approvalId,
+    approval_status: "APPROVED",
+    total_render_units: 15,
+    pilot_reference_unit_id: "RP015",
+    composite_execution_allowed: true,
     provider_execution_allowed: false,
     render_allowed: false,
     approved_at: now.toISOString(),
@@ -4155,6 +4256,132 @@ export class ProjectRegistryConnector {
         error instanceof Error
           ? error.message
           : "Không lập được kế hoạch Base Composite rollout",
+      );
+    }
+  }
+
+  async approveMvDuetBaseCompositeRollout(
+    projectId: string,
+  ): Promise<ApprovedMvDuetBaseCompositeRollout> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    const drive = this.createDriveClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] =
+        await Promise.all([
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+        ]);
+      const projects = projectsResponse.data.values ?? [];
+      const jobs = jobsResponse.data.values ?? [];
+      const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex(
+        (row, index) => index > 0 && String(row[1] ?? "").trim() === projectId,
+      );
+      if (projectIndex < 0) {
+        throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      }
+      const jobIndex = jobs.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[3] ?? "").trim() === MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE,
+      );
+      const jobId = jobIndex > 0 ? String(jobs[jobIndex][0] ?? "").trim() : "";
+      const approvalIndex = approvals.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[2] ?? "").trim() === MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE &&
+          String(row[3] ?? "").trim() === jobId,
+      );
+      const transition = planMvDuetBaseCompositeRolloutApproval(
+        projects[projectIndex].map(String),
+        jobIndex > 0 ? jobs[jobIndex].map(String) : undefined,
+        approvalIndex > 0 ? approvals[approvalIndex].map(String) : undefined,
+      );
+      const { submission_id: _submissionId, manifest_file_id: _manifestFileId, ...result } = transition;
+      if (transition.idempotent_replay) return result;
+      const response = await drive.files.get(
+        { fileId: transition.manifest_file_id, alt: "media", supportsAllDrives: true },
+        { responseType: "text" },
+      );
+      const manifest = typeof response.data === "string"
+        ? parseObject(response.data, "MV_DUET_BASE_COMPOSITE_ROLLOUT manifest")
+        : response.data as Record<string, unknown>;
+      const units = Array.isArray(manifest.rollout_units)
+        ? manifest.rollout_units as Array<Record<string, unknown>>
+        : [];
+      if (
+        String(manifest.project_id ?? "") !== projectId ||
+        String(manifest.rollout_status ?? "") !== "AWAITING_APPROVAL" ||
+        Number(manifest.total_render_units) !== 15 ||
+        units.length !== 15 ||
+        String((manifest.pilot_reference as Record<string, unknown> | undefined)?.render_unit_id ?? "") !== "RP015" ||
+        manifest.composite_execution_allowed !== false ||
+        manifest.provider_execution_allowed !== false ||
+        manifest.render_allowed !== false ||
+        units.some((unit) => unit.provider_execution_allowed !== false || unit.render_allowed !== false)
+      ) {
+        throw new ProjectRegistryInvalidStateError(
+          `Rollout manifest của ${projectId} chưa an toàn để duyệt`,
+        );
+      }
+      const approvedManifest = {
+        ...manifest,
+        rollout_status: "APPROVED",
+        execution_scope: "LOCAL_COMPOSITE_ONLY",
+        composite_execution_allowed: true,
+        provider_execution_allowed: false,
+        render_allowed: false,
+        rollout_units: units.map((unit) => ({
+          ...unit,
+          rollout_status: String(unit.render_unit_id ?? "") === "RP015"
+            ? "PILOT_APPROVED_REFERENCE"
+            : "APPROVED_PENDING_LOCAL_COMPOSITE_EXECUTION",
+          composite_execution_allowed: String(unit.render_unit_id ?? "") !== "RP015",
+          provider_execution_allowed: false,
+          render_allowed: false,
+        })),
+        approval_gate: {
+          approval_status: "APPROVED",
+          reviewer: "PROJECT_OWNER",
+          approved_at: transition.approved_at,
+          next_action: transition.next_action,
+        },
+      };
+      await drive.files.update({
+        fileId: transition.manifest_file_id,
+        media: { mimeType: "application/json", body: JSON.stringify(approvedManifest, null, 2) },
+        supportsAllDrives: true,
+      });
+      const projectRow = projectIndex + 1;
+      const jobRow = jobIndex + 1;
+      const approvalRow = approvalIndex + 1;
+      const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: { valueInputOption: "RAW", data: [
+          { range: `'PROJECTS'!S${projectRow}:T${projectRow}`, values: [["PRE_PRODUCTION", transition.next_action]] },
+          { range: `'PROJECTS'!X${projectRow}`, values: [[transition.approved_at]] },
+          { range: `'PRODUCTION_JOBS'!E${jobRow}`, values: [[transition.job_status]] },
+          { range: `'PRODUCTION_JOBS'!L${jobRow}:N${jobRow}`, values: [[transition.approved_at, String(jobs[jobIndex][12] ?? ""), transition.approved_at]] },
+          { range: `'APPROVALS'!E${approvalRow}:H${approvalRow}`, values: [[transition.approval_status, "PROJECT_OWNER", transition.approved_at, "Đã duyệt rollout 15 cảnh theo mẫu RP015; chỉ mở dựng composite cục bộ cho 14 cảnh còn lại. Provider và render vẫn khóa."]] },
+          { range: `'APPROVALS'!J${approvalRow}`, values: [[transition.approved_at]] },
+          { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, transition.submission_id, "MV_DUET_BASE_COMPOSITE_ROLLOUT_APPROVED", "SUCCEEDED", "AI_EXECUTOR_WEB", "Đã duyệt rollout Base Composite; chưa gọi Runway, provider_execution_allowed=false và render_allowed=false.", transition.approved_at]] },
+        ] },
+      });
+      return result;
+    } catch (error) {
+      if (
+        error instanceof ProjectRegistryNotConfiguredError ||
+        error instanceof ProjectRegistryProjectNotFoundError ||
+        error instanceof ProjectRegistryInvalidStateError
+      ) throw error;
+      throw new ProjectRegistryUnavailableError(
+        error instanceof Error ? error.message : "Không duyệt được Base Composite rollout",
       );
     }
   }
