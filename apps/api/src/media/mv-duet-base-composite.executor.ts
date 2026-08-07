@@ -11,6 +11,9 @@ export const RP015_OUTPUT_WIDTH = 1920;
 export const RP015_OUTPUT_HEIGHT = 1080;
 export const RP015_FFMPEG_TIMEOUT_MS = 720_000;
 export const RP015_MASTER_AUDIO_START_SECONDS = 362;
+export const RP015_DUET_CUT_POINTS_SECONDS = [1.92, 3.84, 5.76, 7.68] as const;
+export const RP015_MIN_AUDIO_MEAN_DB = -45;
+export const RP015_MIN_AUDIO_MAX_DB = -40;
 
 type VideoProbe = {
   width: number;
@@ -315,47 +318,72 @@ export async function executeMvDuetBaseCompositeUnit(
 }
 
 export function buildRp015FinalProofFfmpegArgs(
-  videoInputPath: string,
-  masterAudioInputPath: string,
+  tuongVyInputPath: string,
+  phuongAnInputPath: string,
+  vocalMasterInputPath: string,
   outputPath: string,
 ) {
+  const filter = [
+    "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,split=3[tv0][tv1][tv2]",
+    "[1:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,split=2[pa0][pa1]",
+    "[tv0]trim=start=0:end=1.92,setpts=PTS-STARTPTS[c0]",
+    "[pa0]trim=start=1.92:end=3.84,setpts=PTS-STARTPTS[c1]",
+    "[tv1]trim=start=3.84:end=5.76,setpts=PTS-STARTPTS[c2]",
+    "[pa1]trim=start=5.76:end=7.68,setpts=PTS-STARTPTS[c3]",
+    "[tv2]trim=start=7.68:end=9.62,setpts=PTS-STARTPTS[c4]",
+    "[c0][c1][c2][c3][c4]concat=n=5:v=1:a=0[outv]",
+  ].join(";");
   return [
     "-hide_banner", "-loglevel", "error", "-y",
-    "-i", videoInputPath,
+    "-ss", String(RP015_TUONG_VY_SOURCE_START_SECONDS), "-t", String(RP015_DURATION_SECONDS), "-i", tuongVyInputPath,
+    "-ss", String(RP015_PHUONG_AN_SOURCE_START_SECONDS), "-t", String(RP015_DURATION_SECONDS), "-i", phuongAnInputPath,
     "-ss", String(RP015_MASTER_AUDIO_START_SECONDS),
     "-t", String(RP015_DURATION_SECONDS),
-    "-i", masterAudioInputPath,
-    "-map", "0:v:0", "-map", "1:a:0",
-    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+    "-i", vocalMasterInputPath,
+    "-filter_complex", filter,
+    "-map", "[outv]", "-map", "2:a:0",
+    "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "192k",
     "-shortest", "-movflags", "+faststart", outputPath,
   ];
 }
 
 export async function executeRp015FinalProof(
-  videoInputPath: string,
-  masterAudioInputPath: string,
+  tuongVyInputPath: string,
+  phuongAnInputPath: string,
+  vocalMasterInputPath: string,
   outputPath: string,
 ) {
   await execFileAsync(
     "ffmpeg",
-    buildRp015FinalProofFfmpegArgs(videoInputPath, masterAudioInputPath, outputPath),
+    buildRp015FinalProofFfmpegArgs(tuongVyInputPath, phuongAnInputPath, vocalMasterInputPath, outputPath),
     { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
   );
   const probe = await execFileAsync(
     "ffprobe",
-    ["-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "json", outputPath],
+    ["-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height:format=duration", "-of", "json", outputPath],
     { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8" },
   );
   const data = JSON.parse(probe.stdout) as {
-    streams?: Array<{ codec_type?: string; width?: number; height?: number }>;
+    streams?: Array<{ codec_type?: string; codec_name?: string; width?: number; height?: number }>;
     format?: { duration?: string };
   };
   const video = data.streams?.find((stream) => stream.codec_type === "video");
-  const hasAudio = data.streams?.some((stream) => stream.codec_type === "audio") ?? false;
+  const audio = data.streams?.find((stream) => stream.codec_type === "audio");
   const duration = Number(data.format?.duration);
   if (
     video?.width !== RP015_OUTPUT_WIDTH || video?.height !== RP015_OUTPUT_HEIGHT ||
-    !hasAudio || !Number.isFinite(duration) || Math.abs(duration - RP015_DURATION_SECONDS) > 0.2
+    audio?.codec_name !== "aac" || !Number.isFinite(duration) || Math.abs(duration - RP015_DURATION_SECONDS) > 0.2
   ) throw new Error("RP015 final proof không đạt 1920x1080, audio AAC hoặc thời lượng 9.62 giây");
-  return { width: video.width, height: video.height, duration_seconds: duration, has_audio: true as const };
+  const loudness = await execFileAsync(
+    "ffmpeg",
+    ["-hide_banner", "-i", outputPath, "-vn", "-af", "volumedetect", "-f", "null", "-"],
+    { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
+  );
+  const meanDb = Number(loudness.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  const maxDb = Number(loudness.stderr.match(/max_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  if (!Number.isFinite(meanDb) || !Number.isFinite(maxDb) || meanDb < RP015_MIN_AUDIO_MEAN_DB || maxDb < RP015_MIN_AUDIO_MAX_DB) {
+    throw new Error(`RP015 vocal master không nghe được: mean=${meanDb}dB, max=${maxDb}dB`);
+  }
+  return { width: video.width, height: video.height, duration_seconds: duration, has_audio: true as const, audio_mean_db: meanDb, audio_max_db: maxDb };
 }
