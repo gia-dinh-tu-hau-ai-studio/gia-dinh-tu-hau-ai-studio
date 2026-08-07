@@ -1,13 +1,19 @@
 import { Injectable } from "@nestjs/common";
 import type { NormalizedProjectIntake } from "@tu-hau/contracts";
 import { randomUUID } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { drive_v3, google, sheets_v4 } from "googleapis";
 import {
   createDriveOAuthClient,
   createServiceAuth,
   GoogleDriveOAuthConfigurationError,
 } from "../../google/google-auth";
+import { executeMvDuetBaseComposite } from "../../media/mv-duet-base-composite.executor";
 
 export class ProjectRegistryNotConfiguredError extends Error {}
 export class ProjectRegistryUnavailableError extends Error {}
@@ -258,6 +264,23 @@ export type ApprovedMvDuetBaseComposite = {
   provider_execution_allowed: false;
   render_allowed: false;
   approved_at: string;
+  idempotent_replay: boolean;
+};
+
+export type ExecutedMvDuetBaseComposite = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "REVIEW_MV_DUET_BASE_COMPOSITE";
+  job_id: string;
+  job_status: "SUCCEEDED";
+  output_file_id: string;
+  output_file_url: string;
+  duration_seconds: number;
+  width: number;
+  height: number;
+  provider_execution_allowed: false;
+  render_allowed: false;
+  executed_at: string;
   idempotent_replay: boolean;
 };
 
@@ -559,6 +582,112 @@ export function buildMvDuetBaseCompositeManifest(
       next_action: "APPROVE_MV_DUET_BASE_COMPOSITE",
     },
     prepared_at: preparedAt,
+  };
+}
+
+export function planMvDuetBaseCompositeExecution(
+  projectRow: string[],
+  jobRow: string[] | undefined,
+  approvalRow: string[] | undefined,
+): {
+  submission_id: string;
+  project_id: string;
+  project_name: string;
+  project_folder_id: string;
+  job_id: string;
+  manifest_file_id: string;
+  idempotent_replay: boolean;
+  existing_result?: Omit<ExecutedMvDuetBaseComposite, "idempotent_replay">;
+} {
+  const submissionId = String(projectRow[0] ?? "").trim();
+  const projectId = String(projectRow[1] ?? "").trim();
+  const nextAction = String(projectRow[19] ?? "").trim();
+  const projectFolderId = String(projectRow[20] ?? "").trim();
+  if (
+    !projectId ||
+    !projectFolderId ||
+    String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" ||
+    String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Dự án ${projectId || "EMPTY"} chưa đủ điều kiện dựng base composite RP015`,
+    );
+  }
+  if (
+    !jobRow ||
+    String(jobRow[1] ?? "").trim() !== projectId ||
+    String(jobRow[2] ?? "").trim() !== "PRE_PRODUCTION" ||
+    String(jobRow[3] ?? "").trim() !== MV_DUET_BASE_COMPOSITE_JOB_TYPE
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Dự án ${projectId} chưa có job base composite RP015 hợp lệ`,
+    );
+  }
+  const jobId = String(jobRow[0] ?? "").trim();
+  const outputFileIds = parseStringArray(jobRow[7]);
+  const manifestFileId = outputFileIds[0];
+  if (!manifestFileId) {
+    throw new ProjectRegistryInvalidStateError(
+      `Job ${jobId || "EMPTY"} chưa có base composite manifest`,
+    );
+  }
+  if (
+    !approvalRow ||
+    String(approvalRow[1] ?? "").trim() !== projectId ||
+    String(approvalRow[2] ?? "").trim() !== MV_DUET_BASE_COMPOSITE_JOB_TYPE ||
+    String(approvalRow[3] ?? "").trim() !== jobId ||
+    String(approvalRow[4] ?? "").trim() !== "APPROVED"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Base composite RP015 của ${projectId} chưa được chủ dự án duyệt`,
+    );
+  }
+  if (
+    nextAction === "REVIEW_MV_DUET_BASE_COMPOSITE" &&
+    String(jobRow[4] ?? "").trim() === "SUCCEEDED"
+  ) {
+    const result = parseObject(jobRow[8], "MV_DUET_BASE_COMPOSITE result");
+    return {
+      submission_id: submissionId,
+      project_id: projectId,
+      project_name: String(projectRow[2] ?? "").trim(),
+      project_folder_id: projectFolderId,
+      job_id: jobId,
+      manifest_file_id: manifestFileId,
+      idempotent_replay: true,
+      existing_result: {
+        project_id: projectId,
+        current_stage: "PRE_PRODUCTION",
+        next_action: "REVIEW_MV_DUET_BASE_COMPOSITE",
+        job_id: jobId,
+        job_status: "SUCCEEDED",
+        output_file_id: String(result.output_file_id ?? ""),
+        output_file_url: String(result.output_file_url ?? ""),
+        duration_seconds: Number(result.duration_seconds),
+        width: Number(result.width),
+        height: Number(result.height),
+        provider_execution_allowed: false,
+        render_allowed: false,
+        executed_at: String(result.executed_at ?? ""),
+      },
+    };
+  }
+  if (
+    nextAction !== "EXECUTE_MV_DUET_BASE_COMPOSITE" ||
+    String(jobRow[4] ?? "").trim() !== "APPROVED"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Không thể dựng base composite RP015 từ ${nextAction || "EMPTY"}/${String(jobRow[4] ?? "EMPTY")}`,
+    );
+  }
+  return {
+    submission_id: submissionId,
+    project_id: projectId,
+    project_name: String(projectRow[2] ?? "").trim(),
+    project_folder_id: projectFolderId,
+    job_id: jobId,
+    manifest_file_id: manifestFileId,
+    idempotent_replay: false,
   };
 }
 
@@ -3517,6 +3646,289 @@ export class ProjectRegistryConnector {
     } catch (error) {
       if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không lập được base composite song ca MV");
+    }
+  }
+
+  async executeMvDuetBaseComposite(
+    projectId: string,
+  ): Promise<ExecutedMvDuetBaseComposite> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const projectsRootFolderId = requiredSetting("GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID");
+    const sheets = this.createSheetsClient();
+    const drive = this.createDriveClient();
+    let temporaryDirectory = "";
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] =
+        await Promise.all([
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+        ]);
+      const projects = projectsResponse.data.values ?? [];
+      const jobs = jobsResponse.data.values ?? [];
+      const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex(
+        (row, index) => index > 0 && String(row[1] ?? "").trim() === projectId,
+      );
+      if (projectIndex < 0) {
+        throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      }
+      const jobIndex = jobs.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[3] ?? "").trim() === MV_DUET_BASE_COMPOSITE_JOB_TYPE,
+      );
+      const jobId = jobIndex > 0 ? String(jobs[jobIndex][0] ?? "").trim() : "";
+      const approvalIndex = approvals.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[2] ?? "").trim() === MV_DUET_BASE_COMPOSITE_JOB_TYPE &&
+          String(row[3] ?? "").trim() === jobId,
+      );
+      const transition = planMvDuetBaseCompositeExecution(
+        projects[projectIndex].map(String),
+        jobIndex > 0 ? jobs[jobIndex].map(String) : undefined,
+        approvalIndex > 0 ? approvals[approvalIndex].map(String) : undefined,
+      );
+      if (transition.idempotent_replay && transition.existing_result) {
+        return { ...transition.existing_result, idempotent_replay: true };
+      }
+
+      const projectFolder = await drive.files.get({
+        fileId: transition.project_folder_id,
+        fields: "id,mimeType,parents,trashed",
+        supportsAllDrives: true,
+      });
+      assertProjectFolderWithinRoot(
+        projectFolder.data,
+        projectsRootFolderId,
+        transition.project_id,
+      );
+      const manifestResponse = await drive.files.get(
+        {
+          fileId: transition.manifest_file_id,
+          alt: "media",
+          supportsAllDrives: true,
+        },
+        { responseType: "text" },
+      );
+      const manifest =
+        typeof manifestResponse.data === "string"
+          ? parseObject(manifestResponse.data, "MV_DUET_BASE_COMPOSITE manifest")
+          : manifestResponse.data as Record<string, unknown>;
+      const sources = Array.isArray(manifest.source_videos)
+        ? manifest.source_videos as Array<Record<string, unknown>>
+        : [];
+      const tuongVy = sources.find(
+        (source) => String(source.character_id ?? "") === "GDTH-CHAR-001",
+      );
+      const phuongAn = sources.find(
+        (source) => String(source.character_id ?? "") === "GDTH-CHAR-002",
+      );
+      if (
+        String(manifest.project_id ?? "") !== transition.project_id ||
+        String(manifest.composite_status ?? "") !== "APPROVED" ||
+        String(manifest.output_readiness ?? "") !== "READY_FOR_LOCAL_COMPOSITE_EXECUTION" ||
+        manifest.composite_execution_allowed !== true ||
+        manifest.provider_execution_allowed !== false ||
+        manifest.render_allowed !== false ||
+        sources.length !== 2 ||
+        !tuongVy ||
+        !phuongAn ||
+        !String(tuongVy.file_id ?? "").trim() ||
+        !String(phuongAn.file_id ?? "").trim() ||
+        String(tuongVy.file_id) === String(phuongAn.file_id) ||
+        tuongVy.close_up_allowed !== false ||
+        tuongVy.preserve_microphone !== true
+      ) {
+        throw new ProjectRegistryInvalidStateError(
+          `Base composite RP015 của ${transition.project_id} chưa an toàn để thực thi`,
+        );
+      }
+
+      temporaryDirectory = await mkdtemp(join(tmpdir(), "gdth-rp015-"));
+      const tuongVyPath = join(temporaryDirectory, "tuong-vy-source");
+      const phuongAnPath = join(temporaryDirectory, "phuong-an-source");
+      const outputPath = join(temporaryDirectory, "rp015-base-composite.mp4");
+      const download = async (fileId: string, destination: string) => {
+        const response = await drive.files.get(
+          { fileId, alt: "media", supportsAllDrives: true },
+          { responseType: "stream" },
+        );
+        await pipeline(response.data as Readable, createWriteStream(destination));
+      };
+      await Promise.all([
+        download(String(tuongVy.file_id), tuongVyPath),
+        download(String(phuongAn.file_id), phuongAnPath),
+      ]);
+      const probe = await executeMvDuetBaseComposite(
+        tuongVyPath,
+        phuongAnPath,
+        outputPath,
+      );
+      const outputStats = await stat(outputPath);
+      if (outputStats.size <= 0) {
+        throw new ProjectRegistryInvalidStateError("FFmpeg không tạo được output RP015");
+      }
+
+      const compositeFolder = await this.findChildFolder(
+        drive,
+        transition.project_folder_id,
+        "03_ORIGINAL_FACE_COMPOSITE",
+      );
+      const outputName =
+        `MV_DUET_BASE_COMPOSITE_RP015_${transition.project_id}.mp4`;
+      const escapedName = outputName.replace(/'/g, "\\'");
+      const existingOutput = await drive.files.list({
+        q: `'${compositeFolder.id}' in parents and name='${escapedName}' and trashed=false`,
+        fields: "files(id,webViewLink)",
+        spaces: "drive",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      const existingFile = existingOutput.data.files?.[0];
+      const outputFile = existingFile?.id
+        ? await drive.files.update({
+            fileId: existingFile.id,
+            media: { mimeType: "video/mp4", body: createReadStream(outputPath) },
+            fields: "id,webViewLink",
+            supportsAllDrives: true,
+          })
+        : await drive.files.create({
+            requestBody: {
+              name: outputName,
+              mimeType: "video/mp4",
+              parents: [compositeFolder.id],
+            },
+            media: { mimeType: "video/mp4", body: createReadStream(outputPath) },
+            fields: "id,webViewLink",
+            supportsAllDrives: true,
+          });
+      const outputFileId = String(outputFile.data.id ?? "");
+      if (!outputFileId) {
+        throw new ProjectRegistryInvalidStateError("Drive không trả output file ID RP015");
+      }
+      const outputFileUrl =
+        outputFile.data.webViewLink ??
+        `https://drive.google.com/file/d/${outputFileId}/view`;
+      const executedAt = new Date().toISOString();
+      const result: ExecutedMvDuetBaseComposite = {
+        project_id: transition.project_id,
+        current_stage: "PRE_PRODUCTION",
+        next_action: "REVIEW_MV_DUET_BASE_COMPOSITE",
+        job_id: transition.job_id,
+        job_status: "SUCCEEDED",
+        output_file_id: outputFileId,
+        output_file_url: outputFileUrl,
+        duration_seconds: probe.duration_seconds,
+        width: probe.width,
+        height: probe.height,
+        provider_execution_allowed: false,
+        render_allowed: false,
+        executed_at: executedAt,
+        idempotent_replay: false,
+      };
+      const updatedManifest = {
+        ...manifest,
+        composite_status: "EXECUTED_AWAITING_REVIEW",
+        output_readiness: "AWAITING_OWNER_REVIEW",
+        composite_execution_allowed: false,
+        provider_execution_allowed: false,
+        render_allowed: false,
+        output: {
+          file_id: outputFileId,
+          file_url: outputFileUrl,
+          mime_type: "video/mp4",
+          width: probe.width,
+          height: probe.height,
+          duration_seconds: probe.duration_seconds,
+        },
+        review_gate: {
+          review_status: "PENDING",
+          next_action: result.next_action,
+        },
+        executed_at: executedAt,
+      };
+      await drive.files.update({
+        fileId: transition.manifest_file_id,
+        media: {
+          mimeType: "application/json",
+          body: Readable.from([`${JSON.stringify(updatedManifest, null, 2)}\n`]),
+        },
+        fields: "id,modifiedTime",
+        supportsAllDrives: true,
+      });
+
+      const projectRow = projectIndex + 1;
+      const jobRow = jobIndex + 1;
+      const auditRow = (auditResponse.data.values ?? []).length + 1;
+      const outputIds = [
+        transition.manifest_file_id,
+        outputFileId,
+      ];
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: [
+            {
+              range: `'PROJECTS'!S${projectRow}:T${projectRow}`,
+              values: [["PRE_PRODUCTION", result.next_action]],
+            },
+            {
+              range: `'PROJECTS'!X${projectRow}`,
+              values: [[executedAt]],
+            },
+            {
+              range: `'PRODUCTION_JOBS'!E${jobRow}:J${jobRow}`,
+              values: [[
+                result.job_status,
+                "",
+                String(jobs[jobIndex][6] ?? "[]"),
+                JSON.stringify(outputIds),
+                JSON.stringify(result),
+                Number(jobs[jobIndex][9] ?? 0) + 1,
+              ]],
+            },
+            {
+              range: `'PRODUCTION_JOBS'!L${jobRow}:N${jobRow}`,
+              values: [[executedAt, String(jobs[jobIndex][12] ?? ""), executedAt]],
+            },
+            {
+              range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`,
+              values: [[
+                randomUUID(),
+                transition.project_id,
+                transition.submission_id,
+                "MV_DUET_BASE_COMPOSITE_EXECUTED",
+                "SUCCEEDED",
+                "AI_EXECUTOR_WEB",
+                "Đã dựng local RP015 9.62 giây từ hai nguồn riêng; chờ chủ dự án review. Không gọi Runway.",
+                executedAt,
+              ]],
+            },
+          ],
+        },
+      });
+      return result;
+    } catch (error) {
+      if (
+        error instanceof ProjectRegistryNotConfiguredError ||
+        error instanceof ProjectRegistryProjectNotFoundError ||
+        error instanceof ProjectRegistryInvalidStateError
+      ) throw error;
+      throw new ProjectRegistryUnavailableError(
+        error instanceof Error
+          ? error.message
+          : "Không dựng được base composite RP015",
+      );
+    } finally {
+      if (temporaryDirectory) {
+        await rm(temporaryDirectory, { recursive: true, force: true });
+      }
     }
   }
 
