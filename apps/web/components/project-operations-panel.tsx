@@ -23,6 +23,7 @@ export function ProjectOperationsPanel() {
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT_ID);
   const [running, setRunning] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [approvingPilot, setApprovingPilot] = useState(false);
   const [result, setResult] = useState<CleanVoiceReferenceResult | null>(null);
   const [error, setError] = useState("");
 
@@ -78,6 +79,31 @@ export function ProjectOperationsPanel() {
     }
   }
 
+  async function approveVocalPilot() {
+    const normalizedProjectId = projectId.trim();
+    if (!normalizedProjectId) return;
+
+    setApprovingPilot(true);
+    setResult(null);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(normalizedProjectId)}/approve-rp015-vocal-pilot`,
+        { method: "POST" },
+      );
+      const body = (await response.json()) as CleanVoiceReferenceResult;
+      setResult(body);
+      if (!response.ok) {
+        setError(body.message ?? body.code ?? "Không duyệt được hai Voice Reference Pilot RP015.");
+      }
+    } catch {
+      setError("Không kết nối được API khi duyệt Voice Reference Pilot RP015.");
+    } finally {
+      setApprovingPilot(false);
+    }
+  }
+
   return (
     <section className="operations-panel" aria-labelledby="project-operations-title">
       <div className="section-heading">
@@ -113,11 +139,18 @@ export function ProjectOperationsPanel() {
           {running ? "Đang tách stem Demucs…" : "Tách 2 vocal stem RP015 bằng Demucs"}
         </button>
         <button
-          disabled={running || approving || !projectId.trim()}
+          disabled={running || approving || approvingPilot || !projectId.trim()}
           onClick={approveCleanVoiceReferences}
           type="button"
         >
           {approving ? "Đang ghi phê duyệt…" : "Duyệt 2 vocal stem Demucs RP015"}
+        </button>
+        <button
+          disabled={running || approving || approvingPilot || !projectId.trim()}
+          onClick={approveVocalPilot}
+          type="button"
+        >
+          {approvingPilot ? "Đang ghi phê duyệt Pilot…" : "Duyệt 2 Voice Reference Pilot RP015"}
         </button>
       </div>
 
