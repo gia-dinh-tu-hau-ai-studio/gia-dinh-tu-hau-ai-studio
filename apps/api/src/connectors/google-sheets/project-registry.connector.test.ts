@@ -1380,3 +1380,22 @@ test("source offset rollout luôn nằm trong cửa sổ nguồn", () => {
   assert.ok(offset >= 0);
   assert.ok(offset + 12.4 <= 42.066667 + 0.001);
 });
+
+test("cảnh rollout dài hơn nguồn bắt đầu từ 0 để FFmpeg lặp an toàn", () => {
+  assert.equal(selectRolloutSourceOffset(0, 40.466667, 51.2, 15.42), 0);
+});
+
+test("FFmpeg rollout lặp riêng cả hai input nhưng RP015 không bị thay đổi", () => {
+  const rolloutArgs = buildMvDuetBaseCompositeFfmpegArgs(
+    "tuong-vy.mp4",
+    "phuong-an.mp4",
+    "rp001.mp4",
+    { durationSeconds: 51.2, tuongVyOffset: 0, phuongAnOffset: 0 },
+  );
+  assert.equal(rolloutArgs.filter((arg) => arg === "-stream_loop").length, 2);
+  assert.equal(rolloutArgs.filter((arg) => arg === "-1").length, 2);
+  const pilotArgs = buildMvDuetBaseCompositeFfmpegArgs(
+    "tuong-vy.mp4", "phuong-an.mp4", "rp015.mp4",
+  );
+  assert.equal(pilotArgs.includes("-stream_loop"), false);
+});
