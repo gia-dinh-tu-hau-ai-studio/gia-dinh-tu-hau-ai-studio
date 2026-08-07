@@ -33,6 +33,7 @@ import {
 import {
   buildMvDuetBaseCompositeFfmpegArgs,
   buildRp015FinalProofFfmpegArgs,
+  classifyVoiceReference,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
   RP015_PHUONG_AN_SOURCE_START_SECONDS,
@@ -41,6 +42,12 @@ import {
   RP015_MASTER_AUDIO_START_SECONDS,
   selectRolloutSourceOffset,
 } from "../../media/mv-duet-base-composite.executor";
+
+test("voice reference chỉ là ứng viên khi đủ dài và nghe được", () => {
+  assert.equal(classifyVoiceReference(42.1, -20, -1), "REFERENCE_CANDIDATE");
+  assert.equal(classifyVoiceReference(19.9, -20, -1), "NOT_USABLE");
+  assert.equal(classifyVoiceReference(42.1, -60, -50), "NOT_USABLE");
+});
 
 function pendingMvRenderPlanRows() {
   const project = approvedMvProjectRow();

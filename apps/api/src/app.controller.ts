@@ -150,4 +150,9 @@ export class AppController {
   createRp015FinalProof(@Param("projectId") projectId: string, @Body() body: unknown) {
     return this.intakeService.createRp015FinalProof(projectId, body);
   }
+
+  @Post("projects/:projectId/prepare-rp015-vocal-pilot")
+  prepareRp015VocalPilot(@Param("projectId") projectId: string) {
+    return this.intakeService.prepareRp015VocalPilot(projectId);
+  }
 }

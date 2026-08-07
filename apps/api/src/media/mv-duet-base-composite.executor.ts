@@ -21,6 +21,58 @@ type VideoProbe = {
   duration_seconds: number;
 };
 
+export type VoiceReferenceEvaluation = {
+  duration_seconds: number;
+  sample_rate_hz: number;
+  channels: number;
+  mean_volume_db: number;
+  max_volume_db: number;
+  technical_status: "REFERENCE_CANDIDATE" | "NOT_USABLE";
+};
+
+export function classifyVoiceReference(durationSeconds: number, meanDb: number, maxDb: number) {
+  return durationSeconds >= 20 && Number.isFinite(meanDb) && Number.isFinite(maxDb) && meanDb >= -45 && maxDb >= -40
+    ? "REFERENCE_CANDIDATE" as const
+    : "NOT_USABLE" as const;
+}
+
+export async function extractAndEvaluateVoiceReference(
+  videoInputPath: string,
+  wavOutputPath: string,
+): Promise<VoiceReferenceEvaluation> {
+  const probe = await execFileAsync(
+    "ffprobe",
+    ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate,channels:format=duration", "-of", "json", videoInputPath],
+    { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8" },
+  );
+  const data = JSON.parse(probe.stdout) as { streams?: Array<{ sample_rate?: string; channels?: number }>; format?: { duration?: string } };
+  const stream = data.streams?.[0];
+  const durationSeconds = Number(data.format?.duration ?? 0);
+  if (!stream || !Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    return { duration_seconds: durationSeconds || 0, sample_rate_hz: 0, channels: 0, mean_volume_db: -Infinity, max_volume_db: -Infinity, technical_status: "NOT_USABLE" };
+  }
+  await execFileAsync(
+    "ffmpeg",
+    ["-hide_banner", "-loglevel", "error", "-y", "-i", videoInputPath, "-vn", "-t", String(Math.min(30, durationSeconds)), "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", wavOutputPath],
+    { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 },
+  );
+  const loudness = await execFileAsync(
+    "ffmpeg",
+    ["-hide_banner", "-i", wavOutputPath, "-af", "volumedetect", "-f", "null", "-"],
+    { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
+  );
+  const meanDb = Number(loudness.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  const maxDb = Number(loudness.stderr.match(/max_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  return {
+    duration_seconds: durationSeconds,
+    sample_rate_hz: Number(stream.sample_rate ?? 0),
+    channels: Number(stream.channels ?? 0),
+    mean_volume_db: meanDb,
+    max_volume_db: maxDb,
+    technical_status: classifyVoiceReference(durationSeconds, meanDb, maxDb),
+  };
+}
+
 export type MvDuetCompositeUnit = {
   render_unit_id: string;
   start_seconds: number;

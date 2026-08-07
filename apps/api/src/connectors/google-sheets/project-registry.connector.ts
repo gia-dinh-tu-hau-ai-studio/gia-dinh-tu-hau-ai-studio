@@ -14,6 +14,7 @@ import {
   GoogleDriveOAuthConfigurationError,
 } from "../../google/google-auth";
 import {
+  extractAndEvaluateVoiceReference,
   executeMvDuetBaseComposite,
   executeMvDuetBaseCompositeUnit,
   executeRp015FinalProof,
@@ -386,6 +387,21 @@ export type CreatedRp015FinalProof = {
   idempotent_replay: boolean;
 };
 
+export type PreparedRp015VocalPilot = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "REVIEW_RP015_VOICE_REFERENCES" | "APPROVE_RP015_AI_VOCAL_FALLBACK";
+  job_id: string;
+  job_status: "AWAITING_APPROVAL";
+  manifest_file_id: string;
+  manifest_file_url: string;
+  voice_reference_status: "REFERENCE_CANDIDATE" | "AI_VOICE_REQUIRED";
+  provider_execution_allowed: false;
+  render_allowed: false;
+  prepared_at: string;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -437,6 +453,7 @@ const MV_DUET_BASE_COMPOSITE_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_V1";
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE = "MV_DUET_BASE_COMPOSITE_ROLLOUT";
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_ROLLOUT_V1";
 const MV_RP015_FINAL_PROOF_JOB_TYPE = "MV_RP015_DUET_CUT_PROOF_V2";
+const MV_RP015_VOCAL_PILOT_JOB_TYPE = "MV_RP015_VOCAL_PILOT_PREPARATION";
 const TEMPORARY_CLOSE_UP_LOCK_CHARACTER_IDS = new Set(["GDTH-CHAR-001"]);
 
 export function buildMvRenderExecutionManifest(
@@ -4629,6 +4646,105 @@ export class ProjectRegistryConnector {
     } catch (error) {
       if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không thực thi được Base Composite rollout");
+    } finally {
+      if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  }
+
+  async prepareRp015VocalPilot(projectId: string): Promise<PreparedRp015VocalPilot> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const projectsRootFolderId = requiredSetting("GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID");
+    const sheets = this.createSheetsClient();
+    const drive = this.createDriveClient();
+    let temporaryDirectory = "";
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+      ]);
+      const projects = projectsResponse.data.values ?? []; const jobs = jobsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId);
+      if (projectIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const projectRow = projects[projectIndex].map(String);
+      if (String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" || String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION") {
+        throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không ở PRE_PRODUCTION`);
+      }
+      const existing = jobs.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE)?.map(String);
+      if (existing && String(existing[4] ?? "") === "AWAITING_APPROVAL") {
+        const replay = parseObject(existing[8], "MV_RP015_VOCAL_PILOT result") as unknown as PreparedRp015VocalPilot;
+        return { ...replay, idempotent_replay: true };
+      }
+      const assetJob = jobs.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_ASSET_PREPARATION_JOB_TYPE)?.map(String);
+      const approvals = approvalsResponse.data.values ?? [];
+      const assetApproval = approvals.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[2] ?? "").trim() === MV_ASSET_PREPARATION_JOB_TYPE && String(row[3] ?? "").trim() === String(assetJob?.[0] ?? "").trim())?.map(String);
+      if (!assetJob || String(assetJob[4] ?? "") !== "APPROVED" || String(assetApproval?.[4] ?? "") !== "APPROVED") {
+        throw new ProjectRegistryInvalidStateError(`Asset manifest của ${projectId} chưa được duyệt`);
+      }
+      const projectFolderId = String(projectRow[20] ?? "").trim();
+      const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
+      assertProjectFolderWithinRoot(projectFolder.data, projectsRootFolderId, projectId);
+      const approvedAssets = await this.readApprovedMvAssetManifest(drive, projectFolderId, assetJob, projectId);
+      const sourceAssets = (approvedAssets.source_assets ?? {}) as Record<string, unknown>;
+      const characterSources = Array.isArray(sourceAssets.character_sources) ? sourceAssets.character_sources as Array<Record<string, unknown>> : [];
+      const references = [
+        { character_id: "GDTH-CHAR-001", character_name: "Tường Vy", source: characterSources.find((item) => String(item.character_id) === "GDTH-CHAR-001") },
+        { character_id: "GDTH-CHAR-002", character_name: "Phương An", source: characterSources.find((item) => String(item.character_id) === "GDTH-CHAR-002") },
+      ];
+      if (references.some((item) => !String(item.source?.file_id ?? "").trim())) {
+        throw new ProjectRegistryInvalidStateError("Thiếu clip nguồn Tường Vy hoặc Phương An để đánh giá giọng hát");
+      }
+      temporaryDirectory = await mkdtemp(join(tmpdir(), "gdth-rp015-vocal-pilot-"));
+      const productionFolder = await this.findChildFolder(drive, projectFolderId, "02_SAN_XUAT_MV");
+      const evaluated = [] as Array<Record<string, unknown>>;
+      for (const reference of references) {
+        const sourceFileId = String(reference.source?.file_id ?? "").trim();
+        const videoPath = join(temporaryDirectory, `${reference.character_id}.mp4`);
+        const wavPath = join(temporaryDirectory, `${reference.character_id}.wav`);
+        const response = await drive.files.get({ fileId: sourceFileId, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
+        await pipeline(response.data as Readable, createWriteStream(videoPath));
+        const evaluation = await extractAndEvaluateVoiceReference(videoPath, wavPath);
+        let referenceFileId = ""; let referenceFileUrl = "";
+        if (evaluation.technical_status === "REFERENCE_CANDIDATE") {
+          const fileName = `VOICE_REFERENCE_${reference.character_id}_${projectId}.wav`;
+          const existingFile = await drive.files.list({ q: `'${productionFolder.id}' in parents and name='${fileName}' and trashed=false`, fields: "files(id,webViewLink)", spaces: "drive", supportsAllDrives: true, includeItemsFromAllDrives: true });
+          const file = existingFile.data.files?.[0]?.id
+            ? await drive.files.update({ fileId: existingFile.data.files[0].id!, media: { mimeType: "audio/wav", body: createReadStream(wavPath) }, fields: "id,webViewLink", supportsAllDrives: true })
+            : await drive.files.create({ requestBody: { name: fileName, mimeType: "audio/wav", parents: [productionFolder.id] }, media: { mimeType: "audio/wav", body: createReadStream(wavPath) }, fields: "id,webViewLink", supportsAllDrives: true });
+          referenceFileId = String(file.data.id ?? ""); referenceFileUrl = String(file.data.webViewLink ?? "");
+        }
+        evaluated.push({ character_id: reference.character_id, character_name: reference.character_name, source_video_file_id: sourceFileId, reference_audio_file_id: referenceFileId || null, reference_audio_file_url: referenceFileUrl || null, ...evaluation });
+      }
+      const allCandidates = evaluated.every((item) => item.technical_status === "REFERENCE_CANDIDATE");
+      const nextAction = allCandidates ? "REVIEW_RP015_VOICE_REFERENCES" as const : "APPROVE_RP015_AI_VOCAL_FALLBACK" as const;
+      const status = allCandidates ? "REFERENCE_CANDIDATE" as const : "AI_VOICE_REQUIRED" as const;
+      const preparedAt = new Date().toISOString(); const jobId = randomUUID(); const approvalId = randomUUID();
+      const manifest = {
+        schema_version: "1.0", project_id: projectId, stage: "PRE_PRODUCTION", render_unit_id: "RP015",
+        target_duration_seconds: 9.62, target_master_start_seconds: 362,
+        voice_references: evaluated, voice_reference_status: status,
+        vocal_strategy: allCandidates ? "VOICE_CONVERSION_REQUIRES_HUMAN_REVIEW" : "GENERIC_AI_VOCAL_REQUIRES_PROVIDER_APPROVAL",
+        provider_preferences: ["KITS_AI_OR_EQUIVALENT", "SUNO_GENERIC_AI_VOCAL"],
+        provider_execution_allowed: false, render_allowed: false,
+        approval_gate: { approval_status: "PENDING", next_action: nextAction }, prepared_at: preparedAt,
+      };
+      const manifestFile = await this.createOrReuseJsonFile(drive, productionFolder.id, `MV_RP015_VOCAL_PILOT_${projectId}.json`, manifest);
+      const result: PreparedRp015VocalPilot = {
+        project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: nextAction, job_id: jobId,
+        job_status: "AWAITING_APPROVAL", manifest_file_id: manifestFile.id, manifest_file_url: manifestFile.webViewLink,
+        voice_reference_status: status, provider_execution_allowed: false, render_allowed: false, prepared_at: preparedAt, idempotent_replay: false,
+      };
+      const jobRow = jobs.length + 1; const approvalRow = approvals.length + 1; const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
+        { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_VOCAL_PILOT_JOB_TYPE, "AWAITING_APPROVAL", "LOCAL_FFMPEG", JSON.stringify(references.map((item) => String(item.source?.file_id ?? ""))), JSON.stringify([manifestFile.id, ...evaluated.map((item) => item.reference_audio_file_id).filter(Boolean)]), JSON.stringify(result), 1, preparedAt, preparedAt, preparedAt, preparedAt]] },
+        { range: `'APPROVALS'!A${approvalRow}:J${approvalRow}`, values: [[approvalId, projectId, MV_RP015_VOCAL_PILOT_JOB_TYPE, jobId, "PENDING", "PROJECT_OWNER", "", nextAction, preparedAt, preparedAt]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_VOCAL_PILOT_PREPARED", "AWAITING_APPROVAL", "AI_EXECUTOR_WEB", `Đã trích và đánh giá hai voice reference; status=${status}; chưa gọi provider.`, preparedAt]] },
+      ] } });
+      return result;
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không chuẩn bị được RP015 vocal pilot");
     } finally {
       if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
     }
