@@ -10,6 +10,7 @@ export const RP015_PHUONG_AN_SOURCE_START_SECONDS = 15.42;
 export const RP015_OUTPUT_WIDTH = 1920;
 export const RP015_OUTPUT_HEIGHT = 1080;
 export const RP015_FFMPEG_TIMEOUT_MS = 720_000;
+export const RP015_MASTER_AUDIO_START_SECONDS = 362;
 
 type VideoProbe = {
   width: number;
@@ -311,4 +312,50 @@ export async function executeMvDuetBaseCompositeUnit(
       phuong_an_start_seconds: phuongAnOffset,
     },
   };
+}
+
+export function buildRp015FinalProofFfmpegArgs(
+  videoInputPath: string,
+  masterAudioInputPath: string,
+  outputPath: string,
+) {
+  return [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-i", videoInputPath,
+    "-ss", String(RP015_MASTER_AUDIO_START_SECONDS),
+    "-t", String(RP015_DURATION_SECONDS),
+    "-i", masterAudioInputPath,
+    "-map", "0:v:0", "-map", "1:a:0",
+    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+    "-shortest", "-movflags", "+faststart", outputPath,
+  ];
+}
+
+export async function executeRp015FinalProof(
+  videoInputPath: string,
+  masterAudioInputPath: string,
+  outputPath: string,
+) {
+  await execFileAsync(
+    "ffmpeg",
+    buildRp015FinalProofFfmpegArgs(videoInputPath, masterAudioInputPath, outputPath),
+    { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
+  );
+  const probe = await execFileAsync(
+    "ffprobe",
+    ["-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration", "-of", "json", outputPath],
+    { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8" },
+  );
+  const data = JSON.parse(probe.stdout) as {
+    streams?: Array<{ codec_type?: string; width?: number; height?: number }>;
+    format?: { duration?: string };
+  };
+  const video = data.streams?.find((stream) => stream.codec_type === "video");
+  const hasAudio = data.streams?.some((stream) => stream.codec_type === "audio") ?? false;
+  const duration = Number(data.format?.duration);
+  if (
+    video?.width !== RP015_OUTPUT_WIDTH || video?.height !== RP015_OUTPUT_HEIGHT ||
+    !hasAudio || !Number.isFinite(duration) || Math.abs(duration - RP015_DURATION_SECONDS) > 0.2
+  ) throw new Error("RP015 final proof không đạt 1920x1080, audio AAC hoặc thời lượng 9.62 giây");
+  return { width: video.width, height: video.height, duration_seconds: duration, has_audio: true as const };
 }
