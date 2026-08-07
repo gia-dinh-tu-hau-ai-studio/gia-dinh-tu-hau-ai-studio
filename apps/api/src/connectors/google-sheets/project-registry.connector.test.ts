@@ -33,6 +33,9 @@ import {
   planRp015CleanVoiceReferencesApproval,
   planRp015VocalPilotApproval,
   selectApprovedRp015VocalPilot,
+  isRp015FinalProofJobStale,
+  MV_RP015_FINAL_PROOF_HEARTBEAT_MS,
+  MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS,
 } from "./project-registry.connector";
 import {
   buildBackwardAudioWindowCandidates,
@@ -1309,6 +1312,14 @@ test("từ chối thực thi RP015 khi approval chưa APPROVED", () => {
 test("FFmpeg RP015 có tối đa 720 giây dưới timeout Cloud Run 900 giây", () => {
   assert.equal(RP015_FFMPEG_TIMEOUT_MS, 720_000);
   assert.ok(RP015_FFMPEG_TIMEOUT_MS < 900_000);
+});
+
+test("Final Proof V4 heartbeat và hard-timeout kết thúc trước ngưỡng stale", () => {
+  assert.equal(MV_RP015_FINAL_PROOF_HEARTBEAT_MS, 15_000);
+  assert.equal(MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS, 25 * 60_000);
+  assert.equal(isRp015FinalProofJobStale("2026-08-07T17:00:00.000Z", Date.parse("2026-08-07T17:29:59.999Z")), false);
+  assert.equal(isRp015FinalProofJobStale("2026-08-07T17:00:00.000Z", Date.parse("2026-08-07T17:30:00.000Z")), true);
+  assert.equal(isRp015FinalProofJobStale("invalid", Date.now()), false);
 });
 
 test("FFmpeg chỉ dựng RP015 9.62 giây, không gắn audio và xuất 1920x1080", () => {
