@@ -32,6 +32,7 @@ import {
   ProjectRegistryInvalidStateError,
   planRp015CleanVoiceReferencesApproval,
   planRp015VocalPilotApproval,
+  selectApprovedRp015VocalPilot,
 } from "./project-registry.connector";
 import {
   buildVoiceReferenceNormalizationFfmpegArgs,
@@ -175,6 +176,39 @@ test("khôi phục Voice Reference Pilot khi approval đã APPROVED nhưng job c
   assert.equal(result.provider_execution_allowed, false);
   assert.equal(result.render_allowed, false);
   assert.equal(result.idempotent_replay, false);
+});
+
+test("Final Proof V3 chọn đúng Voice Pilot APPROVED mới nhất", () => {
+  const projectId = "GDTH-MV-20260804092100-63D8";
+  const jobs = [
+    ["job_id", "project_id", "stage", "job_type", "status"],
+    ["pilot-old", projectId, "PRE_PRODUCTION", "MV_RP015_VOCAL_PILOT_PREPARATION", "APPROVED"],
+    ["pilot-current", projectId, "PRE_PRODUCTION", "MV_RP015_VOCAL_PILOT_PREPARATION", "APPROVED"],
+  ];
+  const approvals = [
+    ["approval_id", "project_id", "approval_type", "job_id", "status"],
+    ["approval-old", projectId, "MV_RP015_VOCAL_PILOT_PREPARATION", "pilot-old", "APPROVED"],
+    ["approval-current", projectId, "MV_RP015_VOCAL_PILOT_PREPARATION", "pilot-current", "APPROVED"],
+  ];
+  const selected = selectApprovedRp015VocalPilot(projectId, jobs, approvals);
+  assert.equal(selected.job[0], "pilot-current");
+  assert.equal(selected.approval_id, "approval-current");
+});
+
+test("Final Proof V3 từ chối Voice Pilot mới nhất chưa APPROVED", () => {
+  const projectId = "GDTH-MV-20260804092100-63D8";
+  const jobs = [
+    ["job_id", "project_id", "stage", "job_type", "status"],
+    ["pilot-current", projectId, "PRE_PRODUCTION", "MV_RP015_VOCAL_PILOT_PREPARATION", "AWAITING_APPROVAL"],
+  ];
+  const approvals = [
+    ["approval_id", "project_id", "approval_type", "job_id", "status"],
+    ["approval-current", projectId, "MV_RP015_VOCAL_PILOT_PREPARATION", "pilot-current", "PENDING"],
+  ];
+  assert.throws(
+    () => selectApprovedRp015VocalPilot(projectId, jobs, approvals),
+    ProjectRegistryInvalidStateError,
+  );
 });
 
 test("voice reference dùng Demucs two-stems vocals rồi khóa WAV mono 48 kHz", () => {

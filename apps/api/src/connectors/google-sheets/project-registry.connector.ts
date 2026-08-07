@@ -379,6 +379,8 @@ export type CreatedRp015FinalProof = {
   height: 1080;
   has_audio: true;
   edit_mode: "FULL_FRAME_DUET_CUTS";
+  layout_version: "FULL_FRAME_ALTERNATING_V3";
+  voice_pilot_approval_id: string;
   audio_source: "VOCAL_MASTER";
   audio_mean_db: number;
   audio_max_db: number;
@@ -496,7 +498,7 @@ const MV_DUET_BASE_COMPOSITE_REVIEW_APPROVAL_TYPE = "MV_DUET_BASE_COMPOSITE_REVI
 const MV_DUET_BASE_COMPOSITE_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_V1";
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE = "MV_DUET_BASE_COMPOSITE_ROLLOUT";
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_ROLLOUT_V1";
-const MV_RP015_FINAL_PROOF_JOB_TYPE = "MV_RP015_DUET_CUT_PROOF_V2";
+const MV_RP015_FINAL_PROOF_JOB_TYPE = "MV_RP015_DUET_CUT_PROOF_V3";
 const MV_RP015_VOCAL_PILOT_JOB_TYPE = "MV_RP015_VOCAL_PILOT_PREPARATION";
 const MV_RP015_LEGACY_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_CLEAN_VOICE_REFERENCES";
 const MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_DEMUCS_VOCAL_STEMS_V2";
@@ -2374,6 +2376,41 @@ export function selectNextMvDuetBaseCompositeRolloutUnit(
     String(unit.rollout_status ?? "") !== "SUCCEEDED"
   );
   return { next, completed_count: completed.length, remaining_count: units.length - completed.length };
+}
+
+export function selectApprovedRp015VocalPilot(
+  projectIdInput: string,
+  jobs: unknown[][],
+  approvals: unknown[][],
+) {
+  const projectId = projectIdInput.trim();
+  const matchingJobs = jobs
+    .filter((row, index) =>
+      index > 0 &&
+      String(row[1] ?? "").trim() === projectId &&
+      String(row[3] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE,
+    )
+    .map((row) => row.map(String));
+  const job = matchingJobs[matchingJobs.length - 1];
+  if (!job || String(job[4] ?? "").trim() !== "APPROVED") {
+    throw new ProjectRegistryInvalidStateError(`Voice Reference Pilot RP015 mới nhất của ${projectId} chưa APPROVED`);
+  }
+
+  const jobId = String(job[0] ?? "").trim();
+  const matchingApprovals = approvals
+    .filter((row, index) =>
+      index > 0 &&
+      String(row[1] ?? "").trim() === projectId &&
+      String(row[2] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE &&
+      String(row[3] ?? "").trim() === jobId,
+    )
+    .map((row) => row.map(String));
+  const approval = matchingApprovals[matchingApprovals.length - 1];
+  if (!approval || String(approval[4] ?? "").trim() !== "APPROVED") {
+    throw new ProjectRegistryInvalidStateError(`Approval Voice Reference Pilot RP015 mới nhất của ${projectId} chưa APPROVED`);
+  }
+
+  return { job, approval, approval_id: String(approval[0] ?? "").trim() };
 }
 
 export function planRp015VocalPilotApproval(
@@ -5101,6 +5138,9 @@ export class ProjectRegistryConnector {
       if (!assetJob || String(assetJob[4] ?? "") !== "APPROVED" || String(assetApproval?.[4] ?? "") !== "APPROVED") {
         throw new ProjectRegistryInvalidStateError(`Asset manifest của ${projectId} chưa được duyệt`);
       }
+      const approvedVocalPilot = selectApprovedRp015VocalPilot(projectId, jobs, approvals);
+      const voicePilotApprovalId = approvedVocalPilot.approval_id;
+
       const projectFolderId = String(projectRow[20] ?? "").trim();
       const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
       assertProjectFolderWithinRoot(projectFolder.data, projectsRootFolderId, projectId);
@@ -5130,7 +5170,7 @@ export class ProjectRegistryConnector {
       const proof = await executeRp015FinalProof(tuongVyPath, phuongAnPath, audioPath, outputPath);
       if ((await stat(outputPath)).size <= 0) throw new ProjectRegistryInvalidStateError("FFmpeg không tạo được RP015 final proof");
       const compositeFolder = await this.findChildFolder(drive, projectFolderId, "03_ORIGINAL_FACE_COMPOSITE");
-      const outputName = `MV_DUET_CUT_PROOF_RP015_${projectId}.mp4`;
+      const outputName = `MV_DUET_CUT_PROOF_RP015_V3_${projectId}.mp4`;
       const existingOutput = await drive.files.list({ q: `'${compositeFolder.id}' in parents and name='${outputName}' and trashed=false`, fields: "files(id,webViewLink)", spaces: "drive", supportsAllDrives: true, includeItemsFromAllDrives: true });
       const outputFile = existingOutput.data.files?.[0]?.id
         ? await drive.files.update({ fileId: existingOutput.data.files[0].id!, media: { mimeType: "video/mp4", body: createReadStream(outputPath) }, fields: "id,webViewLink", supportsAllDrives: true })
@@ -5143,14 +5183,14 @@ export class ProjectRegistryConnector {
         render_unit_id: "RP015", proof_status: "SUCCEEDED", output_file_id: outputFileId,
         output_file_url: outputFile.data.webViewLink ?? `https://drive.google.com/file/d/${outputFileId}/view`,
         duration_seconds: proof.duration_seconds, width: 1920, height: 1080, has_audio: true,
-        edit_mode: "FULL_FRAME_DUET_CUTS", audio_source: "VOCAL_MASTER",
+        edit_mode: "FULL_FRAME_DUET_CUTS", layout_version: "FULL_FRAME_ALTERNATING_V3", voice_pilot_approval_id: voicePilotApprovalId, audio_source: "VOCAL_MASTER",
         audio_mean_db: proof.audio_mean_db, audio_max_db: proof.audio_max_db,
         provider_execution_allowed: false, render_allowed: false, created_at: createdAt, idempotent_replay: false,
       };
       const jobRow = jobs.length + 1; const auditRow = (auditResponse.data.values ?? []).length + 1;
       await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
         { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[randomUUID(), projectId, "PRE_PRODUCTION", MV_RP015_FINAL_PROOF_JOB_TYPE, "SUCCEEDED", "LOCAL_FFMPEG", JSON.stringify([tuongVyFileId, phuongAnFileId, vocalMasterFileId]), JSON.stringify([outputFileId]), JSON.stringify(result), 2, createdAt, createdAt, createdAt, createdAt]] },
-        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_DUET_CUT_PROOF_CREATED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã tạo RP015 cắt cảnh song ca toàn khung với vocal master; loudness mean=${proof.audio_mean_db}dB/max=${proof.audio_max_db}dB; không gọi provider và không thay đổi rollout.`, createdAt]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_DUET_CUT_PROOF_V3_CREATED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã tạo RP015 V3 cắt luân phiên từng nhân vật toàn khung với vocal master; loudness mean=${proof.audio_mean_db}dB/max=${proof.audio_max_db}dB; không gọi provider và không thay đổi rollout.`, createdAt]] },
       ] } });
       return result;
     } catch (error) {
