@@ -7,6 +7,7 @@ export const RP015_START_SECONDS = 362;
 export const RP015_DURATION_SECONDS = 9.62;
 export const RP015_OUTPUT_WIDTH = 1920;
 export const RP015_OUTPUT_HEIGHT = 1080;
+export const RP015_FFMPEG_TIMEOUT_MS = 720_000;
 
 export function buildMvDuetBaseCompositeFfmpegArgs(
   tuongVyInputPath: string,
@@ -69,10 +70,44 @@ export async function executeMvDuetBaseComposite(
     phuongAnInputPath,
     outputPath,
   );
-  await execFileAsync("ffmpeg", args, {
-    timeout: 240_000,
-    maxBuffer: 4 * 1024 * 1024,
-  });
+  const startedAt = Date.now();
+  console.log(JSON.stringify({
+    event: "MV_DUET_BASE_COMPOSITE_FFMPEG_STARTED",
+    render_unit_id: "RP015",
+    timeout_ms: RP015_FFMPEG_TIMEOUT_MS,
+  }));
+  try {
+    await execFileAsync("ffmpeg", args, {
+      timeout: RP015_FFMPEG_TIMEOUT_MS,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+  } catch (error) {
+    const failure = error as Error & {
+      stderr?: string;
+      killed?: boolean;
+      signal?: string;
+    };
+    const detail = [failure.message, failure.stderr]
+      .filter(Boolean)
+      .join(" | ")
+      .replace(/\/tmp\/[^\\s'"]+/g, "<temporary-file>")
+      .replace(/\\s+/g, " ")
+      .slice(0, 2_000);
+    console.error(JSON.stringify({
+      event: "MV_DUET_BASE_COMPOSITE_FFMPEG_FAILED",
+      render_unit_id: "RP015",
+      elapsed_ms: Date.now() - startedAt,
+      killed: Boolean(failure.killed),
+      signal: failure.signal ?? null,
+      error: detail,
+    }));
+    throw new Error(`FFmpeg RP015 thất bại: ${detail || "không có stderr"}`);
+  }
+  console.log(JSON.stringify({
+    event: "MV_DUET_BASE_COMPOSITE_FFMPEG_COMPLETED",
+    render_unit_id: "RP015",
+    elapsed_ms: Date.now() - startedAt,
+  }));
 
   const probe = await execFileAsync(
     "ffprobe",
