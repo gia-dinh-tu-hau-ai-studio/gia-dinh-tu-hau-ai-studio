@@ -21,10 +21,16 @@ import {
   planMvRenderExecutionApproval,
   planMvProviderSubmissionApproval,
   planMvDuetBaseCompositeApproval,
+  planMvDuetBaseCompositeExecution,
   planMvShotPlanApproval,
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
+import {
+  buildMvDuetBaseCompositeFfmpegArgs,
+  RP015_DURATION_SECONDS,
+  RP015_START_SECONDS,
+} from "../../media/mv-duet-base-composite.executor";
 
 function pendingMvRenderPlanRows() {
   const project = approvedMvProjectRow();
@@ -988,4 +994,77 @@ test("từ chối duyệt base composite khi job và approval lệch trạng th�
     () => planMvDuetBaseCompositeApproval(project, job, approval),
     ProjectRegistryInvalidStateError,
   );
+});
+
+
+function approvedMvDuetBaseCompositeExecutionRows() {
+  const project = approvedMvProjectRow();
+  project[19] = "EXECUTE_MV_DUET_BASE_COMPOSITE";
+  const job = Array.from({ length: 14 }, () => "");
+  Object.assign(job, {
+    0: "job-duet-base-composite",
+    1: project[1],
+    2: "PRE_PRODUCTION",
+    3: "MV_DUET_BASE_COMPOSITE",
+    4: "APPROVED",
+    7: '["duet-base-composite-manifest-id"]',
+  });
+  const approval = Array.from({ length: 10 }, () => "");
+  Object.assign(approval, {
+    0: "approval-duet-base-composite",
+    1: project[1],
+    2: "MV_DUET_BASE_COMPOSITE",
+    3: job[0],
+    4: "APPROVED",
+  });
+  return { project, job, approval };
+}
+
+test("chỉ thực thi RP015 sau khi base composite đã được duyệt", () => {
+  const { project, job, approval } = approvedMvDuetBaseCompositeExecutionRows();
+  const result = planMvDuetBaseCompositeExecution(project, job, approval);
+  assert.equal(result.idempotent_replay, false);
+  assert.equal(result.manifest_file_id, "duet-base-composite-manifest-id");
+  assert.equal(result.project_folder_id, "project-folder-id");
+});
+
+test("thực thi lại RP015 đã thành công trả kết quả idempotent", () => {
+  const { project, job, approval } = approvedMvDuetBaseCompositeExecutionRows();
+  project[19] = "REVIEW_MV_DUET_BASE_COMPOSITE";
+  job[4] = "SUCCEEDED";
+  job[8] = JSON.stringify({
+    output_file_id: "rp015-output-id",
+    output_file_url: "https://drive.google.com/file/d/rp015-output-id/view",
+    duration_seconds: 9.62,
+    width: 1920,
+    height: 1080,
+    executed_at: "2026-08-07T02:00:00.000Z",
+  });
+  const result = planMvDuetBaseCompositeExecution(project, job, approval);
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.existing_result?.output_file_id, "rp015-output-id");
+  assert.equal(result.existing_result?.provider_execution_allowed, false);
+  assert.equal(result.existing_result?.render_allowed, false);
+});
+
+test("từ chối thực thi RP015 khi approval chưa APPROVED", () => {
+  const { project, job, approval } = approvedMvDuetBaseCompositeExecutionRows();
+  approval[4] = "PENDING";
+  assert.throws(
+    () => planMvDuetBaseCompositeExecution(project, job, approval),
+    ProjectRegistryInvalidStateError,
+  );
+});
+
+test("FFmpeg chỉ dựng RP015 9.62 giây, không gắn audio và xuất 1920x1080", () => {
+  const args = buildMvDuetBaseCompositeFfmpegArgs(
+    "/tmp/tuong-vy",
+    "/tmp/phuong-an",
+    "/tmp/rp015.mp4",
+  );
+  assert.ok(args.includes(String(RP015_START_SECONDS)));
+  assert.ok(args.includes(String(RP015_DURATION_SECONDS)));
+  assert.ok(args.includes("-an"));
+  assert.ok(args.some((value) => value.includes("hstack=inputs=2")));
+  assert.equal(args.at(-1), "/tmp/rp015.mp4");
 });
