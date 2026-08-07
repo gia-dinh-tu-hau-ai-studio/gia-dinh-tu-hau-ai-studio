@@ -5,9 +5,63 @@ const execFileAsync = promisify(execFile);
 
 export const RP015_START_SECONDS = 362;
 export const RP015_DURATION_SECONDS = 9.62;
+export const RP015_TUONG_VY_SOURCE_START_SECONDS = 16.22;
+export const RP015_PHUONG_AN_SOURCE_START_SECONDS = 15.42;
 export const RP015_OUTPUT_WIDTH = 1920;
 export const RP015_OUTPUT_HEIGHT = 1080;
 export const RP015_FFMPEG_TIMEOUT_MS = 720_000;
+
+type VideoProbe = {
+  width: number;
+  height: number;
+  duration_seconds: number;
+};
+
+async function probeVideo(path: string): Promise<VideoProbe> {
+  const probe = await execFileAsync(
+    "ffprobe",
+    [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height:format=duration",
+      "-of",
+      "json",
+      path,
+    ],
+    { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8" },
+  );
+  const data = JSON.parse(probe.stdout) as {
+    streams?: Array<{ width?: number; height?: number }>;
+    format?: { duration?: string };
+  };
+  const stream = data.streams?.[0];
+  return {
+    width: Number(stream?.width ?? 0),
+    height: Number(stream?.height ?? 0),
+    duration_seconds: Number(data.format?.duration),
+  };
+}
+
+function assertSourceWindow(
+  label: string,
+  probe: VideoProbe,
+  startSeconds: number,
+) {
+  const requiredEnd = startSeconds + RP015_DURATION_SECONDS;
+  if (
+    probe.width <= 0 ||
+    probe.height <= 0 ||
+    !Number.isFinite(probe.duration_seconds) ||
+    probe.duration_seconds + 0.05 < requiredEnd
+  ) {
+    throw new Error(
+      `Nguồn ${label} không đủ cho RP015: cần đến ${requiredEnd.toFixed(2)}s, thực tế ${probe.duration_seconds || 0}s/${probe.width}x${probe.height}`,
+    );
+  }
+}
 
 export function buildMvDuetBaseCompositeFfmpegArgs(
   tuongVyInputPath: string,
@@ -26,13 +80,13 @@ export function buildMvDuetBaseCompositeFfmpegArgs(
     "error",
     "-y",
     "-ss",
-    String(RP015_START_SECONDS),
+    String(RP015_TUONG_VY_SOURCE_START_SECONDS),
     "-t",
     String(RP015_DURATION_SECONDS),
     "-i",
     tuongVyInputPath,
     "-ss",
-    String(RP015_START_SECONDS),
+    String(RP015_PHUONG_AN_SOURCE_START_SECONDS),
     "-t",
     String(RP015_DURATION_SECONDS),
     "-i",
@@ -63,6 +117,21 @@ export async function executeMvDuetBaseComposite(
   phuongAnInputPath: string,
   outputPath: string,
 ) {
+  const [tuongVyProbe, phuongAnProbe] = await Promise.all([
+    probeVideo(tuongVyInputPath),
+    probeVideo(phuongAnInputPath),
+  ]);
+  assertSourceWindow(
+    "Tường Vy",
+    tuongVyProbe,
+    RP015_TUONG_VY_SOURCE_START_SECONDS,
+  );
+  assertSourceWindow(
+    "Phương An",
+    phuongAnProbe,
+    RP015_PHUONG_AN_SOURCE_START_SECONDS,
+  );
+
   const args = buildMvDuetBaseCompositeFfmpegArgs(
     tuongVyInputPath,
     phuongAnInputPath,
@@ -73,6 +142,14 @@ export async function executeMvDuetBaseComposite(
     event: "MV_DUET_BASE_COMPOSITE_FFMPEG_STARTED",
     render_unit_id: "RP015",
     timeout_ms: RP015_FFMPEG_TIMEOUT_MS,
+    source_offsets: {
+      tuong_vy_start_seconds: RP015_TUONG_VY_SOURCE_START_SECONDS,
+      phuong_an_start_seconds: RP015_PHUONG_AN_SOURCE_START_SECONDS,
+    },
+    source_durations: {
+      tuong_vy_seconds: tuongVyProbe.duration_seconds,
+      phuong_an_seconds: phuongAnProbe.duration_seconds,
+    },
   }));
   try {
     await execFileAsync("ffmpeg", args, {
@@ -107,40 +184,28 @@ export async function executeMvDuetBaseComposite(
     elapsed_ms: Date.now() - startedAt,
   }));
 
-  const probe = await execFileAsync(
-    "ffprobe",
-    [
-      "-v",
-      "error",
-      "-select_streams",
-      "v:0",
-      "-show_entries",
-      "stream=width,height:format=duration",
-      "-of",
-      "json",
-      outputPath,
-    ],
-    { timeout: 30_000, maxBuffer: 1024 * 1024 },
-  );
-  const data = JSON.parse(probe.stdout) as {
-    streams?: Array<{ width?: number; height?: number }>;
-    format?: { duration?: string };
-  };
-  const stream = data.streams?.[0];
-  const duration = Number(data.format?.duration);
+  const outputProbe = await probeVideo(outputPath);
   if (
-    stream?.width !== RP015_OUTPUT_WIDTH ||
-    stream?.height !== RP015_OUTPUT_HEIGHT ||
-    !Number.isFinite(duration) ||
-    Math.abs(duration - RP015_DURATION_SECONDS) > 0.2
+    outputProbe.width !== RP015_OUTPUT_WIDTH ||
+    outputProbe.height !== RP015_OUTPUT_HEIGHT ||
+    !Number.isFinite(outputProbe.duration_seconds) ||
+    Math.abs(outputProbe.duration_seconds - RP015_DURATION_SECONDS) > 0.2
   ) {
     throw new Error(
-      `RP015 composite output không đạt 1920x1080/9.62s: ${stream?.width ?? 0}x${stream?.height ?? 0}/${duration || 0}s`,
+      `RP015 composite output không đạt 1920x1080/9.62s: ${outputProbe.width}x${outputProbe.height}/${outputProbe.duration_seconds || 0}s`,
     );
   }
   return {
-    width: stream.width,
-    height: stream.height,
-    duration_seconds: duration,
+    width: outputProbe.width,
+    height: outputProbe.height,
+    duration_seconds: outputProbe.duration_seconds,
+    source_offsets: {
+      tuong_vy_start_seconds: RP015_TUONG_VY_SOURCE_START_SECONDS,
+      phuong_an_start_seconds: RP015_PHUONG_AN_SOURCE_START_SECONDS,
+    },
+    source_durations: {
+      tuong_vy_seconds: tuongVyProbe.duration_seconds,
+      phuong_an_seconds: phuongAnProbe.duration_seconds,
+    },
   };
 }
