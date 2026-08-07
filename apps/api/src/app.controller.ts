@@ -147,7 +147,7 @@ export class AppController {
   }
 
   @Post("projects/:projectId/create-rp015-final-proof")
-  createRp015FinalProof(@Param("projectId") projectId: string) {
-    return this.intakeService.createRp015FinalProof(projectId);
+  createRp015FinalProof(@Param("projectId") projectId: string, @Body() body: unknown) {
+    return this.intakeService.createRp015FinalProof(projectId, body);
   }
 }
