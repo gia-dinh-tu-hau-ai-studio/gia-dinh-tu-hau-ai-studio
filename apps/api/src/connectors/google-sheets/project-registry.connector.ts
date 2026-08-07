@@ -21,6 +21,7 @@ import {
   executeRp015FinalProof,
   inspectAudioAsset,
   isDriveAudioCandidate,
+  RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS,
   RP015_DURATION_SECONDS,
   RP015_MASTER_AUDIO_START_SECONDS,
 } from "../../media/mv-duet-base-composite.executor";
@@ -388,6 +389,9 @@ export type CreatedRp015FinalProof = {
   audio_source: "VOCAL_MASTER";
   audio_mean_db: number;
   audio_max_db: number;
+  audio_start_seconds: number;
+  audio_end_drift_seconds: number;
+  audio_window_adjusted: boolean;
   provider_execution_allowed: false;
   render_allowed: false;
   created_at: string;
@@ -5180,19 +5184,23 @@ export class ProjectRegistryConnector {
         await pipeline(response.data as Readable, createWriteStream(destination));
       };
       await Promise.all([download(tuongVyFileId, tuongVyPath), download(phuongAnFileId, phuongAnPath), download(vocalMasterFileId, audioPath)]);
+      let audioInspection;
       try {
-        await inspectAudioAsset(audioPath, {
+        audioInspection = await inspectAudioAsset(audioPath, {
           requiredStartSeconds: RP015_MASTER_AUDIO_START_SECONDS,
           requiredDurationSeconds: RP015_DURATION_SECONDS,
           minimumMeanDb: -45,
           minimumMaxDb: -40,
+          maximumEndDriftSeconds: RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS,
         });
       } catch (error) {
         throw new ProjectRegistryInvalidStateError(
           `Vocal master không đạt kiểm tra nội dung bằng ffprobe/ffmpeg: ${error instanceof Error ? error.message : "lỗi không xác định"}`,
         );
       }
-      const proof = await executeRp015FinalProof(tuongVyPath, phuongAnPath, audioPath, outputPath);
+      const proof = await executeRp015FinalProof(tuongVyPath, phuongAnPath, audioPath, outputPath, {
+        audioStartSeconds: audioInspection.inspected_start_seconds,
+      });
       if ((await stat(outputPath)).size <= 0) throw new ProjectRegistryInvalidStateError("FFmpeg không tạo được RP015 final proof");
       const compositeFolder = await this.findChildFolder(drive, projectFolderId, "03_ORIGINAL_FACE_COMPOSITE");
       const outputName = `MV_DUET_CUT_PROOF_RP015_V3_${projectId}.mp4`;
@@ -5210,12 +5218,14 @@ export class ProjectRegistryConnector {
         duration_seconds: proof.duration_seconds, width: 1920, height: 1080, has_audio: true,
         edit_mode: "FULL_FRAME_DUET_CUTS", layout_version: "FULL_FRAME_ALTERNATING_V3", voice_pilot_approval_id: voicePilotApprovalId, audio_source: "VOCAL_MASTER",
         audio_mean_db: proof.audio_mean_db, audio_max_db: proof.audio_max_db,
+        audio_start_seconds: proof.audio_start_seconds, audio_end_drift_seconds: audioInspection.end_drift_seconds,
+        audio_window_adjusted: audioInspection.window_adjusted,
         provider_execution_allowed: false, render_allowed: false, created_at: createdAt, idempotent_replay: false,
       };
       const jobRow = jobs.length + 1; const auditRow = (auditResponse.data.values ?? []).length + 1;
       await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
         { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[randomUUID(), projectId, "PRE_PRODUCTION", MV_RP015_FINAL_PROOF_JOB_TYPE, "SUCCEEDED", "LOCAL_FFMPEG", JSON.stringify([tuongVyFileId, phuongAnFileId, vocalMasterFileId]), JSON.stringify([outputFileId]), JSON.stringify(result), 2, createdAt, createdAt, createdAt, createdAt]] },
-        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_DUET_CUT_PROOF_V3_CREATED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã tạo RP015 V3 cắt luân phiên từng nhân vật toàn khung với vocal master; loudness mean=${proof.audio_mean_db}dB/max=${proof.audio_max_db}dB; không gọi provider và không thay đổi rollout.`, createdAt]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_DUET_CUT_PROOF_V3_CREATED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã tạo RP015 V3 cắt luân phiên từng nhân vật toàn khung với vocal master; loudness mean=${proof.audio_mean_db}dB/max=${proof.audio_max_db}dB; audio_start=${proof.audio_start_seconds}s; end_drift=${audioInspection.end_drift_seconds}s; không gọi provider và không thay đổi rollout.`, createdAt]] },
       ] } });
       return result;
     } catch (error) {

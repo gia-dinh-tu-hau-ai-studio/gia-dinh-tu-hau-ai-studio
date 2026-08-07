@@ -17,6 +17,7 @@ export const RP015_MASTER_AUDIO_START_SECONDS = 362;
 export const RP015_DUET_CUT_POINTS_SECONDS = [1.92, 3.84, 5.76, 7.68] as const;
 export const RP015_MIN_AUDIO_MEAN_DB = -45;
 export const RP015_MIN_AUDIO_MAX_DB = -40;
+export const RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS = 0.5;
 
 const DRIVE_AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
 const DRIVE_AUDIO_APPLICATION_MIME_TYPES = new Set([
@@ -37,6 +38,25 @@ export function isDriveAudioCandidate(nameInput: string, mimeTypeInput: string, 
   );
 }
 
+export function resolveAudioWindowStart(
+  durationSeconds: number,
+  requestedStartSeconds: number,
+  requestedDurationSeconds: number,
+  maximumEndDriftSeconds = 0,
+) {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) throw new Error("Audio không có thời lượng hợp lệ");
+  if (!Number.isFinite(requestedStartSeconds) || requestedStartSeconds < 0 || !Number.isFinite(requestedDurationSeconds) || requestedDurationSeconds <= 0) {
+    throw new Error("Cửa sổ audio yêu cầu không hợp lệ");
+  }
+  const requestedEndSeconds = requestedStartSeconds + requestedDurationSeconds;
+  const endDriftSeconds = Math.max(0, requestedEndSeconds - durationSeconds);
+  if (endDriftSeconds <= 0.05) return { start_seconds: requestedStartSeconds, end_drift_seconds: endDriftSeconds, adjusted: false as const };
+  if (endDriftSeconds > maximumEndDriftSeconds || durationSeconds < requestedDurationSeconds) {
+    throw new Error(`Audio không đủ thời lượng: cần đến ${requestedEndSeconds.toFixed(2)}s, thực tế ${durationSeconds || 0}s, sai lệch ${endDriftSeconds.toFixed(4)}s`);
+  }
+  return { start_seconds: Number((durationSeconds - requestedDurationSeconds).toFixed(6)), end_drift_seconds: Number(endDriftSeconds.toFixed(6)), adjusted: true as const };
+}
+
 export type AudioAssetInspection = {
   codec_name: string;
   sample_rate_hz: number;
@@ -46,6 +66,8 @@ export type AudioAssetInspection = {
   inspected_duration_seconds: number;
   mean_volume_db: number;
   max_volume_db: number;
+  end_drift_seconds: number;
+  window_adjusted: boolean;
 };
 
 export async function inspectAudioAsset(
@@ -55,6 +77,7 @@ export async function inspectAudioAsset(
     requiredDurationSeconds?: number;
     minimumMeanDb?: number;
     minimumMaxDb?: number;
+    maximumEndDriftSeconds?: number;
   },
 ): Promise<AudioAssetInspection> {
   const requiredStartSeconds = options?.requiredStartSeconds ?? 0;
@@ -72,15 +95,12 @@ export async function inspectAudioAsset(
   };
   const stream = data.streams?.[0];
   const durationSeconds = Number(data.format?.duration ?? 0);
-  const requiredEndSeconds = requiredStartSeconds + requiredDurationSeconds;
   if (!stream?.codec_name) throw new Error("FFprobe không tìm thấy audio stream");
-  if (!Number.isFinite(durationSeconds) || durationSeconds + 0.05 < requiredEndSeconds) {
-    throw new Error(`Audio không đủ thời lượng: cần đến ${requiredEndSeconds.toFixed(2)}s, thực tế ${durationSeconds || 0}s`);
-  }
+  const window = resolveAudioWindowStart(durationSeconds, requiredStartSeconds, requiredDurationSeconds, options?.maximumEndDriftSeconds ?? 0);
   const loudness = await execFileAsync(
     "ffmpeg",
     [
-      "-hide_banner", "-ss", String(requiredStartSeconds), "-t", String(requiredDurationSeconds),
+      "-hide_banner", "-ss", String(window.start_seconds), "-t", String(requiredDurationSeconds),
       "-i", inputPath, "-vn", "-af", "volumedetect", "-f", "null", "-",
     ],
     { timeout: 60_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
@@ -95,10 +115,12 @@ export async function inspectAudioAsset(
     sample_rate_hz: Number(stream.sample_rate ?? 0),
     channels: Number(stream.channels ?? 0),
     duration_seconds: durationSeconds,
-    inspected_start_seconds: requiredStartSeconds,
+    inspected_start_seconds: window.start_seconds,
     inspected_duration_seconds: requiredDurationSeconds,
     mean_volume_db: meanDb,
     max_volume_db: maxDb,
+    end_drift_seconds: window.end_drift_seconds,
+    window_adjusted: window.adjusted,
   };
 }
 
@@ -535,7 +557,9 @@ export function buildRp015FinalProofFfmpegArgs(
   phuongAnInputPath: string,
   vocalMasterInputPath: string,
   outputPath: string,
+  options?: { audioStartSeconds?: number },
 ) {
+  const audioStartSeconds = options?.audioStartSeconds ?? RP015_MASTER_AUDIO_START_SECONDS;
   const filter = [
     "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,split=3[tv0][tv1][tv2]",
     "[1:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,split=2[pa0][pa1]",
@@ -550,7 +574,7 @@ export function buildRp015FinalProofFfmpegArgs(
     "-hide_banner", "-loglevel", "error", "-y",
     "-ss", String(RP015_TUONG_VY_SOURCE_START_SECONDS), "-t", String(RP015_DURATION_SECONDS), "-i", tuongVyInputPath,
     "-ss", String(RP015_PHUONG_AN_SOURCE_START_SECONDS), "-t", String(RP015_DURATION_SECONDS), "-i", phuongAnInputPath,
-    "-ss", String(RP015_MASTER_AUDIO_START_SECONDS),
+    "-ss", String(audioStartSeconds),
     "-t", String(RP015_DURATION_SECONDS),
     "-i", vocalMasterInputPath,
     "-filter_complex", filter,
@@ -566,10 +590,11 @@ export async function executeRp015FinalProof(
   phuongAnInputPath: string,
   vocalMasterInputPath: string,
   outputPath: string,
+  options?: { audioStartSeconds?: number },
 ) {
   await execFileAsync(
     "ffmpeg",
-    buildRp015FinalProofFfmpegArgs(tuongVyInputPath, phuongAnInputPath, vocalMasterInputPath, outputPath),
+    buildRp015FinalProofFfmpegArgs(tuongVyInputPath, phuongAnInputPath, vocalMasterInputPath, outputPath, options),
     { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
   );
   const probe = await execFileAsync(
@@ -598,5 +623,5 @@ export async function executeRp015FinalProof(
   if (!Number.isFinite(meanDb) || !Number.isFinite(maxDb) || meanDb < RP015_MIN_AUDIO_MEAN_DB || maxDb < RP015_MIN_AUDIO_MAX_DB) {
     throw new Error(`RP015 vocal master không nghe được: mean=${meanDb}dB, max=${maxDb}dB`);
   }
-  return { width: video.width, height: video.height, duration_seconds: duration, has_audio: true as const, audio_mean_db: meanDb, audio_max_db: maxDb };
+  return { width: video.width, height: video.height, duration_seconds: duration, has_audio: true as const, audio_mean_db: meanDb, audio_max_db: maxDb, audio_start_seconds: options?.audioStartSeconds ?? RP015_MASTER_AUDIO_START_SECONDS };
 }
