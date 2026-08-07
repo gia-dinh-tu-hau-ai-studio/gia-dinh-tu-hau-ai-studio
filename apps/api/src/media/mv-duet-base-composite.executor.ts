@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { parse, join } from "node:path";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { dirname, parse, join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 
@@ -20,6 +20,9 @@ export const RP015_MIN_AUDIO_MAX_DB = -40;
 export const RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS = 0.5;
 export const RP015_AUDIO_PROOF_MAX_LOOKBACK_SECONDS = 30;
 export const RP015_AUDIO_PROOF_LOOKBACK_STEP_SECONDS = 1;
+export const RP015_V4_SEGMENTATION_FPS = 12;
+export const RP015_V4_BACKGROUND_PATH = "/app/assets/RP015_V4_PRO_STAGE_BACKGROUND_1920x1080.png";
+export const RP015_V4_SEGMENTATION_SCRIPT_PATH = "/app/scripts/rp015_remove_background.py";
 
 const DRIVE_AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
 const DRIVE_AUDIO_APPLICATION_MIME_TYPES = new Set([
@@ -589,33 +592,32 @@ export async function executeMvDuetBaseCompositeUnit(
   };
 }
 
-export function buildRp015FinalProofFfmpegArgs(
-  tuongVyInputPath: string,
-  phuongAnInputPath: string,
+export function buildRp015FinalProofV4FfmpegArgs(
+  backgroundPath: string,
+  tuongVyAlphaPattern: string,
+  phuongAnAlphaPattern: string,
   vocalMasterInputPath: string,
   outputPath: string,
   options?: { audioStartSeconds?: number },
 ) {
   const audioStartSeconds = options?.audioStartSeconds ?? RP015_MASTER_AUDIO_START_SECONDS;
   const filter = [
-    "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,split=3[tv0][tv1][tv2]",
-    "[1:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,split=2[pa0][pa1]",
-    "[tv0]trim=start=0:end=1.92,setpts=PTS-STARTPTS[c0]",
-    "[pa0]trim=start=1.92:end=3.84,setpts=PTS-STARTPTS[c1]",
-    "[tv1]trim=start=3.84:end=5.76,setpts=PTS-STARTPTS[c2]",
-    "[pa1]trim=start=5.76:end=7.68,setpts=PTS-STARTPTS[c3]",
-    "[tv2]trim=start=7.68:end=9.62,setpts=PTS-STARTPTS[c4]",
-    "[c0][c1][c2][c3][c4]concat=n=5:v=1:a=0[outv]",
+    "[0:v]scale=1920:1080,setsar=1[stage]",
+    "[1:v]format=rgba,scale=-2:900:force_original_aspect_ratio=decrease[tuongvy]",
+    "[2:v]format=rgba,scale=-2:900:force_original_aspect_ratio=decrease[phuongan]",
+    "[stage][tuongvy]overlay=x=650-w/2:y=H-h-55:format=auto[tmp]",
+    "[tmp][phuongan]overlay=x=1270-w/2:y=H-h-55:format=auto[outv]",
   ].join(";");
   return [
     "-hide_banner", "-loglevel", "error", "-y",
-    "-ss", String(RP015_TUONG_VY_SOURCE_START_SECONDS), "-t", String(RP015_DURATION_SECONDS), "-i", tuongVyInputPath,
-    "-ss", String(RP015_PHUONG_AN_SOURCE_START_SECONDS), "-t", String(RP015_DURATION_SECONDS), "-i", phuongAnInputPath,
+    "-loop", "1", "-t", String(RP015_DURATION_SECONDS), "-i", backgroundPath,
+    "-framerate", String(RP015_V4_SEGMENTATION_FPS), "-t", String(RP015_DURATION_SECONDS), "-i", tuongVyAlphaPattern,
+    "-framerate", String(RP015_V4_SEGMENTATION_FPS), "-t", String(RP015_DURATION_SECONDS), "-i", phuongAnAlphaPattern,
     "-ss", String(audioStartSeconds),
     "-t", String(RP015_DURATION_SECONDS),
     "-i", vocalMasterInputPath,
     "-filter_complex", filter,
-    "-map", "[outv]", "-map", "2:a:0",
+    "-map", "[outv]", "-map", "3:a:0",
     "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "192k",
     "-shortest", "-movflags", "+faststart", outputPath,
@@ -629,11 +631,31 @@ export async function executeRp015FinalProof(
   outputPath: string,
   options?: { audioStartSeconds?: number },
 ) {
-  await execFileAsync(
+  const workDirectory = join(dirname(outputPath), "rp015-v4-segmentation");
+  const tvFrames = join(workDirectory, "tuong-vy-source");
+  const paFrames = join(workDirectory, "phuong-an-source");
+  const tvAlpha = join(workDirectory, "tuong-vy-alpha");
+  const paAlpha = join(workDirectory, "phuong-an-alpha");
+  await Promise.all([mkdir(tvFrames, { recursive: true }), mkdir(paFrames, { recursive: true }), mkdir(tvAlpha, { recursive: true }), mkdir(paAlpha, { recursive: true })]);
+  const extractFrames = (inputPath: string, startSeconds: number, outputPattern: string) => execFileAsync(
     "ffmpeg",
-    buildRp015FinalProofFfmpegArgs(tuongVyInputPath, phuongAnInputPath, vocalMasterInputPath, outputPath, options),
+    ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(startSeconds), "-t", String(RP015_DURATION_SECONDS), "-i", inputPath, "-vf", `fps=${RP015_V4_SEGMENTATION_FPS}`, outputPattern],
     { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
   );
+  await Promise.all([
+    extractFrames(tuongVyInputPath, RP015_TUONG_VY_SOURCE_START_SECONDS, join(tvFrames, "%06d.png")),
+    extractFrames(phuongAnInputPath, RP015_PHUONG_AN_SOURCE_START_SECONDS, join(paFrames, "%06d.png")),
+  ]);
+  await execFileAsync("python3", [RP015_V4_SEGMENTATION_SCRIPT_PATH, tvFrames, tvAlpha], { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+  await execFileAsync("python3", [RP015_V4_SEGMENTATION_SCRIPT_PATH, paFrames, paAlpha], { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+  await execFileAsync("ffmpeg", buildRp015FinalProofV4FfmpegArgs(
+    RP015_V4_BACKGROUND_PATH,
+    join(tvAlpha, "%06d.png"),
+    join(paAlpha, "%06d.png"),
+    vocalMasterInputPath,
+    outputPath,
+    options,
+  ), { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
   const probe = await execFileAsync(
     "ffprobe",
     ["-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height:format=duration", "-of", "json", outputPath],

@@ -40,7 +40,7 @@ import {
   buildVoiceReferenceSeparationArgs,
   resolveDemucsVocalsPath,
   buildMvDuetBaseCompositeFfmpegArgs,
-  buildRp015FinalProofFfmpegArgs,
+  buildRp015FinalProofV4FfmpegArgs,
   classifyVoiceReference,
   isDriveAudioCandidate,
   parseVoiceReferenceLoudness,
@@ -228,7 +228,7 @@ test("khôi phục Voice Reference Pilot khi approval đã APPROVED nhưng job c
   assert.equal(result.idempotent_replay, false);
 });
 
-test("Final Proof V3 chọn đúng Voice Pilot APPROVED mới nhất", () => {
+test("Final Proof V4 chọn đúng Voice Pilot APPROVED mới nhất", () => {
   const projectId = "GDTH-MV-20260804092100-63D8";
   const jobs = [
     ["job_id", "project_id", "stage", "job_type", "status"],
@@ -245,7 +245,7 @@ test("Final Proof V3 chọn đúng Voice Pilot APPROVED mới nhất", () => {
   assert.equal(selected.approval_id, "approval-current");
 });
 
-test("Final Proof V3 từ chối Voice Pilot mới nhất chưa APPROVED", () => {
+test("Final Proof V4 từ chối Voice Pilot mới nhất chưa APPROVED", () => {
   const projectId = "GDTH-MV-20260804092100-63D8";
   const jobs = [
     ["job_id", "project_id", "stage", "job_type", "status"],
@@ -1642,14 +1642,16 @@ test("FFmpeg rollout lặp riêng cả hai input nhưng RP015 không bị thay �
   assert.equal(pilotArgs.includes("-stream_loop"), false);
 });
 
-test("RP015 final proof cắt luân phiên hai nguồn toàn khung và dùng vocal master", () => {
-  const args = buildRp015FinalProofFfmpegArgs("tuong-vy.mp4", "phuong-an.mp4", "vocal-master.wav", "proof.mp4");
+test("RP015 Final Proof V4 ghép hai lớp người trong suốt vào cùng sân khấu và dùng vocal master", () => {
+  const args = buildRp015FinalProofV4FfmpegArgs("stage.png", "tv/%06d.png", "pa/%06d.png", "vocal-master.wav", "proof.mp4");
   const filter = args[args.indexOf("-filter_complex") + 1];
-  assert.ok(filter.includes("concat=n=5:v=1:a=0[outv]"));
+  assert.ok(filter.includes("[stage][tuongvy]overlay"));
+  assert.ok(filter.includes("[tmp][phuongan]overlay"));
   assert.ok(filter.includes("scale=1920:1080"));
   assert.equal(filter.includes("hstack"), false);
+  assert.equal(filter.includes("concat="), false);
   assert.ok(args.includes("[outv]"));
-  assert.ok(args.includes("2:a:0"));
+  assert.ok(args.includes("3:a:0"));
   assert.equal(args.includes("copy"), false);
   assert.ok(args.includes("aac"));
   assert.ok(args.includes("192k"));

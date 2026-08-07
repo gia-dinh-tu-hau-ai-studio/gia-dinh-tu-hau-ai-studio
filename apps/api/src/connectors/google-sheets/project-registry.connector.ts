@@ -385,8 +385,8 @@ export type CreatedRp015FinalProof = {
   width: 1920;
   height: 1080;
   has_audio: true;
-  edit_mode: "FULL_FRAME_DUET_CUTS";
-  layout_version: "FULL_FRAME_ALTERNATING_V3";
+  edit_mode: "DUET_STAGE_BACKGROUND_REMOVAL";
+  layout_version: "NATURAL_DUET_STAGE_V4";
   voice_pilot_approval_id: string;
   audio_source: "VOCAL_MASTER";
   audio_mean_db: number;
@@ -509,7 +509,7 @@ const MV_DUET_BASE_COMPOSITE_REVIEW_APPROVAL_TYPE = "MV_DUET_BASE_COMPOSITE_REVI
 const MV_DUET_BASE_COMPOSITE_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_V1";
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE = "MV_DUET_BASE_COMPOSITE_ROLLOUT";
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_ROLLOUT_V1";
-const MV_RP015_FINAL_PROOF_JOB_TYPE = "MV_RP015_DUET_CUT_PROOF_V3";
+const MV_RP015_FINAL_PROOF_JOB_TYPE = "MV_RP015_NATURAL_DUET_STAGE_PROOF_V4";
 const MV_RP015_VOCAL_PILOT_JOB_TYPE = "MV_RP015_VOCAL_PILOT_PREPARATION";
 const MV_RP015_LEGACY_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_CLEAN_VOICE_REFERENCES";
 const MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_DEMUCS_VOCAL_STEMS_V2";
@@ -5208,7 +5208,7 @@ export class ProjectRegistryConnector {
       });
       if ((await stat(outputPath)).size <= 0) throw new ProjectRegistryInvalidStateError("FFmpeg không tạo được RP015 final proof");
       const compositeFolder = await this.findChildFolder(drive, projectFolderId, "03_ORIGINAL_FACE_COMPOSITE");
-      const outputName = `MV_DUET_CUT_PROOF_RP015_V3_${projectId}.mp4`;
+      const outputName = `MV_NATURAL_DUET_STAGE_PROOF_RP015_V4_${projectId}.mp4`;
       const existingOutput = await drive.files.list({ q: `'${compositeFolder.id}' in parents and name='${outputName}' and trashed=false`, fields: "files(id,webViewLink)", spaces: "drive", supportsAllDrives: true, includeItemsFromAllDrives: true });
       const outputFile = existingOutput.data.files?.[0]?.id
         ? await drive.files.update({ fileId: existingOutput.data.files[0].id!, media: { mimeType: "video/mp4", body: createReadStream(outputPath) }, fields: "id,webViewLink", supportsAllDrives: true })
@@ -5221,7 +5221,7 @@ export class ProjectRegistryConnector {
         render_unit_id: "RP015", proof_status: "SUCCEEDED", output_file_id: outputFileId,
         output_file_url: outputFile.data.webViewLink ?? `https://drive.google.com/file/d/${outputFileId}/view`,
         duration_seconds: proof.duration_seconds, width: 1920, height: 1080, has_audio: true,
-        edit_mode: "FULL_FRAME_DUET_CUTS", layout_version: "FULL_FRAME_ALTERNATING_V3", voice_pilot_approval_id: voicePilotApprovalId, audio_source: "VOCAL_MASTER",
+        edit_mode: "DUET_STAGE_BACKGROUND_REMOVAL", layout_version: "NATURAL_DUET_STAGE_V4", voice_pilot_approval_id: voicePilotApprovalId, audio_source: "VOCAL_MASTER",
         audio_mean_db: proof.audio_mean_db, audio_max_db: proof.audio_max_db,
         audio_start_seconds: proof.audio_start_seconds, audio_end_drift_seconds: audioInspection.end_drift_seconds,
         audio_lookback_seconds: audioInspection.lookback_seconds, audio_window_adjusted: audioInspection.window_adjusted,
@@ -5230,7 +5230,7 @@ export class ProjectRegistryConnector {
       const jobRow = jobs.length + 1; const auditRow = (auditResponse.data.values ?? []).length + 1;
       await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
         { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[randomUUID(), projectId, "PRE_PRODUCTION", MV_RP015_FINAL_PROOF_JOB_TYPE, "SUCCEEDED", "LOCAL_FFMPEG", JSON.stringify([tuongVyFileId, phuongAnFileId, vocalMasterFileId]), JSON.stringify([outputFileId]), JSON.stringify(result), 2, createdAt, createdAt, createdAt, createdAt]] },
-        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_DUET_CUT_PROOF_V3_CREATED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã tạo RP015 V3 cắt luân phiên từng nhân vật toàn khung với vocal master; loudness mean=${proof.audio_mean_db}dB/max=${proof.audio_max_db}dB; audio_start=${proof.audio_start_seconds}s; end_drift=${audioInspection.end_drift_seconds}s; lookback=${audioInspection.lookback_seconds}s; không gọi provider và không thay đổi rollout.`, createdAt]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_NATURAL_DUET_STAGE_PROOF_V4_CREATED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã tách nền hai nguồn và ghép Tường Vy - Phương An cùng sân khấu V4; kiểm chứng audio sau mux mean=${proof.audio_mean_db}dB/max=${proof.audio_max_db}dB; audio_start=${proof.audio_start_seconds}s; end_drift=${audioInspection.end_drift_seconds}s; lookback=${audioInspection.lookback_seconds}s; không gọi provider và không thay đổi rollout.`, createdAt]] },
       ] } });
       return result;
     } catch (error) {
