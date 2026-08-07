@@ -24,6 +24,13 @@ export const RP015_V4_SEGMENTATION_FPS = 12;
 export const RP015_V4_BACKGROUND_PATH = "/app/assets/RP015_V4_PRO_STAGE_BACKGROUND_1920x1080.png";
 export const RP015_V4_SEGMENTATION_SCRIPT_PATH = "/app/scripts/rp015_remove_background.py";
 
+export type Rp015FinalProofExecutionStage =
+  | "EXTRACTING_FRAMES"
+  | "REMOVING_TUONG_VY_BACKGROUND"
+  | "REMOVING_PHUONG_AN_BACKGROUND"
+  | "COMPOSITING"
+  | "VERIFYING_OUTPUT";
+
 const DRIVE_AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
 const DRIVE_AUDIO_APPLICATION_MIME_TYPES = new Set([
   "application/mp3",
@@ -629,7 +636,11 @@ export async function executeRp015FinalProof(
   phuongAnInputPath: string,
   vocalMasterInputPath: string,
   outputPath: string,
-  options?: { audioStartSeconds?: number },
+  options?: {
+    audioStartSeconds?: number;
+    signal?: AbortSignal;
+    onStage?: (stage: Rp015FinalProofExecutionStage) => void | Promise<void>;
+  },
 ) {
   const workDirectory = join(dirname(outputPath), "rp015-v4-segmentation");
   const tvFrames = join(workDirectory, "tuong-vy-source");
@@ -637,17 +648,22 @@ export async function executeRp015FinalProof(
   const tvAlpha = join(workDirectory, "tuong-vy-alpha");
   const paAlpha = join(workDirectory, "phuong-an-alpha");
   await Promise.all([mkdir(tvFrames, { recursive: true }), mkdir(paFrames, { recursive: true }), mkdir(tvAlpha, { recursive: true }), mkdir(paAlpha, { recursive: true })]);
+  const runStage = async (stage: Rp015FinalProofExecutionStage) => options?.onStage?.(stage);
   const extractFrames = (inputPath: string, startSeconds: number, outputPattern: string) => execFileAsync(
     "ffmpeg",
     ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(startSeconds), "-t", String(RP015_DURATION_SECONDS), "-i", inputPath, "-vf", `fps=${RP015_V4_SEGMENTATION_FPS}`, outputPattern],
-    { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
+    { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, signal: options?.signal },
   );
+  await runStage("EXTRACTING_FRAMES");
   await Promise.all([
     extractFrames(tuongVyInputPath, RP015_TUONG_VY_SOURCE_START_SECONDS, join(tvFrames, "%06d.png")),
     extractFrames(phuongAnInputPath, RP015_PHUONG_AN_SOURCE_START_SECONDS, join(paFrames, "%06d.png")),
   ]);
-  await execFileAsync("python3", [RP015_V4_SEGMENTATION_SCRIPT_PATH, tvFrames, tvAlpha], { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
-  await execFileAsync("python3", [RP015_V4_SEGMENTATION_SCRIPT_PATH, paFrames, paAlpha], { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+  await runStage("REMOVING_TUONG_VY_BACKGROUND");
+  await execFileAsync("python3", [RP015_V4_SEGMENTATION_SCRIPT_PATH, tvFrames, tvAlpha], { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, signal: options?.signal });
+  await runStage("REMOVING_PHUONG_AN_BACKGROUND");
+  await execFileAsync("python3", [RP015_V4_SEGMENTATION_SCRIPT_PATH, paFrames, paAlpha], { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, signal: options?.signal });
+  await runStage("COMPOSITING");
   await execFileAsync("ffmpeg", buildRp015FinalProofV4FfmpegArgs(
     RP015_V4_BACKGROUND_PATH,
     join(tvAlpha, "%06d.png"),
@@ -655,11 +671,12 @@ export async function executeRp015FinalProof(
     vocalMasterInputPath,
     outputPath,
     options,
-  ), { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+  ), { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, signal: options?.signal });
+  await runStage("VERIFYING_OUTPUT");
   const probe = await execFileAsync(
     "ffprobe",
     ["-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height:format=duration", "-of", "json", outputPath],
-    { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8" },
+    { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8", signal: options?.signal },
   );
   const data = JSON.parse(probe.stdout) as {
     streams?: Array<{ codec_type?: string; codec_name?: string; width?: number; height?: number }>;
@@ -675,7 +692,7 @@ export async function executeRp015FinalProof(
   const loudness = await execFileAsync(
     "ffmpeg",
     ["-hide_banner", "-i", outputPath, "-vn", "-af", "volumedetect", "-f", "null", "-"],
-    { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
+    { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8", signal: options?.signal },
   );
   const meanDb = Number(loudness.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
   const maxDb = Number(loudness.stderr.match(/max_volume:\s*(-?[\d.]+) dB/)?.[1]);
