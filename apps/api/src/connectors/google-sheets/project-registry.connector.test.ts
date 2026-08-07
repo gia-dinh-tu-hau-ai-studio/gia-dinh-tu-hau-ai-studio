@@ -31,6 +31,7 @@ import {
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
   planRp015CleanVoiceReferencesApproval,
+  planRp015VocalPilotApproval,
 } from "./project-registry.connector";
 import {
   buildVoiceReferenceNormalizationFfmpegArgs,
@@ -102,6 +103,48 @@ test("duyệt lại vocal stem Demucs đã APPROVED là idempotent", () => {
   const result = planRp015CleanVoiceReferencesApproval(project, job, approval);
   assert.equal(result.idempotent_replay, true);
   assert.equal(result.approved_at, "2026-08-07T10:10:00.000Z");
+});
+
+test("duyệt hai Voice Reference Pilot RP015 mở bước Final Proof nhưng giữ khóa an toàn", () => {
+  const project = Array.from({ length: 25 }, () => "");
+  Object.assign(project, { 1: "GDTH-MV-20260804092100-63D8", 3: "MUSIC_VIDEO", 18: "PRE_PRODUCTION" });
+  const job = Array.from({ length: 14 }, () => "");
+  Object.assign(job, {
+    0: "job-vocal-pilot",
+    1: project[1],
+    3: "MV_RP015_VOCAL_PILOT_PREPARATION",
+    4: "AWAITING_APPROVAL",
+    7: JSON.stringify(["manifest-id", "tuong-vy-reference-id", "phuong-an-reference-id"]),
+    8: JSON.stringify({ voice_reference_status: "REFERENCE_CANDIDATE", provider_execution_allowed: false, render_allowed: false }),
+  });
+  const approval = Array.from({ length: 10 }, () => "");
+  Object.assign(approval, { 0: "approval-vocal-pilot", 1: project[1], 2: job[3], 3: job[0], 4: "PENDING" });
+  const result = planRp015VocalPilotApproval(project, job, approval, new Date("2026-08-07T11:30:00.000Z"));
+  assert.equal(result.job_status, "APPROVED");
+  assert.equal(result.approval_status, "APPROVED");
+  assert.equal(result.next_action, "CREATE_RP015_FINAL_PROOF");
+  assert.equal(result.provider_execution_allowed, false);
+  assert.equal(result.render_allowed, false);
+  assert.equal(result.idempotent_replay, false);
+});
+
+test("duyệt lại Voice Reference Pilot RP015 đã APPROVED là idempotent", () => {
+  const project = Array.from({ length: 25 }, () => "");
+  Object.assign(project, { 1: "GDTH-MV-20260804092100-63D8", 3: "MUSIC_VIDEO", 18: "PRE_PRODUCTION" });
+  const job = Array.from({ length: 14 }, () => "");
+  Object.assign(job, {
+    0: "job-vocal-pilot",
+    1: project[1],
+    3: "MV_RP015_VOCAL_PILOT_PREPARATION",
+    4: "APPROVED",
+    7: JSON.stringify(["manifest-id", "tuong-vy-reference-id", "phuong-an-reference-id"]),
+    8: JSON.stringify({ voice_reference_status: "REFERENCE_CANDIDATE", provider_execution_allowed: false, render_allowed: false }),
+  });
+  const approval = Array.from({ length: 10 }, () => "");
+  Object.assign(approval, { 0: "approval-vocal-pilot", 1: project[1], 2: job[3], 3: job[0], 4: "APPROVED", 6: "2026-08-07T11:30:00.000Z" });
+  const result = planRp015VocalPilotApproval(project, job, approval);
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.approved_at, "2026-08-07T11:30:00.000Z");
 });
 
 test("voice reference dùng Demucs two-stems vocals rồi khóa WAV mono 48 kHz", () => {

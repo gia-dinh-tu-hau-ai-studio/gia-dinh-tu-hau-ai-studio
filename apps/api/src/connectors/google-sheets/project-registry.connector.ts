@@ -418,6 +418,20 @@ export type PreparedRp015CleanVoiceReferences = {
   idempotent_replay: boolean;
 };
 
+export type ApprovedRp015VocalPilot = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "CREATE_RP015_FINAL_PROOF";
+  job_id: string;
+  job_status: "APPROVED";
+  approval_id: string;
+  approval_status: "APPROVED";
+  approved_at: string;
+  provider_execution_allowed: false;
+  render_allowed: false;
+  idempotent_replay: boolean;
+};
+
 export type ApprovedRp015CleanVoiceReferences = {
   project_id: string;
   current_stage: "PRE_PRODUCTION";
@@ -2360,6 +2374,46 @@ export function selectNextMvDuetBaseCompositeRolloutUnit(
     String(unit.rollout_status ?? "") !== "SUCCEEDED"
   );
   return { next, completed_count: completed.length, remaining_count: units.length - completed.length };
+}
+
+export function planRp015VocalPilotApproval(
+  projectRow: string[],
+  jobRow: string[] | undefined,
+  approvalRow: string[] | undefined,
+  now = new Date(),
+): ApprovedRp015VocalPilot {
+  const projectId = String(projectRow[1] ?? "").trim();
+  if (!projectId || String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" || String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION") {
+    throw new ProjectRegistryInvalidStateError(`Dự án ${projectId || "EMPTY"} chưa đủ điều kiện duyệt Voice Reference Pilot RP015`);
+  }
+  if (!jobRow || String(jobRow[1] ?? "").trim() !== projectId || String(jobRow[3] ?? "").trim() !== MV_RP015_VOCAL_PILOT_JOB_TYPE) {
+    throw new ProjectRegistryInvalidStateError(`Không tìm thấy job Voice Reference Pilot RP015 của ${projectId}`);
+  }
+  const jobId = String(jobRow[0] ?? "").trim();
+  const result = parseObject(jobRow[8], "MV_RP015_VOCAL_PILOT result") as Record<string, unknown>;
+  const outputFileIds = parseStringArray(jobRow[7]);
+  if (
+    String(result.voice_reference_status ?? "") !== "REFERENCE_CANDIDATE" ||
+    result.provider_execution_allowed !== false ||
+    result.render_allowed !== false ||
+    outputFileIds.length < 3
+  ) {
+    throw new ProjectRegistryInvalidStateError("Hai Voice Reference Pilot RP015 chưa đủ điều kiện phê duyệt");
+  }
+  if (!approvalRow || String(approvalRow[1] ?? "").trim() !== projectId || String(approvalRow[2] ?? "").trim() !== MV_RP015_VOCAL_PILOT_JOB_TYPE || String(approvalRow[3] ?? "").trim() !== jobId) {
+    throw new ProjectRegistryInvalidStateError(`Cổng duyệt Voice Reference Pilot RP015 của ${projectId} không khớp`);
+  }
+  const jobStatus = String(jobRow[4] ?? "").trim();
+  const approvalId = String(approvalRow[0] ?? "").trim();
+  const approvalStatus = String(approvalRow[4] ?? "").trim();
+  const approvedAt = String(approvalRow[6] ?? "").trim() || now.toISOString();
+  if (jobStatus === "APPROVED" && approvalStatus === "APPROVED") {
+    return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "CREATE_RP015_FINAL_PROOF", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: approvedAt, provider_execution_allowed: false, render_allowed: false, idempotent_replay: true };
+  }
+  if (jobStatus !== "AWAITING_APPROVAL" || approvalStatus !== "PENDING") {
+    throw new ProjectRegistryInvalidStateError(`Không thể duyệt Voice Reference Pilot RP015 từ ${jobStatus || "EMPTY"}/${approvalStatus || "EMPTY"}`);
+  }
+  return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "CREATE_RP015_FINAL_PROOF", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: now.toISOString(), provider_execution_allowed: false, render_allowed: false, idempotent_replay: false };
 }
 
 export function planRp015CleanVoiceReferencesApproval(
@@ -4969,6 +5023,41 @@ export class ProjectRegistryConnector {
     } catch (error) {
       if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không duyệt được vocal stem Demucs RP015");
+    }
+  }
+
+  async approveRp015VocalPilot(projectId: string): Promise<ApprovedRp015VocalPilot> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+      ]);
+      const projects = projectsResponse.data.values ?? [];
+      const jobs = jobsResponse.data.values ?? [];
+      const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId);
+      if (projectIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const jobIndex = jobs.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE);
+      const job = jobIndex >= 0 ? jobs[jobIndex].map(String) : undefined;
+      const approvalIndex = approvals.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[2] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE && String(row[3] ?? "").trim() === String(job?.[0] ?? "").trim());
+      const approval = approvalIndex >= 0 ? approvals[approvalIndex].map(String) : undefined;
+      const result = planRp015VocalPilotApproval(projects[projectIndex].map(String), job, approval);
+      if (result.idempotent_replay) return result;
+      const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
+        { range: `'PROJECTS'!T${projectIndex + 1}`, values: [[result.next_action]] },
+        { range: `'PRODUCTION_JOBS'!E${jobIndex + 1}:N${jobIndex + 1}`, values: [["APPROVED", String(job?.[5] ?? "LOCAL_DEMUCS"), String(job?.[6] ?? "[]"), String(job?.[7] ?? "[]"), String(job?.[8] ?? ""), String(job?.[9] ?? "1"), String(job?.[10] ?? result.approved_at), result.approved_at, String(job?.[12] ?? result.approved_at), result.approved_at]] },
+        { range: `'APPROVALS'!E${approvalIndex + 1}:J${approvalIndex + 1}`, values: [["APPROVED", "PROJECT_OWNER", result.approved_at, "Chủ dự án xác nhận đã nghe và duyệt cả hai Voice Reference Pilot RP015.", String(approval?.[8] ?? result.approved_at), result.approved_at]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projects[projectIndex][0] ?? ""), "MV_RP015_VOCAL_PILOT_APPROVED", "SUCCEEDED", "AI_EXECUTOR_WEB", "Đã duyệt cả hai Voice Reference Pilot RP015. Provider và render vẫn khóa.", result.approved_at]] },
+      ] } });
+      return result;
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không duyệt được Voice Reference Pilot RP015");
     }
   }
 
