@@ -43,6 +43,8 @@ import {
   classifyVoiceReference,
   isDriveAudioCandidate,
   parseVoiceReferenceLoudness,
+  resolveAudioWindowStart,
+  RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
   RP015_PHUONG_AN_SOURCE_START_SECONDS,
@@ -76,6 +78,23 @@ test("Drive application/mp3 được nhận là ứng viên âm thanh", () => {
 test("metadata không phải âm thanh hoặc file rỗng bị từ chối", () => {
   assert.equal(isDriveAudioCandidate("manifest.json", "application/json", 1024), false);
   assert.equal(isDriveAudioCandidate("vocal-master.mp3", "application/mp3", 0), false);
+});
+
+test("RP015 tự dịch cửa sổ audio khi cuối nguồn lệch không quá 0.5 giây", () => {
+  const window = resolveAudioWindowStart(371.2986, 362, 9.62, RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS);
+  assert.deepEqual(window, { start_seconds: 361.6786, end_drift_seconds: 0.3214, adjusted: true });
+});
+
+test("RP015 từ chối nguồn lệch cuối timeline quá 0.5 giây", () => {
+  assert.throws(() => resolveAudioWindowStart(371.0, 362, 9.62, RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS), /không đủ thời lượng/);
+});
+
+test("RP015 giữ nguyên mốc audio khi nguồn đủ dài", () => {
+  assert.deepEqual(resolveAudioWindowStart(371.62, 362, 9.62, RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS), {
+    start_seconds: 362,
+    end_drift_seconds: 0,
+    adjusted: false,
+  });
 });
 
 test("duyệt hai vocal stem Demucs mở bước voice-conversion pilot nhưng không mở provider/render", () => {
