@@ -2362,7 +2362,6 @@ export function selectNextMvDuetBaseCompositeRolloutUnit(
   return { next, completed_count: completed.length, remaining_count: units.length - completed.length };
 }
 
-@Injectable()
 export function planRp015CleanVoiceReferencesApproval(
   projectRow: string[],
   jobRow: string[] | undefined,
@@ -2397,6 +2396,7 @@ export function planRp015CleanVoiceReferencesApproval(
   return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "PREPARE_RP015_VOICE_CONVERSION_PILOT", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: now.toISOString(), provider_execution_allowed: false, render_allowed: false, idempotent_replay: false };
 }
 
+@Injectable()
 export class ProjectRegistryConnector {
   private createSheetsClient(): sheets_v4.Sheets {
     return google.sheets({
