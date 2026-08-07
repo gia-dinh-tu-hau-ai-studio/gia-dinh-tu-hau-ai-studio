@@ -12,7 +12,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/demucs
 ENV PATH="/opt/demucs/bin:${PATH}"
-RUN pip install --no-cache-dir torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu \
+RUN pip install --no-cache-dir "https://download.pytorch.org/whl/cpu/torch-2.7.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
   && pip install --no-cache-dir demucs==4.0.1
 RUN python3 -c "from demucs.pretrained import get_model; get_model('htdemucs_ft')"
 WORKDIR /app
