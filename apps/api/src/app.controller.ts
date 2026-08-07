@@ -145,4 +145,9 @@ export class AppController {
   executeMvDuetBaseCompositeRolloutUnit(@Param("projectId") projectId: string) {
     return this.intakeService.executeMvDuetBaseCompositeRolloutUnit(projectId);
   }
+
+  @Post("projects/:projectId/create-rp015-final-proof")
+  createRp015FinalProof(@Param("projectId") projectId: string) {
+    return this.intakeService.createRp015FinalProof(projectId);
+  }
 }
