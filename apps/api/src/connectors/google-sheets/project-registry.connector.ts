@@ -292,6 +292,22 @@ export type ExecutedMvDuetBaseComposite = {
   idempotent_replay: boolean;
 };
 
+export type ApprovedMvDuetBaseCompositeReview = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "PLAN_MV_DUET_BASE_COMPOSITE_ROLLOUT";
+  job_id: string;
+  job_status: "SUCCEEDED";
+  review_approval_id: string;
+  review_status: "APPROVED";
+  output_file_id: string;
+  output_file_url: string;
+  provider_execution_allowed: false;
+  render_allowed: false;
+  approved_at: string;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -338,6 +354,7 @@ const MV_PROVIDER_SUBMISSION_FILE_PREFIX = "MV_PROVIDER_SUBMISSION_V1";
 const MV_PROVIDER_PILOT_JOB_TYPE = "MV_PROVIDER_PILOT";
 const MV_PROVIDER_PILOT_FILE_PREFIX = "MV_PROVIDER_PILOT_V1";
 const MV_DUET_BASE_COMPOSITE_JOB_TYPE = "MV_DUET_BASE_COMPOSITE";
+const MV_DUET_BASE_COMPOSITE_REVIEW_APPROVAL_TYPE = "MV_DUET_BASE_COMPOSITE_REVIEW";
 const MV_DUET_BASE_COMPOSITE_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_V1";
 const TEMPORARY_CLOSE_UP_LOCK_CHARACTER_IDS = new Set(["GDTH-CHAR-001"]);
 
@@ -1868,6 +1885,117 @@ export function buildProjectId(
 
 function safeFolderName(value: string) {
   return value.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+
+export function planMvDuetBaseCompositeReviewApproval(
+  projectRow: string[],
+  jobRow: string[] | undefined,
+  executionApprovalRow: string[] | undefined,
+  reviewApprovalRow: string[] | undefined,
+  now = new Date(),
+): ApprovedMvDuetBaseCompositeReview & { submission_id: string; manifest_file_id: string } {
+  const submissionId = String(projectRow[0] ?? "").trim();
+  const projectId = String(projectRow[1] ?? "").trim();
+  const nextAction = String(projectRow[19] ?? "").trim();
+  if (
+    !projectId ||
+    String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" ||
+    String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Dự án ${projectId || "EMPTY"} chưa đủ điều kiện duyệt review RP015`,
+    );
+  }
+  if (
+    !jobRow ||
+    String(jobRow[1] ?? "").trim() !== projectId ||
+    String(jobRow[3] ?? "").trim() !== MV_DUET_BASE_COMPOSITE_JOB_TYPE ||
+    String(jobRow[4] ?? "").trim() !== "SUCCEEDED"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `RP015 của ${projectId} chưa thực thi thành công`,
+    );
+  }
+  const jobId = String(jobRow[0] ?? "").trim();
+  if (
+    !executionApprovalRow ||
+    String(executionApprovalRow[1] ?? "").trim() !== projectId ||
+    String(executionApprovalRow[2] ?? "").trim() !== MV_DUET_BASE_COMPOSITE_JOB_TYPE ||
+    String(executionApprovalRow[3] ?? "").trim() !== jobId ||
+    String(executionApprovalRow[4] ?? "").trim() !== "APPROVED"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Approval thực thi RP015 của ${projectId} không hợp lệ`,
+    );
+  }
+  const result = parseObject(jobRow[8], "MV_DUET_BASE_COMPOSITE execution result");
+  const outputFileId = String(result.output_file_id ?? "").trim();
+  const outputFileUrl = String(result.output_file_url ?? "").trim();
+  const outputIds = parseStringArray(jobRow[7]);
+  const manifestFileId = outputIds[0] ?? "";
+  if (
+    !manifestFileId ||
+    !outputFileId ||
+    outputIds[1] !== outputFileId ||
+    !outputFileUrl ||
+    Number(result.width) !== 1920 ||
+    Number(result.height) !== 1080 ||
+    Math.abs(Number(result.duration_seconds) - 9.62) > 0.2 ||
+    result.provider_execution_allowed !== false ||
+    result.render_allowed !== false
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Output RP015 của ${projectId} không đạt điều kiện review`,
+    );
+  }
+  const existingApproved =
+    nextAction === "PLAN_MV_DUET_BASE_COMPOSITE_ROLLOUT" &&
+    String(reviewApprovalRow?.[1] ?? "").trim() === projectId &&
+    String(reviewApprovalRow?.[2] ?? "").trim() === MV_DUET_BASE_COMPOSITE_REVIEW_APPROVAL_TYPE &&
+    String(reviewApprovalRow?.[3] ?? "").trim() === jobId &&
+    String(reviewApprovalRow?.[4] ?? "").trim() === "APPROVED";
+  if (existingApproved) {
+    return {
+      submission_id: submissionId,
+      project_id: projectId,
+      current_stage: "PRE_PRODUCTION",
+      next_action: "PLAN_MV_DUET_BASE_COMPOSITE_ROLLOUT",
+      job_id: jobId,
+      job_status: "SUCCEEDED",
+      review_approval_id: String(reviewApprovalRow?.[0] ?? ""),
+      review_status: "APPROVED",
+      output_file_id: outputFileId,
+      output_file_url: outputFileUrl,
+      provider_execution_allowed: false,
+      render_allowed: false,
+      approved_at: String(reviewApprovalRow?.[6] ?? ""),
+      manifest_file_id: manifestFileId,
+      idempotent_replay: true,
+    };
+  }
+  if (nextAction !== "REVIEW_MV_DUET_BASE_COMPOSITE" || reviewApprovalRow) {
+    throw new ProjectRegistryInvalidStateError(
+      `Dự án ${projectId} không ở cổng review RP015`,
+    );
+  }
+  return {
+    submission_id: submissionId,
+    project_id: projectId,
+    current_stage: "PRE_PRODUCTION",
+    next_action: "PLAN_MV_DUET_BASE_COMPOSITE_ROLLOUT",
+    job_id: jobId,
+    job_status: "SUCCEEDED",
+    review_approval_id: randomUUID(),
+    review_status: "APPROVED",
+    output_file_id: outputFileId,
+    output_file_url: outputFileUrl,
+    provider_execution_allowed: false,
+    render_allowed: false,
+    approved_at: now.toISOString(),
+    manifest_file_id: manifestFileId,
+    idempotent_replay: false,
+  };
 }
 
 @Injectable()
@@ -3993,6 +4121,172 @@ export class ProjectRegistryConnector {
       if (temporaryDirectory) {
         await rm(temporaryDirectory, { recursive: true, force: true });
       }
+    }
+  }
+
+
+  async approveMvDuetBaseCompositeReview(
+    projectId: string,
+  ): Promise<ApprovedMvDuetBaseCompositeReview> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    const drive = this.createDriveClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] =
+        await Promise.all([
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+        ]);
+      const projects = projectsResponse.data.values ?? [];
+      const jobs = jobsResponse.data.values ?? [];
+      const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex(
+        (row, index) => index > 0 && String(row[1] ?? "").trim() === projectId,
+      );
+      if (projectIndex < 0) {
+        throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      }
+      const jobIndex = jobs.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[3] ?? "").trim() === MV_DUET_BASE_COMPOSITE_JOB_TYPE,
+      );
+      const jobId = jobIndex > 0 ? String(jobs[jobIndex][0] ?? "").trim() : "";
+      const executionApproval = approvals.find(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[2] ?? "").trim() === MV_DUET_BASE_COMPOSITE_JOB_TYPE &&
+          String(row[3] ?? "").trim() === jobId,
+      )?.map(String);
+      const reviewApproval = approvals.find(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[2] ?? "").trim() === MV_DUET_BASE_COMPOSITE_REVIEW_APPROVAL_TYPE &&
+          String(row[3] ?? "").trim() === jobId,
+      )?.map(String);
+      const transition = planMvDuetBaseCompositeReviewApproval(
+        projects[projectIndex].map(String),
+        jobIndex > 0 ? jobs[jobIndex].map(String) : undefined,
+        executionApproval,
+        reviewApproval,
+      );
+      if (transition.idempotent_replay) {
+        const { submission_id: _submissionId, manifest_file_id: _manifestFileId, ...result } = transition;
+        return result;
+      }
+      const manifestResponse = await drive.files.get(
+        { fileId: transition.manifest_file_id, alt: "media", supportsAllDrives: true },
+        { responseType: "text" },
+      );
+      const manifest =
+        typeof manifestResponse.data === "string"
+          ? parseObject(manifestResponse.data, "MV_DUET_BASE_COMPOSITE manifest")
+          : manifestResponse.data as Record<string, unknown>;
+      const output = (manifest.output ?? {}) as Record<string, unknown>;
+      const reviewGate = (manifest.review_gate ?? {}) as Record<string, unknown>;
+      if (
+        String(manifest.project_id ?? "") !== projectId ||
+        String(manifest.composite_status ?? "") !== "EXECUTED_AWAITING_REVIEW" ||
+        String(manifest.output_readiness ?? "") !== "AWAITING_OWNER_REVIEW" ||
+        String(reviewGate.review_status ?? "") !== "PENDING" ||
+        String(output.file_id ?? "") !== transition.output_file_id ||
+        Number(output.width) !== 1920 ||
+        Number(output.height) !== 1080 ||
+        Math.abs(Number(output.duration_seconds) - 9.62) > 0.2 ||
+        manifest.provider_execution_allowed !== false ||
+        manifest.render_allowed !== false
+      ) {
+        throw new ProjectRegistryInvalidStateError(
+          `Manifest RP015 của ${projectId} không ở trạng thái chờ review`,
+        );
+      }
+      const approvedManifest = {
+        ...manifest,
+        composite_status: "PILOT_APPROVED",
+        output_readiness: "APPROVED_PILOT_REFERENCE",
+        composite_execution_allowed: false,
+        provider_execution_allowed: false,
+        render_allowed: false,
+        review_gate: {
+          review_status: "APPROVED",
+          review_approval_id: transition.review_approval_id,
+          approved_at: transition.approved_at,
+          next_action: transition.next_action,
+        },
+        reviewed_at: transition.approved_at,
+      };
+      await drive.files.update({
+        fileId: transition.manifest_file_id,
+        media: {
+          mimeType: "application/json",
+          body: Readable.from([`${JSON.stringify(approvedManifest, null, 2)}\n`]),
+        },
+        fields: "id,modifiedTime",
+        supportsAllDrives: true,
+      });
+      const projectRow = projectIndex + 1;
+      const approvalRow = approvals.length + 1;
+      const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: [
+            {
+              range: `'PROJECTS'!S${projectRow}:T${projectRow}`,
+              values: [["PRE_PRODUCTION", transition.next_action]],
+            },
+            {
+              range: `'PROJECTS'!X${projectRow}`,
+              values: [[transition.approved_at]],
+            },
+            {
+              range: `'APPROVALS'!A${approvalRow}:J${approvalRow}`,
+              values: [[
+                transition.review_approval_id,
+                projectId,
+                MV_DUET_BASE_COMPOSITE_REVIEW_APPROVAL_TYPE,
+                transition.job_id,
+                "APPROVED",
+                "OWNER",
+                transition.approved_at,
+                "Chủ dự án duyệt Base Composite RP015 bản dựng thử.",
+                transition.approved_at,
+                transition.approved_at,
+              ]],
+            },
+            {
+              range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`,
+              values: [[
+                randomUUID(),
+                projectId,
+                transition.submission_id,
+                "MV_DUET_BASE_COMPOSITE_REVIEW_APPROVED",
+                "SUCCEEDED",
+                "AI_EXECUTOR_WEB",
+                "Chủ dự án đã duyệt RP015 làm pilot reference. Provider và render toàn bộ vẫn bị khóa.",
+                transition.approved_at,
+              ]],
+            },
+          ],
+        },
+      });
+      const { submission_id: _submissionId, manifest_file_id: _manifestFileId, ...result } = transition;
+      return result;
+    } catch (error) {
+      if (
+        error instanceof ProjectRegistryNotConfiguredError ||
+        error instanceof ProjectRegistryProjectNotFoundError ||
+        error instanceof ProjectRegistryInvalidStateError
+      ) throw error;
+      throw new ProjectRegistryUnavailableError(
+        error instanceof Error ? error.message : "Không duyệt được review Base Composite RP015",
+      );
     }
   }
 
