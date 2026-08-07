@@ -4818,6 +4818,7 @@ export class ProjectRegistryConnector {
       if (referenceFileIds.length !== 2 || referenceFileIds.some((fileId) => !fileId)) {
         throw new ProjectRegistryInvalidStateError("Thiếu hai tệp Voice Reference nguồn để tách lại bằng Demucs");
       }
+      console.info(JSON.stringify({ event: "RP015_DEMUCS_PREFLIGHT_PASSED", project_id: projectId, source_count: referenceFileIds.length }));
 
       const projectFolderId = String(projectRow[20] ?? "").trim();
       const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
@@ -4835,7 +4836,9 @@ export class ProjectRegistryConnector {
         const outputPath = join(temporaryDirectory, `${characters[index].character_id}-clean.wav`);
         const response = await drive.files.get({ fileId: inputFileId, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
         await pipeline(response.data as Readable, createWriteStream(inputPath));
+        console.info(JSON.stringify({ event: "RP015_DEMUCS_SEPARATION_STARTED", project_id: projectId, character_id: characters[index].character_id }));
         const evaluation = await cleanAndEvaluateVoiceReference(inputPath, outputPath);
+        console.info(JSON.stringify({ event: "RP015_DEMUCS_SEPARATION_COMPLETED", project_id: projectId, character_id: characters[index].character_id, technical_status: evaluation.technical_status, mean_volume_db: evaluation.mean_volume_db, max_volume_db: evaluation.max_volume_db }));
         if (evaluation.technical_status !== "REFERENCE_CANDIDATE") {
           throw new ProjectRegistryInvalidStateError(`Voice Reference đã chuẩn hóa của ${characters[index].character_name} không đạt kiểm tra kỹ thuật`);
         }
@@ -4867,15 +4870,18 @@ export class ProjectRegistryConnector {
       const jobRow = jobs.length + 1;
       const approvalRow = approvals.length + 1;
       const auditRow = (auditResponse.data.values ?? []).length + 1;
+      console.info(JSON.stringify({ event: "RP015_DEMUCS_PERSIST_STARTED", project_id: projectId, job_id: jobId }));
       await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
         { range: `'PRODUCTION_JOBS'!E${legacyJobIndex + 1}`, values: [["REJECTED_BACKGROUND_MUSIC_REMAINS"]] },
         { range: `'APPROVALS'!E${legacyApprovalIndex + 1}:J${legacyApprovalIndex + 1}`, values: [["REJECTED", "PROJECT_OWNER", preparedAt, "Hai kết quả FFmpeg vẫn còn nhạc nền; chuyển sang tách stem Demucs.", String(approvals[legacyApprovalIndex][8] ?? preparedAt), preparedAt]] },
-        { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE, "AWAITING_APPROVAL", "LOCAL_FFMPEG", JSON.stringify(referenceFileIds), JSON.stringify([manifestFile.id, ...cleaned.map((item) => item.clean_reference_file_id)]), JSON.stringify(result), 1, preparedAt, preparedAt, preparedAt, preparedAt]] },
+        { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE, "AWAITING_APPROVAL", "LOCAL_DEMUCS", JSON.stringify(referenceFileIds), JSON.stringify([manifestFile.id, ...cleaned.map((item) => item.clean_reference_file_id)]), JSON.stringify(result), 1, preparedAt, preparedAt, preparedAt, preparedAt]] },
         { range: `'APPROVALS'!A${approvalRow}:J${approvalRow}`, values: [[approvalId, projectId, MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE, jobId, "PENDING", "PROJECT_OWNER", "", "REVIEW_RP015_CLEAN_VOICE_REFERENCES", preparedAt, preparedAt]] },
         { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_CLEAN_VOICE_REFERENCES_PREPARED", "AWAITING_APPROVAL", "AI_EXECUTOR_WEB", "Đã tách hai stem vocals bằng Demucs htdemucs_ft và chuẩn hóa WAV mono 48 kHz; chưa gọi provider.", preparedAt]] },
       ] } });
+      console.info(JSON.stringify({ event: "RP015_DEMUCS_PERSIST_COMPLETED", project_id: projectId, job_id: jobId }));
       return result;
     } catch (error) {
+      console.error(JSON.stringify({ event: "RP015_DEMUCS_FAILED", project_id: projectId, error: error instanceof Error ? error.message : String(error) }));
       if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không chuẩn hóa được Voice Reference RP015");
     } finally {
