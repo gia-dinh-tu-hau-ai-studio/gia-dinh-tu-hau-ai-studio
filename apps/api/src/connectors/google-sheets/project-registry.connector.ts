@@ -27,6 +27,7 @@ import {
   RP015_DURATION_SECONDS,
   RP015_MASTER_AUDIO_START_SECONDS,
 } from "../../media/mv-duet-base-composite.executor";
+import type { Rp015FinalProofExecutionStage } from "../../media/mv-duet-base-composite.executor";
 
 export class ProjectRegistryNotConfiguredError extends Error {}
 export class ProjectRegistryUnavailableError extends Error {}
@@ -409,6 +410,9 @@ export type Rp015FinalProofJobStatus = {
   job_status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
   result?: CreatedRp015FinalProof;
   error_message?: string;
+  stage?: string;
+  heartbeat_at?: string;
+  hard_timeout_at?: string;
   provider_execution_allowed: false;
   render_allowed: false;
   created_at: string;
@@ -527,6 +531,8 @@ const MV_DUET_BASE_COMPOSITE_ROLLOUT_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_ROLLO
 const MV_RP015_FINAL_PROOF_JOB_TYPE = "MV_RP015_NATURAL_DUET_STAGE_PROOF_V4";
 const MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE = "MV_RP015_NATURAL_DUET_STAGE_PROOF_V4_ASYNC";
 const MV_RP015_FINAL_PROOF_STALE_MS = 30 * 60 * 1000;
+export const MV_RP015_FINAL_PROOF_HEARTBEAT_MS = 15 * 1000;
+export const MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS = 25 * 60 * 1000;
 const MV_RP015_VOCAL_PILOT_JOB_TYPE = "MV_RP015_VOCAL_PILOT_PREPARATION";
 const MV_RP015_LEGACY_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_CLEAN_VOICE_REFERENCES";
 const MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_DEMUCS_VOCAL_STEMS_V2";
@@ -2515,6 +2521,20 @@ export function planRp015CleanVoiceReferencesApproval(
     throw new ProjectRegistryInvalidStateError(`Không thể duyệt Demucs V2 từ ${jobStatus || "EMPTY"}/${approvalStatus || "EMPTY"}`);
   }
   return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "PREPARE_RP015_VOICE_CONVERSION_PILOT", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: now.toISOString(), provider_execution_allowed: false, render_allowed: false, idempotent_replay: false };
+}
+
+type Rp015FinalProofJobStage =
+  | "QUEUED"
+  | "VALIDATING"
+  | "DOWNLOADING_INPUTS"
+  | "INSPECTING_AUDIO"
+  | Rp015FinalProofExecutionStage
+  | "UPLOADING_OUTPUT"
+  | "RECORDING_RESULT";
+
+export function isRp015FinalProofJobStale(updatedAtInput: string, nowMs = Date.now()) {
+  const updatedAtMs = Date.parse(updatedAtInput);
+  return Number.isFinite(updatedAtMs) && nowMs - updatedAtMs >= MV_RP015_FINAL_PROOF_STALE_MS;
 }
 
 @Injectable()
@@ -5157,26 +5177,52 @@ export class ProjectRegistryConnector {
           created_at: String(completedProof[12] ?? result.created_at), updated_at: String(completedProof[13] ?? result.created_at), idempotent_replay: true,
         };
       }
-      const activeControl = jobs.filter((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE && ["QUEUED", "RUNNING"].includes(String(row[4] ?? "").trim())).at(-1)?.map(String);
+      let activeControlIndex = -1;
+      for (let index = jobs.length - 1; index > 0; index -= 1) {
+        const row = jobs[index];
+        if (String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE && ["QUEUED", "RUNNING"].includes(String(row[4] ?? "").trim())) {
+          activeControlIndex = index;
+          break;
+        }
+      }
+      const activeControl = activeControlIndex >= 0 ? jobs[activeControlIndex].map(String) : undefined;
       if (activeControl) {
         const updatedAt = String(activeControl[13] ?? activeControl[12] ?? "");
-        const ageMs = Date.now() - Date.parse(updatedAt);
-        if (this.rp015FinalProofTasks.has(projectId) || !Number.isFinite(ageMs) || ageMs < MV_RP015_FINAL_PROOF_STALE_MS) {
+        if (this.rp015FinalProofTasks.has(projectId) || !isRp015FinalProofJobStale(updatedAt)) {
           return this.buildRp015FinalProofJobStatus(activeControl, true);
         }
+        const recoveredAt = new Date().toISOString();
+        await sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: `'PRODUCTION_JOBS'!E${activeControlIndex + 1}:N${activeControlIndex + 1}`,
+          valueInputOption: "RAW",
+          requestBody: { values: [[
+            "FAILED", "LOCAL_FFMPEG", String(activeControl[6] ?? "[]"), "[]",
+            JSON.stringify({ message: "Job mất heartbeat quá 30 phút; tiến trình cũ không còn trong runtime và đã được đóng để retry", stage: "STALE_RECOVERY", heartbeat_at: updatedAt }),
+            0, String(activeControl[10] ?? ""), recoveredAt, String(activeControl[12] ?? recoveredAt), recoveredAt,
+          ]] },
+        });
+        await sheets.spreadsheets.values.append({
+          spreadsheetId,
+          range: "'AUDIT_LOG'!A:H",
+          valueInputOption: "RAW",
+          insertDataOption: "INSERT_ROWS",
+          requestBody: { values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_FINAL_PROOF_V4_STALE_RECOVERED", "FAILED", "AI_EXECUTOR_API", "Đã đóng job Final Proof V4 mất heartbeat trước khi cho phép retry; provider và render tổng vẫn khóa.", recoveredAt]] },
+        });
       }
       const now = new Date().toISOString();
       const jobId = randomUUID();
       const jobRow = jobs.length + 1;
       const auditRow = (auditResponse.data.values ?? []).length + 1;
       await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
-        { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE, "QUEUED", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message: "Final Proof V4 đã vào hàng đợi" }), 0, "", "", now, now]] },
+        { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE, "QUEUED", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message: "Final Proof V4 đã vào hàng đợi", stage: "QUEUED", heartbeat_at: now, hard_timeout_at: new Date(Date.parse(now) + MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS).toISOString() }), 0, "", "", now, now]] },
         { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_FINAL_PROOF_V4_QUEUED", "QUEUED", "AI_EXECUTOR_WEB", "Đã tạo job bất đồng bộ Final Proof V4; provider và render tổng vẫn khóa.", now]] },
       ] } });
       this.launchRp015FinalProofTask(projectId, vocalMasterFileId, jobRow, now);
       return {
         project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "WAIT_RP015_FINAL_PROOF",
-        job_id: jobId, job_status: "QUEUED", provider_execution_allowed: false, render_allowed: false,
+        job_id: jobId, job_status: "QUEUED", stage: "QUEUED", heartbeat_at: now,
+        hard_timeout_at: new Date(Date.parse(now) + MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS).toISOString(), provider_execution_allowed: false, render_allowed: false,
         created_at: now, updated_at: now, idempotent_replay: false,
       };
     } catch (error) {
@@ -5209,6 +5255,9 @@ export class ProjectRegistryConnector {
       next_action: status === "SUCCEEDED" ? "REVIEW_RP015_FINAL_PROOF" : status === "FAILED" ? "RETRY_RP015_FINAL_PROOF" : "WAIT_RP015_FINAL_PROOF",
       job_id: String(job[0] ?? ""), job_status: status, result,
       error_message: status === "FAILED" ? String(payload.message ?? "Final Proof V4 thất bại") : undefined,
+      stage: typeof payload.stage === "string" ? payload.stage : undefined,
+      heartbeat_at: typeof payload.heartbeat_at === "string" ? payload.heartbeat_at : undefined,
+      hard_timeout_at: typeof payload.hard_timeout_at === "string" ? payload.hard_timeout_at : undefined,
       provider_execution_allowed: false, render_allowed: false,
       created_at: String(job[12] ?? ""), updated_at: String(job[13] ?? job[12] ?? ""), idempotent_replay: idempotentReplay,
     };
@@ -5220,31 +5269,67 @@ export class ProjectRegistryConnector {
       const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
       const sheets = this.createSheetsClient();
       const startedAt = new Date().toISOString();
+      const hardTimeoutAt = new Date(Date.parse(startedAt) + MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS).toISOString();
+      const controller = new AbortController();
+      let stage: Rp015FinalProofJobStage = "VALIDATING";
+      const writeRunning = async (nextStage: Rp015FinalProofJobStage) => {
+        const heartbeatAt = new Date().toISOString();
+        await sheets.spreadsheets.values.update({ spreadsheetId, range: `'PRODUCTION_JOBS'!E${jobRow}:N${jobRow}`, valueInputOption: "RAW", requestBody: { values: [["RUNNING", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message: `Final Proof V4 đang xử lý: ${nextStage}`, stage: nextStage, heartbeat_at: heartbeatAt, hard_timeout_at: hardTimeoutAt }), 0, startedAt, "", createdAt, heartbeatAt]] } });
+      };
+      let heartbeatWrite = Promise.resolve();
+      const queueRunning = (nextStage: Rp015FinalProofJobStage) => {
+        stage = nextStage;
+        heartbeatWrite = heartbeatWrite.catch(() => undefined).then(() => writeRunning(nextStage));
+        return heartbeatWrite;
+      };
+      const heartbeat = setInterval(() => {
+        if (controller.signal.aborted) return;
+        void queueRunning(stage).catch(() => undefined);
+      }, MV_RP015_FINAL_PROOF_HEARTBEAT_MS);
+      const hardTimeout = setTimeout(() => controller.abort(new Error(`Final Proof V4 vượt hard-timeout ${MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS / 60_000} phút`)), MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS);
       try {
-        await sheets.spreadsheets.values.update({ spreadsheetId, range: `'PRODUCTION_JOBS'!E${jobRow}:N${jobRow}`, valueInputOption: "RAW", requestBody: { values: [["RUNNING", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message: "Đang tách nền và dựng Final Proof V4" }), 0, startedAt, "", createdAt, startedAt]] } });
-        const result = await this.createRp015FinalProof(projectId, vocalMasterFileId);
+        await queueRunning("VALIDATING");
+        const result = await this.createRp015FinalProof(projectId, vocalMasterFileId, {
+          signal: controller.signal,
+          onStage: queueRunning,
+        });
+        clearInterval(heartbeat);
+        await heartbeatWrite.catch(() => undefined);
         const completedAt = new Date().toISOString();
         await sheets.spreadsheets.values.update({ spreadsheetId, range: `'PRODUCTION_JOBS'!E${jobRow}:N${jobRow}`, valueInputOption: "RAW", requestBody: { values: [["SUCCEEDED", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), JSON.stringify([result.output_file_id]), JSON.stringify(result), 0, startedAt, completedAt, createdAt, completedAt]] } });
       } catch (error) {
+        clearInterval(heartbeat);
+        await heartbeatWrite.catch(() => undefined);
         const failedAt = new Date().toISOString();
-        const message = error instanceof Error ? error.message : "Lỗi không xác định khi tạo Final Proof V4";
+        const timedOut = controller.signal.aborted;
+        const message = timedOut
+          ? `Final Proof V4 đã bị hủy sau hard-timeout ${MV_RP015_FINAL_PROOF_HARD_TIMEOUT_MS / 60_000} phút; tiến trình con đã nhận AbortSignal`
+          : error instanceof Error ? error.message : "Lỗi không xác định khi tạo Final Proof V4";
         try {
-          await sheets.spreadsheets.values.update({ spreadsheetId, range: `'PRODUCTION_JOBS'!E${jobRow}:N${jobRow}`, valueInputOption: "RAW", requestBody: { values: [["FAILED", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message }), 0, startedAt, failedAt, createdAt, failedAt]] } });
+          await sheets.spreadsheets.values.update({ spreadsheetId, range: `'PRODUCTION_JOBS'!E${jobRow}:N${jobRow}`, valueInputOption: "RAW", requestBody: { values: [["FAILED", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message, stage: timedOut ? "TIMED_OUT" : stage, heartbeat_at: failedAt, hard_timeout_at: hardTimeoutAt }), 0, startedAt, failedAt, createdAt, failedAt]] } });
         } catch {
           // Tránh unhandled rejection làm dừng process; job QUEUED/RUNNING cũ sẽ hết hạn và cho phép retry.
         }
+      } finally {
+        clearInterval(heartbeat);
+        clearTimeout(hardTimeout);
       }
     }).catch(() => undefined).finally(() => this.rp015FinalProofTasks.delete(projectId));
     this.rp015FinalProofTasks.set(projectId, task);
   }
 
-  private async createRp015FinalProof(projectId: string, vocalMasterFileIdInput: string): Promise<CreatedRp015FinalProof> {
+  private async createRp015FinalProof(
+    projectId: string,
+    vocalMasterFileIdInput: string,
+    options?: { signal?: AbortSignal; onStage?: (stage: Rp015FinalProofJobStage) => void | Promise<void> },
+  ): Promise<CreatedRp015FinalProof> {
     const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
     const projectsRootFolderId = requiredSetting("GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID");
     const sheets = this.createSheetsClient();
     const drive = this.createDriveClient();
     let temporaryDirectory = "";
     try {
+      options?.signal?.throwIfAborted();
       const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] = await Promise.all([
         sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
         sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
@@ -5309,11 +5394,15 @@ export class ProjectRegistryConnector {
       const phuongAnPath = join(temporaryDirectory, "phuong-an.mp4");
       const audioPath = join(temporaryDirectory, "vocal-master-audio");
       const outputPath = join(temporaryDirectory, "rp015-final-proof.mp4");
+      await options?.onStage?.("DOWNLOADING_INPUTS");
       const download = async (fileId: string, destination: string) => {
-        const response = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
-        await pipeline(response.data as Readable, createWriteStream(destination));
+        options?.signal?.throwIfAborted();
+        const response = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "stream", signal: options?.signal });
+        await pipeline(response.data as Readable, createWriteStream(destination), { signal: options?.signal });
       };
       await Promise.all([download(tuongVyFileId, tuongVyPath), download(phuongAnFileId, phuongAnPath), download(vocalMasterFileId, audioPath)]);
+      await options?.onStage?.("INSPECTING_AUDIO");
+      options?.signal?.throwIfAborted();
       let audioInspection;
       try {
         audioInspection = await inspectAudioAsset(audioPath, {
@@ -5332,16 +5421,22 @@ export class ProjectRegistryConnector {
       }
       const proof = await executeRp015FinalProof(tuongVyPath, phuongAnPath, audioPath, outputPath, {
         audioStartSeconds: audioInspection.inspected_start_seconds,
+        signal: options?.signal,
+        onStage: options?.onStage,
       });
       if ((await stat(outputPath)).size <= 0) throw new ProjectRegistryInvalidStateError("FFmpeg không tạo được RP015 final proof");
+      await options?.onStage?.("UPLOADING_OUTPUT");
+      options?.signal?.throwIfAborted();
       const compositeFolder = await this.findChildFolder(drive, projectFolderId, "03_ORIGINAL_FACE_COMPOSITE");
       const outputName = `MV_NATURAL_DUET_STAGE_PROOF_RP015_V4_${projectId}.mp4`;
       const existingOutput = await drive.files.list({ q: `'${compositeFolder.id}' in parents and name='${outputName}' and trashed=false`, fields: "files(id,webViewLink)", spaces: "drive", supportsAllDrives: true, includeItemsFromAllDrives: true });
       const outputFile = existingOutput.data.files?.[0]?.id
-        ? await drive.files.update({ fileId: existingOutput.data.files[0].id!, media: { mimeType: "video/mp4", body: createReadStream(outputPath) }, fields: "id,webViewLink", supportsAllDrives: true })
-        : await drive.files.create({ requestBody: { name: outputName, mimeType: "video/mp4", parents: [compositeFolder.id] }, media: { mimeType: "video/mp4", body: createReadStream(outputPath) }, fields: "id,webViewLink", supportsAllDrives: true });
+        ? await drive.files.update({ fileId: existingOutput.data.files[0].id!, media: { mimeType: "video/mp4", body: createReadStream(outputPath) }, fields: "id,webViewLink", supportsAllDrives: true }, { signal: options?.signal })
+        : await drive.files.create({ requestBody: { name: outputName, mimeType: "video/mp4", parents: [compositeFolder.id] }, media: { mimeType: "video/mp4", body: createReadStream(outputPath) }, fields: "id,webViewLink", supportsAllDrives: true }, { signal: options?.signal });
       const outputFileId = String(outputFile.data.id ?? "");
       if (!outputFileId) throw new ProjectRegistryInvalidStateError("Drive không trả file ID RP015 final proof");
+      await options?.onStage?.("RECORDING_RESULT");
+      options?.signal?.throwIfAborted();
       const createdAt = new Date().toISOString();
       const result: CreatedRp015FinalProof = {
         project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "REVIEW_RP015_FINAL_PROOF",
