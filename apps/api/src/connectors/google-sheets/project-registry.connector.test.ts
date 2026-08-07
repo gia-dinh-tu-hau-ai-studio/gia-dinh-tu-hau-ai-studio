@@ -24,6 +24,7 @@ import {
   planMvDuetBaseCompositeApproval,
   planMvDuetBaseCompositeExecution,
   planMvDuetBaseCompositeReviewApproval,
+  planMvDuetBaseCompositeRolloutApproval,
   planMvShotPlanApproval,
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
@@ -1266,6 +1267,68 @@ test("từ chối rollout plan nếu pilot RP015 chưa được owner duyệt", 
       "rp015-output-id",
       "2026-08-07T03:40:00.000Z",
     ),
+    ProjectRegistryInvalidStateError,
+  );
+});
+
+function pendingMvDuetBaseCompositeRolloutRows() {
+  const project = approvedMvProjectRow();
+  project[19] = "APPROVE_MV_DUET_BASE_COMPOSITE_ROLLOUT";
+  const job = Array.from({ length: 14 }, () => "");
+  Object.assign(job, {
+    0: "job-rollout-001",
+    1: project[1],
+    2: "PRE_PRODUCTION",
+    3: "MV_DUET_BASE_COMPOSITE_ROLLOUT",
+    4: "AWAITING_APPROVAL",
+    7: '["rollout-manifest-file-id"]',
+  });
+  const approval = Array.from({ length: 10 }, () => "");
+  Object.assign(approval, {
+    0: "approval-rollout-001",
+    1: project[1],
+    2: "MV_DUET_BASE_COMPOSITE_ROLLOUT",
+    3: job[0],
+    4: "PENDING",
+  });
+  return { project, job, approval };
+}
+
+test("duyệt rollout chỉ mở composite cục bộ và tiếp tục khóa provider/render", () => {
+  const { project, job, approval } = pendingMvDuetBaseCompositeRolloutRows();
+  const result = planMvDuetBaseCompositeRolloutApproval(
+    project,
+    job,
+    approval,
+    new Date("2026-08-07T04:00:00.000Z"),
+  );
+  assert.equal(result.next_action, "EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT");
+  assert.equal(result.job_status, "APPROVED");
+  assert.equal(result.approval_status, "APPROVED");
+  assert.equal(result.total_render_units, 15);
+  assert.equal(result.pilot_reference_unit_id, "RP015");
+  assert.equal(result.composite_execution_allowed, true);
+  assert.equal(result.provider_execution_allowed, false);
+  assert.equal(result.render_allowed, false);
+  assert.equal(result.idempotent_replay, false);
+});
+
+test("duyệt lại rollout đã APPROVED là idempotent", () => {
+  const { project, job, approval } = pendingMvDuetBaseCompositeRolloutRows();
+  project[19] = "EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT";
+  job[4] = "APPROVED";
+  approval[4] = "APPROVED";
+  approval[6] = "2026-08-07T04:00:00.000Z";
+  const result = planMvDuetBaseCompositeRolloutApproval(project, job, approval);
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.approved_at, "2026-08-07T04:00:00.000Z");
+});
+
+test("từ chối duyệt rollout khi job và approval lệch trạng thái", () => {
+  const { project, job, approval } = pendingMvDuetBaseCompositeRolloutRows();
+  job[4] = "APPROVED";
+  assert.throws(
+    () => planMvDuetBaseCompositeRolloutApproval(project, job, approval),
     ProjectRegistryInvalidStateError,
   );
 });
