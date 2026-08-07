@@ -380,6 +380,7 @@ export type CreatedRp015FinalProof = {
   has_audio: true;
   edit_mode: "FULL_FRAME_DUET_CUTS";
   layout_version: "FULL_FRAME_ALTERNATING_V3";
+  voice_pilot_approval_id: string;
   audio_source: "VOCAL_MASTER";
   audio_mean_db: number;
   audio_max_db: number;
@@ -5102,6 +5103,26 @@ export class ProjectRegistryConnector {
       if (!assetJob || String(assetJob[4] ?? "") !== "APPROVED" || String(assetApproval?.[4] ?? "") !== "APPROVED") {
         throw new ProjectRegistryInvalidStateError(`Asset manifest của ${projectId} chưa được duyệt`);
       }
+      const vocalPilotJob = [...jobs].reverse().find((row, index) =>
+        index < jobs.length - 1 &&
+        String(row[1] ?? "").trim() === projectId &&
+        String(row[3] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE
+      )?.map(String);
+      const vocalPilotApproval = [...approvals].reverse().find((row, index) =>
+        index < approvals.length - 1 &&
+        String(row[1] ?? "").trim() === projectId &&
+        String(row[2] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE &&
+        String(row[3] ?? "").trim() === String(vocalPilotJob?.[0] ?? "").trim()
+      )?.map(String);
+      if (
+        !vocalPilotJob ||
+        String(vocalPilotJob[4] ?? "").trim() !== "APPROVED" ||
+        String(vocalPilotApproval?.[4] ?? "").trim() !== "APPROVED"
+      ) {
+        throw new ProjectRegistryInvalidStateError(`Voice Reference Pilot RP015 của ${projectId} chưa được duyệt`);
+      }
+      const voicePilotApprovalId = String(vocalPilotApproval[0] ?? "").trim();
+
       const projectFolderId = String(projectRow[20] ?? "").trim();
       const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
       assertProjectFolderWithinRoot(projectFolder.data, projectsRootFolderId, projectId);
@@ -5144,7 +5165,7 @@ export class ProjectRegistryConnector {
         render_unit_id: "RP015", proof_status: "SUCCEEDED", output_file_id: outputFileId,
         output_file_url: outputFile.data.webViewLink ?? `https://drive.google.com/file/d/${outputFileId}/view`,
         duration_seconds: proof.duration_seconds, width: 1920, height: 1080, has_audio: true,
-        edit_mode: "FULL_FRAME_DUET_CUTS", layout_version: "FULL_FRAME_ALTERNATING_V3", audio_source: "VOCAL_MASTER",
+        edit_mode: "FULL_FRAME_DUET_CUTS", layout_version: "FULL_FRAME_ALTERNATING_V3", voice_pilot_approval_id: voicePilotApprovalId, audio_source: "VOCAL_MASTER",
         audio_mean_db: proof.audio_mean_db, audio_max_db: proof.audio_max_db,
         provider_execution_allowed: false, render_allowed: false, created_at: createdAt, idempotent_replay: false,
       };
