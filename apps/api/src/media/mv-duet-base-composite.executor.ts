@@ -17,6 +17,12 @@ type VideoProbe = {
   duration_seconds: number;
 };
 
+export type MvDuetCompositeUnit = {
+  render_unit_id: string;
+  start_seconds: number;
+  duration_seconds: number;
+};
+
 async function probeVideo(path: string): Promise<VideoProbe> {
   const probe = await execFileAsync(
     "ffprobe",
@@ -49,8 +55,9 @@ function assertSourceWindow(
   label: string,
   probe: VideoProbe,
   startSeconds: number,
+  durationSeconds = RP015_DURATION_SECONDS,
 ) {
-  const requiredEnd = startSeconds + RP015_DURATION_SECONDS;
+  const requiredEnd = startSeconds + durationSeconds;
   if (
     probe.width <= 0 ||
     probe.height <= 0 ||
@@ -67,7 +74,15 @@ export function buildMvDuetBaseCompositeFfmpegArgs(
   tuongVyInputPath: string,
   phuongAnInputPath: string,
   outputPath: string,
+  options?: {
+    durationSeconds: number;
+    tuongVyOffset: number;
+    phuongAnOffset: number;
+  },
 ) {
+  const durationSeconds = options?.durationSeconds ?? RP015_DURATION_SECONDS;
+  const tuongVyOffset = options?.tuongVyOffset ?? RP015_TUONG_VY_SOURCE_START_SECONDS;
+  const phuongAnOffset = options?.phuongAnOffset ?? RP015_PHUONG_AN_SOURCE_START_SECONDS;
   const filter = [
     "[0:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[left]",
     "[1:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[right]",
@@ -80,15 +95,15 @@ export function buildMvDuetBaseCompositeFfmpegArgs(
     "error",
     "-y",
     "-ss",
-    String(RP015_TUONG_VY_SOURCE_START_SECONDS),
+    String(tuongVyOffset),
     "-t",
-    String(RP015_DURATION_SECONDS),
+    String(durationSeconds),
     "-i",
     tuongVyInputPath,
     "-ss",
-    String(RP015_PHUONG_AN_SOURCE_START_SECONDS),
+    String(phuongAnOffset),
     "-t",
-    String(RP015_DURATION_SECONDS),
+    String(durationSeconds),
     "-i",
     phuongAnInputPath,
     "-filter_complex",
@@ -206,6 +221,83 @@ export async function executeMvDuetBaseComposite(
     source_durations: {
       tuong_vy_seconds: tuongVyProbe.duration_seconds,
       phuong_an_seconds: phuongAnProbe.duration_seconds,
+    },
+  };
+}
+
+export function selectRolloutSourceOffset(
+  timelineStartSeconds: number,
+  sourceDurationSeconds: number,
+  outputDurationSeconds: number,
+  pilotSourceOffsetSeconds: number,
+) {
+  const usableWindow = sourceDurationSeconds - outputDurationSeconds;
+  if (!Number.isFinite(usableWindow) || usableWindow < 0) {
+    throw new Error("Nguồn không đủ dài cho render unit rollout");
+  }
+  if (usableWindow === 0) return 0;
+  return Number(((timelineStartSeconds + pilotSourceOffsetSeconds) % usableWindow).toFixed(3));
+}
+
+export async function executeMvDuetBaseCompositeUnit(
+  unit: MvDuetCompositeUnit,
+  tuongVyInputPath: string,
+  phuongAnInputPath: string,
+  outputPath: string,
+) {
+  if (
+    !unit.render_unit_id ||
+    unit.render_unit_id === "RP015" ||
+    !Number.isFinite(unit.start_seconds) ||
+    !Number.isFinite(unit.duration_seconds) ||
+    unit.duration_seconds <= 0
+  ) {
+    throw new Error("Render unit rollout không hợp lệ");
+  }
+  const [tuongVyProbe, phuongAnProbe] = await Promise.all([
+    probeVideo(tuongVyInputPath),
+    probeVideo(phuongAnInputPath),
+  ]);
+  const tuongVyOffset = selectRolloutSourceOffset(
+    unit.start_seconds,
+    tuongVyProbe.duration_seconds,
+    unit.duration_seconds,
+    RP015_TUONG_VY_SOURCE_START_SECONDS,
+  );
+  const phuongAnOffset = selectRolloutSourceOffset(
+    unit.start_seconds,
+    phuongAnProbe.duration_seconds,
+    unit.duration_seconds,
+    RP015_PHUONG_AN_SOURCE_START_SECONDS,
+  );
+  assertSourceWindow("Tường Vy", tuongVyProbe, tuongVyOffset, unit.duration_seconds);
+  assertSourceWindow("Phương An", phuongAnProbe, phuongAnOffset, unit.duration_seconds);
+  const args = buildMvDuetBaseCompositeFfmpegArgs(
+    tuongVyInputPath,
+    phuongAnInputPath,
+    outputPath,
+    { durationSeconds: unit.duration_seconds, tuongVyOffset, phuongAnOffset },
+  );
+  await execFileAsync("ffmpeg", args, {
+    timeout: RP015_FFMPEG_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  const outputProbe = await probeVideo(outputPath);
+  if (
+    outputProbe.width !== RP015_OUTPUT_WIDTH ||
+    outputProbe.height !== RP015_OUTPUT_HEIGHT ||
+    !Number.isFinite(outputProbe.duration_seconds) ||
+    Math.abs(outputProbe.duration_seconds - unit.duration_seconds) > 0.2
+  ) {
+    throw new Error(
+      `${unit.render_unit_id} composite output không đạt 1920x1080/${unit.duration_seconds}s`,
+    );
+  }
+  return {
+    ...outputProbe,
+    source_offsets: {
+      tuong_vy_start_seconds: tuongVyOffset,
+      phuong_an_start_seconds: phuongAnOffset,
     },
   };
 }

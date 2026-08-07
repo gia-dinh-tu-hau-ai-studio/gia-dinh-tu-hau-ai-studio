@@ -25,6 +25,7 @@ import {
   planMvDuetBaseCompositeExecution,
   planMvDuetBaseCompositeReviewApproval,
   planMvDuetBaseCompositeRolloutApproval,
+  selectNextMvDuetBaseCompositeRolloutUnit,
   planMvShotPlanApproval,
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
@@ -36,6 +37,7 @@ import {
   RP015_PHUONG_AN_SOURCE_START_SECONDS,
   RP015_START_SECONDS,
   RP015_TUONG_VY_SOURCE_START_SECONDS,
+  selectRolloutSourceOffset,
 } from "../../media/mv-duet-base-composite.executor";
 
 function pendingMvRenderPlanRows() {
@@ -1331,4 +1333,50 @@ test("từ chối duyệt rollout khi job và approval lệch trạng thái", ()
     () => planMvDuetBaseCompositeRolloutApproval(project, job, approval),
     ProjectRegistryInvalidStateError,
   );
+});
+
+test("rollout tuần tự bỏ qua RP015 và cảnh đã hoàn tất", () => {
+  const units = approvedRenderPlanForRollout().render_units.map((unit) => ({
+    ...unit,
+    rollout_status: unit.render_unit_id === "RP015" ? "PILOT_APPROVED_REFERENCE" : "APPROVED_PENDING_LOCAL_COMPOSITE_EXECUTION",
+    composite_execution_allowed: unit.render_unit_id !== "RP015",
+    provider_execution_allowed: false,
+    render_allowed: false,
+  }));
+  units[0].rollout_status = "SUCCEEDED";
+  const result = selectNextMvDuetBaseCompositeRolloutUnit({
+    rollout_status: "IN_PROGRESS",
+    composite_execution_allowed: true,
+    provider_execution_allowed: false,
+    render_allowed: false,
+    rollout_units: units,
+  });
+  assert.equal(result.next?.render_unit_id, "RP002");
+  assert.equal(result.completed_count, 2);
+  assert.equal(result.remaining_count, 13);
+});
+
+test("rollout hoàn tất là idempotent và không chọn lại unit", () => {
+  const units = approvedRenderPlanForRollout().render_units.map((unit) => ({
+    ...unit,
+    rollout_status: unit.render_unit_id === "RP015" ? "PILOT_APPROVED_REFERENCE" : "SUCCEEDED",
+    provider_execution_allowed: false,
+    render_allowed: false,
+  }));
+  const result = selectNextMvDuetBaseCompositeRolloutUnit({
+    rollout_status: "SUCCEEDED_AWAITING_REVIEW",
+    composite_execution_allowed: true,
+    provider_execution_allowed: false,
+    render_allowed: false,
+    rollout_units: units,
+  });
+  assert.equal(result.next, undefined);
+  assert.equal(result.completed_count, 15);
+  assert.equal(result.remaining_count, 0);
+});
+
+test("source offset rollout luôn nằm trong cửa sổ nguồn", () => {
+  const offset = selectRolloutSourceOffset(250.5, 42.066667, 12.4, 16.22);
+  assert.ok(offset >= 0);
+  assert.ok(offset + 12.4 <= 42.066667 + 0.001);
 });

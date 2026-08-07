@@ -13,7 +13,10 @@ import {
   createServiceAuth,
   GoogleDriveOAuthConfigurationError,
 } from "../../google/google-auth";
-import { executeMvDuetBaseComposite } from "../../media/mv-duet-base-composite.executor";
+import {
+  executeMvDuetBaseComposite,
+  executeMvDuetBaseCompositeUnit,
+} from "../../media/mv-duet-base-composite.executor";
 
 export class ProjectRegistryNotConfiguredError extends Error {}
 export class ProjectRegistryUnavailableError extends Error {}
@@ -340,6 +343,23 @@ export type ApprovedMvDuetBaseCompositeRollout = {
   provider_execution_allowed: false;
   render_allowed: false;
   approved_at: string;
+  idempotent_replay: boolean;
+};
+
+export type ExecutedMvDuetBaseCompositeRolloutUnit = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT" | "REVIEW_MV_DUET_BASE_COMPOSITE_ROLLOUT";
+  job_id: string;
+  job_status: "IN_PROGRESS" | "SUCCEEDED";
+  render_unit_id: string;
+  completed_render_units: number;
+  remaining_render_units: number;
+  output_file_id: string;
+  output_file_url: string;
+  provider_execution_allowed: false;
+  render_allowed: false;
+  executed_at: string;
   idempotent_replay: boolean;
 };
 
@@ -2235,6 +2255,38 @@ export function planMvDuetBaseCompositeRolloutApproval(
     manifest_file_id: manifestFileId,
     idempotent_replay: false,
   };
+}
+
+export function selectNextMvDuetBaseCompositeRolloutUnit(
+  manifest: Record<string, unknown>,
+) {
+  const units = Array.isArray(manifest.rollout_units)
+    ? manifest.rollout_units as Array<Record<string, unknown>>
+    : [];
+  if (
+    String(manifest.rollout_status ?? "") !== "APPROVED" &&
+    String(manifest.rollout_status ?? "") !== "IN_PROGRESS" &&
+    String(manifest.rollout_status ?? "") !== "SUCCEEDED_AWAITING_REVIEW"
+  ) {
+    throw new ProjectRegistryInvalidStateError("Rollout chưa được duyệt để thực thi");
+  }
+  if (
+    manifest.composite_execution_allowed !== true ||
+    manifest.provider_execution_allowed !== false ||
+    manifest.render_allowed !== false ||
+    units.length !== 15
+  ) {
+    throw new ProjectRegistryInvalidStateError("Rollout manifest không giữ đúng khóa an toàn");
+  }
+  const completed = units.filter((unit) =>
+    String(unit.render_unit_id ?? "") === "RP015" ||
+    String(unit.rollout_status ?? "") === "SUCCEEDED"
+  );
+  const next = units.find((unit) =>
+    String(unit.render_unit_id ?? "") !== "RP015" &&
+    String(unit.rollout_status ?? "") !== "SUCCEEDED"
+  );
+  return { next, completed_count: completed.length, remaining_count: units.length - completed.length };
 }
 
 @Injectable()
@@ -4383,6 +4435,178 @@ export class ProjectRegistryConnector {
       throw new ProjectRegistryUnavailableError(
         error instanceof Error ? error.message : "Không duyệt được Base Composite rollout",
       );
+    }
+  }
+
+  async executeMvDuetBaseCompositeRolloutUnit(
+    projectId: string,
+  ): Promise<ExecutedMvDuetBaseCompositeRolloutUnit> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const projectsRootFolderId = requiredSetting("GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID");
+    const sheets = this.createSheetsClient();
+    const drive = this.createDriveClient();
+    let temporaryDirectory = "";
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+      ]);
+      const projects = projectsResponse.data.values ?? [];
+      const jobs = jobsResponse.data.values ?? [];
+      const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex((row, index) =>
+        index > 0 && String(row[1] ?? "").trim() === projectId
+      );
+      if (projectIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const projectRow = projects[projectIndex].map(String);
+      const nextAction = String(projectRow[19] ?? "").trim();
+      if (
+        String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" ||
+        String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION" ||
+        !["EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT", "REVIEW_MV_DUET_BASE_COMPOSITE_ROLLOUT"].includes(nextAction)
+      ) throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không ở cổng thực thi rollout`);
+      const jobIndex = jobs.findIndex((row, index) => index > 0 &&
+        String(row[1] ?? "").trim() === projectId &&
+        String(row[3] ?? "").trim() === MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE
+      );
+      const jobId = jobIndex > 0 ? String(jobs[jobIndex][0] ?? "").trim() : "";
+      const approval = approvals.find((row, index) => index > 0 &&
+        String(row[1] ?? "").trim() === projectId &&
+        String(row[2] ?? "").trim() === MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE &&
+        String(row[3] ?? "").trim() === jobId
+      );
+      const manifestFileId = parseStringArray(jobs[jobIndex]?.[7])[0] ?? "";
+      if (!jobId || !manifestFileId || String(approval?.[4] ?? "") !== "APPROVED") {
+        throw new ProjectRegistryInvalidStateError(`Rollout ${projectId} chưa được duyệt đầy đủ`);
+      }
+      const manifestResponse = await drive.files.get(
+        { fileId: manifestFileId, alt: "media", supportsAllDrives: true },
+        { responseType: "text" },
+      );
+      const manifest = typeof manifestResponse.data === "string"
+        ? parseObject(manifestResponse.data, "MV_DUET_BASE_COMPOSITE_ROLLOUT manifest")
+        : manifestResponse.data as Record<string, unknown>;
+      if (String(manifest.project_id ?? "") !== projectId) {
+        throw new ProjectRegistryInvalidStateError("Rollout manifest sai project_id");
+      }
+      const selection = selectNextMvDuetBaseCompositeRolloutUnit(manifest);
+      const units = manifest.rollout_units as Array<Record<string, unknown>>;
+      if (!selection.next) {
+        const last = [...units].reverse().find((unit) => String(unit.output_file_id ?? ""));
+        return {
+          project_id: projectId, current_stage: "PRE_PRODUCTION",
+          next_action: "REVIEW_MV_DUET_BASE_COMPOSITE_ROLLOUT", job_id: jobId,
+          job_status: "SUCCEEDED", render_unit_id: String(last?.render_unit_id ?? "RP015"),
+          completed_render_units: 15, remaining_render_units: 0,
+          output_file_id: String(last?.output_file_id ?? ""), output_file_url: String(last?.output_file_url ?? ""),
+          provider_execution_allowed: false, render_allowed: false,
+          executed_at: String(manifest.completed_at ?? manifest.updated_at ?? ""), idempotent_replay: true,
+        };
+      }
+      const unit = selection.next;
+      const renderUnitId = String(unit.render_unit_id ?? "").trim();
+      const startSeconds = Number(unit.start_seconds);
+      const durationSeconds = Number(unit.duration_seconds);
+      const framing = (unit.framing_constraints ?? {}) as Record<string, unknown>;
+      const performer = String(unit.performer ?? "");
+      if (
+        !renderUnitId || renderUnitId === "RP015" || !Number.isFinite(startSeconds) ||
+        !Number.isFinite(durationSeconds) || durationSeconds <= 0 ||
+        unit.provider_execution_allowed !== false || unit.render_allowed !== false ||
+        ((performer === "TUONG_VY_EM" || performer === "SONG_CA") &&
+          (framing.close_up_allowed !== false || framing.preserve_microphone !== true))
+      ) throw new ProjectRegistryInvalidStateError(`Render unit ${renderUnitId || "EMPTY"} không an toàn`);
+
+      const sourceRefs = (manifest.source_references ?? {}) as Record<string, unknown>;
+      const pilotManifestId = String(sourceRefs.approved_pilot_manifest_file_id ?? "").trim();
+      const pilotResponse = await drive.files.get(
+        { fileId: pilotManifestId, alt: "media", supportsAllDrives: true },
+        { responseType: "text" },
+      );
+      const pilot = typeof pilotResponse.data === "string"
+        ? parseObject(pilotResponse.data, "MV_DUET_BASE_COMPOSITE pilot manifest")
+        : pilotResponse.data as Record<string, unknown>;
+      const sources = Array.isArray(pilot.source_videos) ? pilot.source_videos as Array<Record<string, unknown>> : [];
+      const tuongVy = sources.find((source) => String(source.character_id ?? "") === "GDTH-CHAR-001");
+      const phuongAn = sources.find((source) => String(source.character_id ?? "") === "GDTH-CHAR-002");
+      if (!tuongVy || !phuongAn || tuongVy.close_up_allowed !== false || tuongVy.preserve_microphone !== true) {
+        throw new ProjectRegistryInvalidStateError("Nguồn rollout không giữ đúng khóa Tường Vy");
+      }
+      const projectFolderId = String(projectRow[20] ?? "").trim();
+      const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
+      assertProjectFolderWithinRoot(projectFolder.data, projectsRootFolderId, projectId);
+      temporaryDirectory = await mkdtemp(join(tmpdir(), `gdth-${renderUnitId.toLowerCase()}-`));
+      const tuongVyPath = join(temporaryDirectory, "tuong-vy-source");
+      const phuongAnPath = join(temporaryDirectory, "phuong-an-source");
+      const outputPath = join(temporaryDirectory, `${renderUnitId}.mp4`);
+      const download = async (fileId: string, destination: string) => {
+        const response = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
+        await pipeline(response.data as Readable, createWriteStream(destination));
+      };
+      await Promise.all([
+        download(String(tuongVy.file_id ?? ""), tuongVyPath),
+        download(String(phuongAn.file_id ?? ""), phuongAnPath),
+      ]);
+      const probe = await executeMvDuetBaseCompositeUnit(
+        { render_unit_id: renderUnitId, start_seconds: startSeconds, duration_seconds: durationSeconds },
+        tuongVyPath, phuongAnPath, outputPath,
+      );
+      if ((await stat(outputPath)).size <= 0) throw new ProjectRegistryInvalidStateError(`FFmpeg không tạo output ${renderUnitId}`);
+      const compositeFolder = await this.findChildFolder(drive, projectFolderId, "03_ORIGINAL_FACE_COMPOSITE");
+      const outputName = `MV_DUET_BASE_COMPOSITE_${renderUnitId}_${projectId}.mp4`;
+      const existing = await drive.files.list({
+        q: `'${compositeFolder.id}' in parents and name='${outputName.replace(/'/g, "\\'")}' and trashed=false`,
+        fields: "files(id,webViewLink)", spaces: "drive", supportsAllDrives: true, includeItemsFromAllDrives: true,
+      });
+      const outputFile = existing.data.files?.[0]?.id
+        ? await drive.files.update({ fileId: existing.data.files[0].id!, media: { mimeType: "video/mp4", body: createReadStream(outputPath) }, fields: "id,webViewLink", supportsAllDrives: true })
+        : await drive.files.create({ requestBody: { name: outputName, mimeType: "video/mp4", parents: [compositeFolder.id] }, media: { mimeType: "video/mp4", body: createReadStream(outputPath) }, fields: "id,webViewLink", supportsAllDrives: true });
+      const outputFileId = String(outputFile.data.id ?? "");
+      const outputFileUrl = outputFile.data.webViewLink ?? `https://drive.google.com/file/d/${outputFileId}/view`;
+      const executedAt = new Date().toISOString();
+      const updatedUnits = units.map((candidate) => String(candidate.render_unit_id ?? "") === renderUnitId ? {
+        ...candidate, rollout_status: "SUCCEEDED", composite_execution_allowed: false,
+        provider_execution_allowed: false, render_allowed: false,
+        output_file_id: outputFileId, output_file_url: outputFileUrl,
+        width: probe.width, height: probe.height, output_duration_seconds: probe.duration_seconds,
+        source_offsets: probe.source_offsets, executed_at: executedAt,
+      } : candidate);
+      const completedCount = updatedUnits.filter((candidate) =>
+        String(candidate.render_unit_id ?? "") === "RP015" || String(candidate.rollout_status ?? "") === "SUCCEEDED"
+      ).length;
+      const remainingCount = 15 - completedCount;
+      const final = remainingCount === 0;
+      const result: ExecutedMvDuetBaseCompositeRolloutUnit = {
+        project_id: projectId, current_stage: "PRE_PRODUCTION",
+        next_action: final ? "REVIEW_MV_DUET_BASE_COMPOSITE_ROLLOUT" : "EXECUTE_MV_DUET_BASE_COMPOSITE_ROLLOUT",
+        job_id: jobId, job_status: final ? "SUCCEEDED" : "IN_PROGRESS", render_unit_id: renderUnitId,
+        completed_render_units: completedCount, remaining_render_units: remainingCount,
+        output_file_id: outputFileId, output_file_url: outputFileUrl,
+        provider_execution_allowed: false, render_allowed: false, executed_at: executedAt, idempotent_replay: false,
+      };
+      await drive.files.update({ fileId: manifestFileId, media: { mimeType: "application/json", body: Readable.from([`${JSON.stringify({
+        ...manifest, rollout_status: final ? "SUCCEEDED_AWAITING_REVIEW" : "IN_PROGRESS",
+        composite_execution_allowed: !final, provider_execution_allowed: false, render_allowed: false,
+        rollout_units: updatedUnits, completed_render_units: completedCount,
+        remaining_render_units: remainingCount, updated_at: executedAt, ...(final ? { completed_at: executedAt } : {}),
+      }, null, 2)}\n`]) }, supportsAllDrives: true });
+      const projectSheetRow = projectIndex + 1; const jobSheetRow = jobIndex + 1;
+      const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
+        { range: `'PROJECTS'!S${projectSheetRow}:T${projectSheetRow}`, values: [["PRE_PRODUCTION", result.next_action]] },
+        { range: `'PROJECTS'!X${projectSheetRow}`, values: [[executedAt]] },
+        { range: `'PRODUCTION_JOBS'!E${jobSheetRow}:J${jobSheetRow}`, values: [[result.job_status, "", String(jobs[jobIndex][6] ?? "[]"), JSON.stringify([manifestFileId, ...updatedUnits.map((candidate) => candidate.output_file_id).filter(Boolean)]), JSON.stringify(result), Number(jobs[jobIndex][9] ?? 0) + 1]] },
+        { range: `'PRODUCTION_JOBS'!L${jobSheetRow}:N${jobSheetRow}`, values: [[final ? executedAt : "", String(jobs[jobIndex][12] ?? ""), executedAt]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_DUET_BASE_COMPOSITE_ROLLOUT_UNIT_EXECUTED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã dựng local ${renderUnitId}; ${remainingCount} cảnh còn lại. Không gọi provider.`, executedAt]] },
+      ] } });
+      return result;
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không thực thi được Base Composite rollout");
+    } finally {
+      if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
     }
   }
 
