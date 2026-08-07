@@ -148,7 +148,12 @@ export class AppController {
 
   @Post("projects/:projectId/create-rp015-final-proof")
   createRp015FinalProof(@Param("projectId") projectId: string, @Body() body: unknown) {
-    return this.intakeService.createRp015FinalProof(projectId, body);
+    return this.intakeService.startRp015FinalProof(projectId, body);
+  }
+
+  @Get("projects/:projectId/rp015-final-proof-status")
+  getRp015FinalProofStatus(@Param("projectId") projectId: string) {
+    return this.intakeService.getRp015FinalProofStatus(projectId);
   }
 
   @Post("projects/:projectId/prepare-rp015-vocal-pilot")

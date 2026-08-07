@@ -10,6 +10,7 @@ type CleanVoiceReferenceResult = {
   current_stage?: string;
   next_action?: string;
   job_status?: string;
+  job_id?: string;
   manifest_file_url?: string;
   output_file_url?: string;
   proof_status?: string;
@@ -22,7 +23,16 @@ type CleanVoiceReferenceResult = {
   render_allowed?: boolean;
   message?: string;
   code?: string;
+  error_message?: string;
+  result?: CleanVoiceReferenceResult;
 };
+
+const FINAL_PROOF_POLL_INTERVAL_MS = 5_000;
+const FINAL_PROOF_POLL_LIMIT = 240;
+
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
 
 export function ProjectOperationsPanel() {
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT_ID);
@@ -133,10 +143,34 @@ export function ProjectOperationsPanel() {
       setResult(body);
       if (!response.ok) {
         setError(body.message ?? body.code ?? "Không tạo được Final Proof V4 RP015.");
+        return;
       }
+
+      if (body.job_status === "SUCCEEDED") return;
+
+      for (let attempt = 0; attempt < FINAL_PROOF_POLL_LIMIT; attempt += 1) {
+        await wait(FINAL_PROOF_POLL_INTERVAL_MS);
+        const statusResponse = await fetch(
+          `/api/projects/${encodeURIComponent(normalizedProjectId)}/rp015-final-proof-status`,
+          { method: "GET", cache: "no-store" },
+        );
+        const status = (await statusResponse.json()) as CleanVoiceReferenceResult;
+        setResult(status);
+        if (!statusResponse.ok) {
+          setError(status.message ?? status.code ?? "Không đọc được trạng thái Final Proof V4 RP015.");
+          return;
+        }
+        if (status.job_status === "SUCCEEDED") return;
+        if (status.job_status === "FAILED") {
+          setError(status.error_message ?? "Final Proof V4 RP015 thất bại.");
+          return;
+        }
+      }
+
+      setError("Final Proof V4 vẫn đang chạy. Có thể bấm lại để tiếp tục theo dõi cùng job, không tạo job trùng.");
     } catch {
       setError(
-        "Không kết nối được API khi tạo Final Proof V4. Hệ thống không tự động gửi lại để tránh tạo tác vụ trùng.",
+        "Mất kết nối khi theo dõi Final Proof V4. Có thể bấm lại; API sẽ trả về job đang chạy thay vì tạo trùng.",
       );
     } finally {
       setCreatingProof(false);
@@ -196,7 +230,7 @@ export function ProjectOperationsPanel() {
           onClick={createFinalProofV4}
           type="button"
         >
-          {creatingProof ? "Đang dựng Final Proof V4…" : "Chạy Final Proof V4 RP015"}
+          {creatingProof ? "Đang theo dõi Final Proof V4…" : "Chạy Final Proof V4 RP015"}
         </button>
       </div>
 
@@ -210,8 +244,8 @@ export function ProjectOperationsPanel() {
       {result && (
         <div className="operation-result">
           <pre>{JSON.stringify(result, null, 2)}</pre>
-          {result.output_file_url && (
-            <a href={result.output_file_url} rel="noreferrer" target="_blank">
+          {(result.result?.output_file_url ?? result.output_file_url) && (
+            <a href={result.result?.output_file_url ?? result.output_file_url} rel="noreferrer" target="_blank">
               Mở Final Proof V4 RP015 trên Drive
             </a>
           )}
