@@ -135,4 +135,9 @@ export class AppController {
   prepareMvDuetBaseCompositeRollout(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvDuetBaseCompositeRollout(projectId);
   }
+
+  @Post("projects/:projectId/approve-mv-duet-base-composite-rollout")
+  approveMvDuetBaseCompositeRollout(@Param("projectId") projectId: string) {
+    return this.intakeService.approveMvDuetBaseCompositeRollout(projectId);
+  }
 }
