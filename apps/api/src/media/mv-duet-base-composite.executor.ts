@@ -90,8 +90,8 @@ export async function executeMvDuetBaseComposite(
     const detail = [failure.message, failure.stderr]
       .filter(Boolean)
       .join(" | ")
-      .replace(/\/tmp\/[^\\s'"]+/g, "<temporary-file>")
-      .replace(/\\s+/g, " ")
+      .replace(/\/tmp\/[^\s'"]+/g, "<temporary-file>")
+      .replace(/\s+/g, " ")
       .slice(0, 2_000);
     console.error(JSON.stringify({
       event: "MV_DUET_BASE_COMPOSITE_FFMPEG_FAILED",
