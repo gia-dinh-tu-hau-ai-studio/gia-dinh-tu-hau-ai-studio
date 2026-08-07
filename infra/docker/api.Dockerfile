@@ -12,8 +12,12 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/demucs
 ENV PATH="/opt/demucs/bin:${PATH}"
-RUN pip install --no-cache-dir "https://download.pytorch.org/whl/cpu/torch-2.7.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
-  && pip install --no-cache-dir demucs==4.0.1
+RUN pip install --no-cache-dir \
+      "https://download.pytorch.org/whl/cpu/torch-2.7.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
+      "https://download.pytorch.org/whl/cpu/torchaudio-2.7.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
+  && python3 -c "import torch, torchaudio; assert torch.__version__ == '2.7.1+cpu'; assert torchaudio.__version__ == '2.7.1+cpu'" \
+  && pip install --no-cache-dir demucs==4.0.1 \
+  && python3 -c "import torch, torchaudio; assert torch.__version__ == '2.7.1+cpu'; assert torchaudio.__version__ == '2.7.1+cpu'"
 RUN python3 -c "from demucs.pretrained import get_model; get_model('htdemucs_ft')"
 WORKDIR /app
 ENV NODE_ENV=production
