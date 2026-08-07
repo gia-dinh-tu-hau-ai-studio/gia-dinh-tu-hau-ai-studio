@@ -64,8 +64,7 @@ export async function extractAndEvaluateVoiceReference(
     ["-hide_banner", "-i", wavOutputPath, "-af", "volumedetect", "-f", "null", "-"],
     { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
   );
-  const meanDb = Number(loudness.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
-  const maxDb = Number(loudness.stderr.match(/max_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  const { meanDb, maxDb } = parseVoiceReferenceLoudness(loudness.stderr);
   return {
     duration_seconds: durationSeconds,
     sample_rate_hz: Number(stream.sample_rate ?? 0),
@@ -73,6 +72,13 @@ export async function extractAndEvaluateVoiceReference(
     mean_volume_db: meanDb,
     max_volume_db: maxDb,
     technical_status: classifyVoiceReference(durationSeconds, meanDb, maxDb),
+  };
+}
+
+export function parseVoiceReferenceLoudness(stderr: string) {
+  return {
+    meanDb: Number(stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]),
+    maxDb: Number(stderr.match(/max_volume:\s*(-?[\d.]+) dB/)?.[1]),
   };
 }
 
@@ -133,8 +139,7 @@ export async function cleanAndEvaluateVoiceReference(
     ["-hide_banner", "-i", outputPath, "-af", "volumedetect", "-f", "null", "-"],
     { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
   );
-  const meanDb = Number(loudness.stderr.match(/mean_volume:\\s*(-?[\\d.]+) dB/)?.[1]);
-  const maxDb = Number(loudness.stderr.match(/max_volume:\\s*(-?[\\d.]+) dB/)?.[1]);
+  const { meanDb, maxDb } = parseVoiceReferenceLoudness(loudness.stderr);
   return {
     duration_seconds: durationSeconds,
     sample_rate_hz: Number(stream?.sample_rate ?? 0),
