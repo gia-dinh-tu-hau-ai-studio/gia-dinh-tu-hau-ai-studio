@@ -715,6 +715,9 @@ export function buildMvDuetBaseCompositeRolloutManifest(
     total_render_units: 15,
     total_duration_seconds: Number(totalDurationSeconds.toFixed(3)),
     execution_scope: "PLAN_ONLY",
+    composite_execution_allowed: false,
+    provider_execution_allowed: false,
+    render_allowed: false,
     rollout_units: units.map((unit) => ({
       render_unit_id: unit.render_unit_id,
       cue_order: unit.cue_order,
