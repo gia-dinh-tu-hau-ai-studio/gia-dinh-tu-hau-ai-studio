@@ -29,6 +29,7 @@ import {
 import {
   buildMvDuetBaseCompositeFfmpegArgs,
   RP015_DURATION_SECONDS,
+  RP015_FFMPEG_TIMEOUT_MS,
   RP015_START_SECONDS,
 } from "../../media/mv-duet-base-composite.executor";
 
@@ -1054,6 +1055,11 @@ test("từ chối thực thi RP015 khi approval chưa APPROVED", () => {
     () => planMvDuetBaseCompositeExecution(project, job, approval),
     ProjectRegistryInvalidStateError,
   );
+});
+
+test("FFmpeg RP015 có tối đa 720 giây dưới timeout Cloud Run 900 giây", () => {
+  assert.equal(RP015_FFMPEG_TIMEOUT_MS, 720_000);
+  assert.ok(RP015_FFMPEG_TIMEOUT_MS < 900_000);
 });
 
 test("FFmpeg chỉ dựng RP015 9.62 giây, không gắn audio và xuất 1920x1080", () => {
