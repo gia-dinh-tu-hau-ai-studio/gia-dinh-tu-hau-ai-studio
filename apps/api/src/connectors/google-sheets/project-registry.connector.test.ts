@@ -38,6 +38,7 @@ import {
   buildMvDuetBaseCompositeFfmpegArgs,
   buildRp015FinalProofFfmpegArgs,
   classifyVoiceReference,
+  parseVoiceReferenceLoudness,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
   RP015_PHUONG_AN_SOURCE_START_SECONDS,
@@ -51,6 +52,15 @@ test("voice reference chỉ là ứng viên khi đủ dài và nghe được", (
   assert.equal(classifyVoiceReference(42.1, -20, -1), "REFERENCE_CANDIDATE");
   assert.equal(classifyVoiceReference(19.9, -20, -1), "NOT_USABLE");
   assert.equal(classifyVoiceReference(42.1, -60, -50), "NOT_USABLE");
+});
+
+test("đọc đúng loudness FFmpeg sau khi Demucs tách stem", () => {
+  const parsed = parseVoiceReferenceLoudness([
+    "[Parsed_volumedetect_0] mean_volume: -16.4 dB",
+    "[Parsed_volumedetect_0] max_volume: -1.5 dB",
+  ].join("\n"));
+  assert.deepEqual(parsed, { meanDb: -16.4, maxDb: -1.5 });
+  assert.equal(classifyVoiceReference(42.1, parsed.meanDb, parsed.maxDb), "REFERENCE_CANDIDATE");
 });
 
 test("voice reference dùng Demucs two-stems vocals rồi khóa WAV mono 48 kHz", () => {
