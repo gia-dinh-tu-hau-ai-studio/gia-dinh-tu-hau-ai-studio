@@ -1071,6 +1071,11 @@ test("FFmpeg chỉ dựng RP015 9.62 giây, không gắn audio và xuất 1920x1
   assert.ok(args.includes(String(RP015_START_SECONDS)));
   assert.ok(args.includes(String(RP015_DURATION_SECONDS)));
   assert.ok(args.includes("-an"));
-  assert.ok(args.some((value) => value.includes("hstack=inputs=2")));
+  const filterIndex = args.indexOf("-filter_complex");
+  const filterGraph = args[filterIndex + 1] ?? "";
+  assert.match(filterGraph, /\[0:v\]scale=.*?,pad=.*?,setsar=1\[left\]/);
+  assert.match(filterGraph, /\[1:v\]scale=.*?,pad=.*?,setsar=1\[right\]/);
+  assert.doesNotMatch(filterGraph, /;pad=/);
+  assert.ok(filterGraph.includes("[left][right]hstack=inputs=2[outv]"));
   assert.equal(args.at(-1), "/tmp/rp015.mp4");
 });
