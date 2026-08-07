@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { parse, join } from "node:path";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -73,11 +76,26 @@ export async function extractAndEvaluateVoiceReference(
   };
 }
 
-export function buildVoiceReferenceCleanupFfmpegArgs(inputPath: string, outputPath: string) {
+export const RP015_DEMUCS_MODEL = "htdemucs_ft";
+
+export function buildVoiceReferenceSeparationArgs(inputPath: string, outputDirectory: string) {
+  return [
+    "-m", "demucs.separate",
+    "--two-stems", "vocals",
+    "--name", RP015_DEMUCS_MODEL,
+    "--out", outputDirectory,
+    inputPath,
+  ];
+}
+
+export function resolveDemucsVocalsPath(inputPath: string, outputDirectory: string) {
+  return join(outputDirectory, RP015_DEMUCS_MODEL, parse(inputPath).name, "vocals.wav");
+}
+
+export function buildVoiceReferenceNormalizationFfmpegArgs(inputPath: string, outputPath: string) {
   return [
     "-hide_banner", "-loglevel", "error", "-y", "-i", inputPath, "-vn",
-    "-af",
-    "highpass=f=80,lowpass=f=12000,afftdn=nf=-30:tn=1,acompressor=threshold=-20dB:ratio=3:attack=10:release=100,loudnorm=I=-16:TP=-1.5:LRA=7",
+    "-af", "highpass=f=70,lowpass=f=14000,loudnorm=I=-16:TP=-1.5:LRA=7",
     "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", outputPath,
   ];
 }
@@ -86,11 +104,22 @@ export async function cleanAndEvaluateVoiceReference(
   inputPath: string,
   outputPath: string,
 ): Promise<VoiceReferenceEvaluation> {
-  await execFileAsync(
-    "ffmpeg",
-    buildVoiceReferenceCleanupFfmpegArgs(inputPath, outputPath),
-    { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 },
-  );
+  const separationDirectory = await mkdtemp(join(tmpdir(), "gdth-demucs-"));
+  try {
+    await execFileAsync(
+      "python3",
+      buildVoiceReferenceSeparationArgs(inputPath, separationDirectory),
+      { timeout: 720_000, maxBuffer: 8 * 1024 * 1024 },
+    );
+    const vocalsPath = resolveDemucsVocalsPath(inputPath, separationDirectory);
+    await execFileAsync(
+      "ffmpeg",
+      buildVoiceReferenceNormalizationFfmpegArgs(vocalsPath, outputPath),
+      { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 },
+    );
+  } finally {
+    await rm(separationDirectory, { recursive: true, force: true });
+  }
   const probe = await execFileAsync(
     "ffprobe",
     ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate,channels:format=duration", "-of", "json", outputPath],
@@ -104,8 +133,8 @@ export async function cleanAndEvaluateVoiceReference(
     ["-hide_banner", "-i", outputPath, "-af", "volumedetect", "-f", "null", "-"],
     { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
   );
-  const meanDb = Number(loudness.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
-  const maxDb = Number(loudness.stderr.match(/max_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  const meanDb = Number(loudness.stderr.match(/mean_volume:\\s*(-?[\\d.]+) dB/)?.[1]);
+  const maxDb = Number(loudness.stderr.match(/max_volume:\\s*(-?[\\d.]+) dB/)?.[1]);
   return {
     duration_seconds: durationSeconds,
     sample_rate_hz: Number(stream?.sample_rate ?? 0),
