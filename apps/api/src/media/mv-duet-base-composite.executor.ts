@@ -73,6 +73,49 @@ export async function extractAndEvaluateVoiceReference(
   };
 }
 
+export function buildVoiceReferenceCleanupFfmpegArgs(inputPath: string, outputPath: string) {
+  return [
+    "-hide_banner", "-loglevel", "error", "-y", "-i", inputPath, "-vn",
+    "-af",
+    "highpass=f=80,lowpass=f=12000,afftdn=nf=-30:tn=1,acompressor=threshold=-20dB:ratio=3:attack=10:release=100,loudnorm=I=-16:TP=-1.5:LRA=7",
+    "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", outputPath,
+  ];
+}
+
+export async function cleanAndEvaluateVoiceReference(
+  inputPath: string,
+  outputPath: string,
+): Promise<VoiceReferenceEvaluation> {
+  await execFileAsync(
+    "ffmpeg",
+    buildVoiceReferenceCleanupFfmpegArgs(inputPath, outputPath),
+    { timeout: 180_000, maxBuffer: 2 * 1024 * 1024 },
+  );
+  const probe = await execFileAsync(
+    "ffprobe",
+    ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate,channels:format=duration", "-of", "json", outputPath],
+    { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8" },
+  );
+  const data = JSON.parse(probe.stdout) as { streams?: Array<{ sample_rate?: string; channels?: number }>; format?: { duration?: string } };
+  const stream = data.streams?.[0];
+  const durationSeconds = Number(data.format?.duration ?? 0);
+  const loudness = await execFileAsync(
+    "ffmpeg",
+    ["-hide_banner", "-i", outputPath, "-af", "volumedetect", "-f", "null", "-"],
+    { timeout: 30_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
+  );
+  const meanDb = Number(loudness.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  const maxDb = Number(loudness.stderr.match(/max_volume:\s*(-?[\d.]+) dB/)?.[1]);
+  return {
+    duration_seconds: durationSeconds,
+    sample_rate_hz: Number(stream?.sample_rate ?? 0),
+    channels: Number(stream?.channels ?? 0),
+    mean_volume_db: meanDb,
+    max_volume_db: maxDb,
+    technical_status: classifyVoiceReference(durationSeconds, meanDb, maxDb),
+  };
+}
+
 export type MvDuetCompositeUnit = {
   render_unit_id: string;
   start_seconds: number;

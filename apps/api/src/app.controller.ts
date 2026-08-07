@@ -155,4 +155,9 @@ export class AppController {
   prepareRp015VocalPilot(@Param("projectId") projectId: string) {
     return this.intakeService.prepareRp015VocalPilot(projectId);
   }
+
+  @Post("projects/:projectId/prepare-rp015-clean-voice-references")
+  prepareRp015CleanVoiceReferences(@Param("projectId") projectId: string) {
+    return this.intakeService.prepareRp015CleanVoiceReferences(projectId);
+  }
 }

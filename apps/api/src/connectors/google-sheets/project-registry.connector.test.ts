@@ -31,6 +31,7 @@ import {
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
 import {
+  buildVoiceReferenceCleanupFfmpegArgs,
   buildMvDuetBaseCompositeFfmpegArgs,
   buildRp015FinalProofFfmpegArgs,
   classifyVoiceReference,
@@ -47,6 +48,16 @@ test("voice reference chỉ là ứng viên khi đủ dài và nghe được", (
   assert.equal(classifyVoiceReference(42.1, -20, -1), "REFERENCE_CANDIDATE");
   assert.equal(classifyVoiceReference(19.9, -20, -1), "NOT_USABLE");
   assert.equal(classifyVoiceReference(42.1, -60, -50), "NOT_USABLE");
+});
+
+test("chuẩn hóa voice reference giảm nền, giới hạn dải giọng và khóa WAV mono 48 kHz", () => {
+  const args = buildVoiceReferenceCleanupFfmpegArgs("source.wav", "clean.wav");
+  const filter = args[args.indexOf("-af") + 1];
+  assert.ok(filter.includes("highpass=f=80"));
+  assert.ok(filter.includes("lowpass=f=12000"));
+  assert.ok(filter.includes("afftdn="));
+  assert.ok(filter.includes("loudnorm=I=-16"));
+  assert.deepEqual(args.slice(-7), ["-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", "clean.wav"]);
 });
 
 function pendingMvRenderPlanRows() {
