@@ -1,4 +1,5 @@
 import { ProjectIntakeForm } from "../components/project-intake-form";
+import { ProjectOperationsPanel } from "../components/project-operations-panel";
 
 export default function HomePage() {
   return (
@@ -9,6 +10,7 @@ export default function HomePage() {
         <p>Khởi tạo hợp đồng MV người thật · ORIGINAL_FACE_COMPOSITE</p>
       </header>
       <ProjectIntakeForm />
+      <ProjectOperationsPanel />
     </main>
   );
 }
