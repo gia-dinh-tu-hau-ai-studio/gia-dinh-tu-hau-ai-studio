@@ -1976,7 +1976,6 @@ export class ProjectRegistryConnector {
       if (transition.idempotent_replay) return transition;
 
       const sheetRow = rowIndex + 1;
-      executionStage = "PERSISTING_RESULT";
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId,
         requestBody: {
@@ -2378,27 +2377,8 @@ export class ProjectRegistryConnector {
         },
       });
 
-      executionStage = "COMPLETED";
-      console.log(JSON.stringify({
-        event: "MV_DUET_BASE_COMPOSITE_COMPLETED",
-        project_id: transition.project_id,
-        render_unit_id: "RP015",
-        elapsed_ms: Date.now() - executionStartedAt,
-      }));
       return result;
     } catch (error) {
-      const detail = (error instanceof Error ? error.message : String(error))
-        .replace(/\/tmp\/[^\s'"]+/g, "<temporary-file>")
-        .replace(/\s+/g, " ")
-        .slice(0, 2_000);
-      console.error(JSON.stringify({
-        event: "MV_DUET_BASE_COMPOSITE_FAILED",
-        project_id: projectId,
-        render_unit_id: "RP015",
-        stage: executionStage,
-        elapsed_ms: Date.now() - executionStartedAt,
-        error: detail,
-      }));
       if (
         error instanceof ProjectRegistryNotConfiguredError ||
         error instanceof ProjectRegistryProjectNotFoundError ||
@@ -3916,6 +3896,7 @@ export class ProjectRegistryConnector {
         transition.manifest_file_id,
         outputFileId,
       ];
+      executionStage = "PERSISTING_RESULT";
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId,
         requestBody: {
@@ -3960,8 +3941,27 @@ export class ProjectRegistryConnector {
           ],
         },
       });
+      executionStage = "COMPLETED";
+      console.log(JSON.stringify({
+        event: "MV_DUET_BASE_COMPOSITE_COMPLETED",
+        project_id: transition.project_id,
+        render_unit_id: "RP015",
+        elapsed_ms: Date.now() - executionStartedAt,
+      }));
       return result;
     } catch (error) {
+      const detail = (error instanceof Error ? error.message : String(error))
+        .replace(/\/tmp\/[^\s'"]+/g, "<temporary-file>")
+        .replace(/\s+/g, " ")
+        .slice(0, 2_000);
+      console.error(JSON.stringify({
+        event: "MV_DUET_BASE_COMPOSITE_FAILED",
+        project_id: projectId,
+        render_unit_id: "RP015",
+        stage: executionStage,
+        elapsed_ms: Date.now() - executionStartedAt,
+        error: detail,
+      }));
       if (
         error instanceof ProjectRegistryNotConfiguredError ||
         error instanceof ProjectRegistryProjectNotFoundError ||
