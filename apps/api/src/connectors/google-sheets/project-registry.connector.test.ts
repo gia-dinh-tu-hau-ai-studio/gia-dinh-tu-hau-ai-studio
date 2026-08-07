@@ -1402,16 +1402,20 @@ test("FFmpeg rollout lặp riêng cả hai input nhưng RP015 không bị thay �
   assert.equal(pilotArgs.includes("-stream_loop"), false);
 });
 
-test("RP015 final proof ghép đúng audio master 362-371.62 và giữ video", () => {
-  const args = buildRp015FinalProofFfmpegArgs("rp015.mp4", "master.wav", "proof.mp4");
-  const seek = args.indexOf("-ss");
-  const duration = args.indexOf("-t");
-  assert.equal(args[seek + 1], String(RP015_MASTER_AUDIO_START_SECONDS));
-  assert.equal(args[duration + 1], String(RP015_DURATION_SECONDS));
-  assert.ok(args.includes("0:v:0"));
-  assert.ok(args.includes("1:a:0"));
-  assert.ok(args.includes("copy"));
+test("RP015 final proof cắt luân phiên hai nguồn toàn khung và dùng vocal master", () => {
+  const args = buildRp015FinalProofFfmpegArgs("tuong-vy.mp4", "phuong-an.mp4", "vocal-master.wav", "proof.mp4");
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.ok(filter.includes("concat=n=5:v=1:a=0[outv]"));
+  assert.ok(filter.includes("scale=1920:1080"));
+  assert.equal(filter.includes("hstack"), false);
+  assert.ok(args.includes("[outv]"));
+  assert.ok(args.includes("2:a:0"));
+  assert.equal(args.includes("copy"), false);
   assert.ok(args.includes("aac"));
   assert.ok(args.includes("192k"));
   assert.ok(args.includes("-shortest"));
+  const vocalIndex = args.indexOf("vocal-master.wav");
+  assert.equal(args[vocalIndex - 5], "-ss");
+  assert.equal(args[vocalIndex - 4], String(RP015_MASTER_AUDIO_START_SECONDS));
+  assert.equal(args[vocalIndex - 2], String(RP015_DURATION_SECONDS));
 });

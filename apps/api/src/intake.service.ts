@@ -654,10 +654,13 @@ export class IntakeService {
     }
   }
 
-  async createRp015FinalProof(projectIdInput: string) {
+  async createRp015FinalProof(projectIdInput: string, body: unknown) {
     const projectId = projectIdInput.trim();
     if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.createRp015FinalProof(projectId); }
+    const request = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+    const vocalMasterFileId = String(request.vocal_master_file_id ?? "").trim();
+    if (!vocalMasterFileId) throw new BadRequestException({ code: "VOCAL_MASTER_FILE_ID_REQUIRED", message: "vocal_master_file_id có giọng hát là bắt buộc" });
+    try { return await this.projectRegistry.createRp015FinalProof(projectId, vocalMasterFileId); }
     catch (error) {
       if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
       if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "RP015_FINAL_PROOF_INVALID_STATE", message: error.message });
