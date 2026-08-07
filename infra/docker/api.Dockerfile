@@ -6,8 +6,15 @@ COPY packages ./packages
 RUN npm ci
 RUN npm run build --workspace @tu-hau/contracts && npm run build --workspace @tu-hau/api
 
-FROM node:22-alpine
-RUN apk add --no-cache ffmpeg
+FROM node:22-bookworm-slim
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg python3 python3-venv ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+RUN python3 -m venv /opt/demucs
+ENV PATH="/opt/demucs/bin:${PATH}"
+RUN pip install --no-cache-dir torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu \
+  && pip install --no-cache-dir demucs==4.0.1
+RUN python3 -c "from demucs.pretrained import get_model; get_model('htdemucs_ft')"
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules

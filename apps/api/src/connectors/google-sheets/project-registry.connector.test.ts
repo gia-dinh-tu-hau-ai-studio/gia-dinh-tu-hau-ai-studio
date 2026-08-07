@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { join } from "node:path";
 import { normalizeProjectIntake } from "@tu-hau/contracts";
 import {
   applyMvAssetCharacterSafetyLocks,
@@ -31,7 +32,9 @@ import {
   ProjectRegistryInvalidStateError,
 } from "./project-registry.connector";
 import {
-  buildVoiceReferenceCleanupFfmpegArgs,
+  buildVoiceReferenceNormalizationFfmpegArgs,
+  buildVoiceReferenceSeparationArgs,
+  resolveDemucsVocalsPath,
   buildMvDuetBaseCompositeFfmpegArgs,
   buildRp015FinalProofFfmpegArgs,
   classifyVoiceReference,
@@ -50,14 +53,25 @@ test("voice reference chỉ là ứng viên khi đủ dài và nghe được", (
   assert.equal(classifyVoiceReference(42.1, -60, -50), "NOT_USABLE");
 });
 
-test("chuẩn hóa voice reference giảm nền, giới hạn dải giọng và khóa WAV mono 48 kHz", () => {
-  const args = buildVoiceReferenceCleanupFfmpegArgs("source.wav", "clean.wav");
-  const filter = args[args.indexOf("-af") + 1];
-  assert.ok(filter.includes("highpass=f=80"));
-  assert.ok(filter.includes("lowpass=f=12000"));
-  assert.ok(filter.includes("afftdn="));
+test("voice reference dùng Demucs two-stems vocals rồi khóa WAV mono 48 kHz", () => {
+  const separationArgs = buildVoiceReferenceSeparationArgs("source.wav", "/tmp/separated");
+  assert.deepEqual(separationArgs, [
+    "-m", "demucs.separate",
+    "--two-stems", "vocals",
+    "--name", "htdemucs_ft",
+    "--out", "/tmp/separated",
+    "source.wav",
+  ]);
+  assert.equal(
+    resolveDemucsVocalsPath("source.wav", "/tmp/separated"),
+    join("/tmp/separated", "htdemucs_ft", "source", "vocals.wav"),
+  );
+  const normalizationArgs = buildVoiceReferenceNormalizationFfmpegArgs("vocals.wav", "clean.wav");
+  const filter = normalizationArgs[normalizationArgs.indexOf("-af") + 1];
+  assert.ok(filter.includes("highpass=f=70"));
+  assert.ok(filter.includes("lowpass=f=14000"));
   assert.ok(filter.includes("loudnorm=I=-16"));
-  assert.deepEqual(args.slice(-7), ["-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", "clean.wav"]);
+  assert.deepEqual(normalizationArgs.slice(-7), ["-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", "clean.wav"]);
 });
 
 function pendingMvRenderPlanRows() {

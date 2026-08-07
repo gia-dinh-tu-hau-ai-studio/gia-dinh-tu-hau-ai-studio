@@ -470,7 +470,8 @@ const MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE = "MV_DUET_BASE_COMPOSITE_ROLLOUT"
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_ROLLOUT_V1";
 const MV_RP015_FINAL_PROOF_JOB_TYPE = "MV_RP015_DUET_CUT_PROOF_V2";
 const MV_RP015_VOCAL_PILOT_JOB_TYPE = "MV_RP015_VOCAL_PILOT_PREPARATION";
-const MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_CLEAN_VOICE_REFERENCES";
+const MV_RP015_LEGACY_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_CLEAN_VOICE_REFERENCES";
+const MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_DEMUCS_VOCAL_STEMS_V2";
 const TEMPORARY_CLOSE_UP_LOCK_CHARACTER_IDS = new Set(["GDTH-CHAR-001"]);
 
 export function buildMvRenderExecutionManifest(
@@ -4754,7 +4755,7 @@ export class ProjectRegistryConnector {
       };
       const jobRow = jobs.length + 1; const approvalRow = approvals.length + 1; const auditRow = (auditResponse.data.values ?? []).length + 1;
       await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
-        { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_VOCAL_PILOT_JOB_TYPE, "AWAITING_APPROVAL", "LOCAL_FFMPEG", JSON.stringify(references.map((item) => String(item.source?.file_id ?? ""))), JSON.stringify([manifestFile.id, ...evaluated.map((item) => item.reference_audio_file_id).filter(Boolean)]), JSON.stringify(result), 1, preparedAt, preparedAt, preparedAt, preparedAt]] },
+        { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_VOCAL_PILOT_JOB_TYPE, "AWAITING_APPROVAL", "LOCAL_DEMUCS", JSON.stringify(references.map((item) => String(item.source?.file_id ?? ""))), JSON.stringify([manifestFile.id, ...evaluated.map((item) => item.reference_audio_file_id).filter(Boolean)]), JSON.stringify(result), 1, preparedAt, preparedAt, preparedAt, preparedAt]] },
         { range: `'APPROVALS'!A${approvalRow}:J${approvalRow}`, values: [[approvalId, projectId, MV_RP015_VOCAL_PILOT_JOB_TYPE, jobId, "PENDING", "PROJECT_OWNER", "", nextAction, preparedAt, preparedAt]] },
         { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_VOCAL_PILOT_PREPARED", "AWAITING_APPROVAL", "AI_EXECUTOR_WEB", `Đã trích và đánh giá hai voice reference; status=${status}; chưa gọi provider.`, preparedAt]] },
       ] } });
@@ -4794,21 +4795,29 @@ export class ProjectRegistryConnector {
         const replay = parseObject(existing[8], "MV_RP015_CLEAN_VOICE_REFERENCES result") as unknown as PreparedRp015CleanVoiceReferences;
         return { ...replay, idempotent_replay: true };
       }
-      const sourceJob = jobs.find((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE)?.map(String);
-      if (!sourceJob || String(sourceJob[4] ?? "").trim() !== "AWAITING_APPROVAL") {
-        throw new ProjectRegistryInvalidStateError(`Voice Reference RP015 của ${projectId} chưa sẵn sàng để chuẩn hóa`);
+      const legacyJobIndex = jobs.findIndex((row, index) =>
+        index > 0 &&
+        String(row[1] ?? "").trim() === projectId &&
+        String(row[3] ?? "").trim() === MV_RP015_LEGACY_CLEAN_VOICE_REFERENCES_JOB_TYPE &&
+        String(row[4] ?? "").trim() === "AWAITING_APPROVAL"
+      );
+      if (legacyJobIndex < 0) {
+        throw new ProjectRegistryInvalidStateError(`Không tìm thấy kết quả FFmpeg RP015 đang chờ duyệt để tách lại bằng Demucs`);
       }
-      const sourceResult = parseObject(sourceJob[8], "MV_RP015_VOCAL_PILOT result") as Record<string, unknown>;
-      if (String(sourceResult.voice_reference_status ?? "") !== "REFERENCE_CANDIDATE") {
-        throw new ProjectRegistryInvalidStateError("Hai Voice Reference chưa đạt điều kiện kỹ thuật");
+      const legacyJob = jobs[legacyJobIndex].map(String);
+      const legacyApprovalIndex = approvals.findIndex((row, index) =>
+        index > 0 &&
+        String(row[1] ?? "").trim() === projectId &&
+        String(row[2] ?? "").trim() === MV_RP015_LEGACY_CLEAN_VOICE_REFERENCES_JOB_TYPE &&
+        String(row[3] ?? "").trim() === String(legacyJob[0] ?? "").trim()
+      );
+      if (legacyApprovalIndex < 0 || String(approvals[legacyApprovalIndex][4] ?? "").trim() !== "PENDING") {
+        throw new ProjectRegistryInvalidStateError("Cổng duyệt kết quả FFmpeg RP015 không ở trạng thái PENDING");
       }
-      const sourceApprovalIndex = approvals.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[2] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE && String(row[3] ?? "").trim() === String(sourceJob[0] ?? "").trim());
-      if (sourceApprovalIndex < 0 || String(approvals[sourceApprovalIndex][4] ?? "").trim() !== "PENDING") {
-        throw new ProjectRegistryInvalidStateError("Cổng duyệt Voice Reference không ở trạng thái PENDING");
+      const referenceFileIds = JSON.parse(String(legacyJob[6] ?? "[]")) as string[];
+      if (referenceFileIds.length !== 2 || referenceFileIds.some((fileId) => !fileId)) {
+        throw new ProjectRegistryInvalidStateError("Thiếu hai tệp Voice Reference nguồn để tách lại bằng Demucs");
       }
-      const sourceFileIds = JSON.parse(String(sourceJob[7] ?? "[]")) as string[];
-      const referenceFileIds = sourceFileIds.slice(1).filter(Boolean);
-      if (referenceFileIds.length !== 2) throw new ProjectRegistryInvalidStateError("Thiếu hai tệp Voice Reference để chuẩn hóa");
 
       const projectFolderId = String(projectRow[20] ?? "").trim();
       const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
@@ -4842,8 +4851,8 @@ export class ProjectRegistryConnector {
       const approvalId = randomUUID();
       const manifest = {
         schema_version: "1.0", project_id: projectId, stage: "PRE_PRODUCTION", render_unit_id: "RP015",
-        cleanup_method: "FFMPEG_VOCAL_FOCUSED_BACKGROUND_ATTENUATION_V1",
-        cleanup_disclaimer: "Giảm nhạc nền và chuẩn hóa kỹ thuật; bắt buộc nghe duyệt, không tuyên bố tách vocal tuyệt đối.",
+        cleanup_method: "DEMUCS_HTDEMUCS_FT_TWO_STEMS_V1",
+        cleanup_disclaimer: "Tách stem vocals bằng Demucs htdemucs_ft, sau đó chuẩn hóa WAV mono 48 kHz; bắt buộc nghe duyệt trước khi dùng.",
         clean_voice_references: cleaned,
         provider_execution_allowed: false, render_allowed: false,
         approval_gate: { approval_status: "PENDING", next_action: "REVIEW_RP015_CLEAN_VOICE_REFERENCES" }, prepared_at: preparedAt,
@@ -4855,15 +4864,15 @@ export class ProjectRegistryConnector {
         cleaned_reference_status: "CLEAN_REFERENCE_CANDIDATE", provider_execution_allowed: false, render_allowed: false,
         prepared_at: preparedAt, idempotent_replay: false,
       };
-      const sourceApprovalRow = sourceApprovalIndex + 1;
       const jobRow = jobs.length + 1;
       const approvalRow = approvals.length + 1;
       const auditRow = (auditResponse.data.values ?? []).length + 1;
       await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
-        { range: `'APPROVALS'!E${sourceApprovalRow}:J${sourceApprovalRow}`, values: [["APPROVED", "PROJECT_OWNER", preparedAt, "Đã duyệt đúng danh tính giọng; nguồn còn nhạc nền nên chuyển sang bước làm sạch cục bộ.", String(approvals[sourceApprovalIndex][8] ?? preparedAt), preparedAt]] },
+        { range: `'PRODUCTION_JOBS'!E${legacyJobIndex + 1}`, values: [["REJECTED_BACKGROUND_MUSIC_REMAINS"]] },
+        { range: `'APPROVALS'!E${legacyApprovalIndex + 1}:J${legacyApprovalIndex + 1}`, values: [["REJECTED", "PROJECT_OWNER", preparedAt, "Hai kết quả FFmpeg vẫn còn nhạc nền; chuyển sang tách stem Demucs.", String(approvals[legacyApprovalIndex][8] ?? preparedAt), preparedAt]] },
         { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE, "AWAITING_APPROVAL", "LOCAL_FFMPEG", JSON.stringify(referenceFileIds), JSON.stringify([manifestFile.id, ...cleaned.map((item) => item.clean_reference_file_id)]), JSON.stringify(result), 1, preparedAt, preparedAt, preparedAt, preparedAt]] },
         { range: `'APPROVALS'!A${approvalRow}:J${approvalRow}`, values: [[approvalId, projectId, MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE, jobId, "PENDING", "PROJECT_OWNER", "", "REVIEW_RP015_CLEAN_VOICE_REFERENCES", preparedAt, preparedAt]] },
-        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_CLEAN_VOICE_REFERENCES_PREPARED", "AWAITING_APPROVAL", "AI_EXECUTOR_WEB", "Đã giảm nhạc nền và chuẩn hóa hai Voice Reference bằng FFmpeg cục bộ; chưa gọi provider.", preparedAt]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_CLEAN_VOICE_REFERENCES_PREPARED", "AWAITING_APPROVAL", "AI_EXECUTOR_WEB", "Đã tách hai stem vocals bằng Demucs htdemucs_ft và chuẩn hóa WAV mono 48 kHz; chưa gọi provider.", preparedAt]] },
       ] } });
       return result;
     } catch (error) {
