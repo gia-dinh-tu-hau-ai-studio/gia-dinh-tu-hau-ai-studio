@@ -57,8 +57,8 @@ export function ProjectOperationsPanel() {
         <div>
           <h2 id="project-operations-title">Vận hành dự án hiện hữu</h2>
           <p>
-            Chạy tác vụ đã được duyệt cho RP015. Bước này chỉ dùng FFmpeg cục bộ,
-            không gọi Suno, Kits AI, Runway và không mở render tổng.
+            Tách hai vocal stem RP015 bằng Demucs htdemucs_ft trên CPU. Tác vụ có thể
+            mất đến 10 phút; không gọi Suno, Kits AI, Runway và không mở render tổng.
           </p>
         </div>
       </div>
@@ -82,12 +82,13 @@ export function ProjectOperationsPanel() {
           onClick={prepareCleanVoiceReferences}
           type="button"
         >
-          {running ? "Đang chuẩn hóa…" : "Chuẩn hóa 2 Voice Reference RP015"}
+          {running ? "Đang tách stem Demucs…" : "Tách 2 vocal stem RP015 bằng Demucs"}
         </button>
       </div>
 
       <p className="library-status">
-        Kết quả bắt buộc dừng tại REVIEW_RP015_CLEAN_VOICE_REFERENCES để chủ dự án nghe duyệt.
+        Giữ nguyên trang này trong lúc xử lý. Kết quả bắt buộc dừng tại
+        REVIEW_RP015_CLEAN_VOICE_REFERENCES để chủ dự án nghe duyệt.
       </p>
 
       {error && <p className="operation-error" role="alert">{error}</p>}
