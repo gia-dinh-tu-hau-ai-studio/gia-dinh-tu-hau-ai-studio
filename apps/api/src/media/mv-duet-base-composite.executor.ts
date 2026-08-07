@@ -15,10 +15,8 @@ export function buildMvDuetBaseCompositeFfmpegArgs(
   outputPath: string,
 ) {
   const filter = [
-    "[0:v]scale=960:1080:force_original_aspect_ratio=decrease",
-    "pad=960:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[left]",
-    "[1:v]scale=960:1080:force_original_aspect_ratio=decrease",
-    "pad=960:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[right]",
+    "[0:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[left]",
+    "[1:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[right]",
     "[left][right]hstack=inputs=2[outv]",
   ].join(";");
 
