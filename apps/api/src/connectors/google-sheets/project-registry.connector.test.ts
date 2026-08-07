@@ -32,11 +32,13 @@ import {
 } from "./project-registry.connector";
 import {
   buildMvDuetBaseCompositeFfmpegArgs,
+  buildRp015FinalProofFfmpegArgs,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
   RP015_PHUONG_AN_SOURCE_START_SECONDS,
   RP015_START_SECONDS,
   RP015_TUONG_VY_SOURCE_START_SECONDS,
+  RP015_MASTER_AUDIO_START_SECONDS,
   selectRolloutSourceOffset,
 } from "../../media/mv-duet-base-composite.executor";
 
@@ -1398,4 +1400,18 @@ test("FFmpeg rollout lặp riêng cả hai input nhưng RP015 không bị thay �
     "tuong-vy.mp4", "phuong-an.mp4", "rp015.mp4",
   );
   assert.equal(pilotArgs.includes("-stream_loop"), false);
+});
+
+test("RP015 final proof ghép đúng audio master 362-371.62 và giữ video", () => {
+  const args = buildRp015FinalProofFfmpegArgs("rp015.mp4", "master.wav", "proof.mp4");
+  const seek = args.indexOf("-ss");
+  const duration = args.indexOf("-t");
+  assert.equal(args[seek + 1], String(RP015_MASTER_AUDIO_START_SECONDS));
+  assert.equal(args[duration + 1], String(RP015_DURATION_SECONDS));
+  assert.ok(args.includes("0:v:0"));
+  assert.ok(args.includes("1:a:0"));
+  assert.ok(args.includes("copy"));
+  assert.ok(args.includes("aac"));
+  assert.ok(args.includes("192k"));
+  assert.ok(args.includes("-shortest"));
 });
