@@ -1222,7 +1222,9 @@ test("lập rollout plan đủ 15 render unit và tiếp tục khóa toàn bộ 
   assert.equal(manifest.rollout_units.length, 15);
   assert.equal(manifest.rollout_units[14].rollout_status, "PILOT_APPROVED_REFERENCE");
   assert.equal(manifest.rollout_units[0].composite_execution_allowed, false);
-  assert.equal(manifest.provider_execution_allowed, undefined);
+  assert.equal(manifest.composite_execution_allowed, false);
+  assert.equal(manifest.provider_execution_allowed, false);
+  assert.equal(manifest.render_allowed, false);
   assert.equal(manifest.safety_policy.provider_execution_allowed, false);
   assert.equal(manifest.safety_policy.render_allowed, false);
   assert.equal(
