@@ -2378,6 +2378,41 @@ export function selectNextMvDuetBaseCompositeRolloutUnit(
   return { next, completed_count: completed.length, remaining_count: units.length - completed.length };
 }
 
+export function selectApprovedRp015VocalPilot(
+  projectIdInput: string,
+  jobs: unknown[][],
+  approvals: unknown[][],
+) {
+  const projectId = projectIdInput.trim();
+  const matchingJobs = jobs
+    .filter((row, index) =>
+      index > 0 &&
+      String(row[1] ?? "").trim() === projectId &&
+      String(row[3] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE,
+    )
+    .map((row) => row.map(String));
+  const job = matchingJobs[matchingJobs.length - 1];
+  if (!job || String(job[4] ?? "").trim() !== "APPROVED") {
+    throw new ProjectRegistryInvalidStateError(`Voice Reference Pilot RP015 mới nhất của ${projectId} chưa APPROVED`);
+  }
+
+  const jobId = String(job[0] ?? "").trim();
+  const matchingApprovals = approvals
+    .filter((row, index) =>
+      index > 0 &&
+      String(row[1] ?? "").trim() === projectId &&
+      String(row[2] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE &&
+      String(row[3] ?? "").trim() === jobId,
+    )
+    .map((row) => row.map(String));
+  const approval = matchingApprovals[matchingApprovals.length - 1];
+  if (!approval || String(approval[4] ?? "").trim() !== "APPROVED") {
+    throw new ProjectRegistryInvalidStateError(`Approval Voice Reference Pilot RP015 mới nhất của ${projectId} chưa APPROVED`);
+  }
+
+  return { job, approval, approval_id: String(approval[0] ?? "").trim() };
+}
+
 export function planRp015VocalPilotApproval(
   projectRow: string[],
   jobRow: string[] | undefined,
@@ -5103,25 +5138,8 @@ export class ProjectRegistryConnector {
       if (!assetJob || String(assetJob[4] ?? "") !== "APPROVED" || String(assetApproval?.[4] ?? "") !== "APPROVED") {
         throw new ProjectRegistryInvalidStateError(`Asset manifest của ${projectId} chưa được duyệt`);
       }
-      const vocalPilotJob = [...jobs].reverse().find((row, index) =>
-        index < jobs.length - 1 &&
-        String(row[1] ?? "").trim() === projectId &&
-        String(row[3] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE
-      )?.map(String);
-      const vocalPilotApproval = [...approvals].reverse().find((row, index) =>
-        index < approvals.length - 1 &&
-        String(row[1] ?? "").trim() === projectId &&
-        String(row[2] ?? "").trim() === MV_RP015_VOCAL_PILOT_JOB_TYPE &&
-        String(row[3] ?? "").trim() === String(vocalPilotJob?.[0] ?? "").trim()
-      )?.map(String);
-      if (
-        !vocalPilotJob ||
-        String(vocalPilotJob[4] ?? "").trim() !== "APPROVED" ||
-        String(vocalPilotApproval?.[4] ?? "").trim() !== "APPROVED"
-      ) {
-        throw new ProjectRegistryInvalidStateError(`Voice Reference Pilot RP015 của ${projectId} chưa được duyệt`);
-      }
-      const voicePilotApprovalId = String(vocalPilotApproval[0] ?? "").trim();
+      const approvedVocalPilot = selectApprovedRp015VocalPilot(projectId, jobs, approvals);
+      const voicePilotApprovalId = approvedVocalPilot.approval_id;
 
       const projectFolderId = String(projectRow[20] ?? "").trim();
       const projectFolder = await drive.files.get({ fileId: projectFolderId, fields: "id,mimeType,parents,trashed", supportsAllDrives: true });
