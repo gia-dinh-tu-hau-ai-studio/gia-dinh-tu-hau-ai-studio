@@ -246,6 +246,21 @@ export type PreparedMvDuetBaseComposite = {
   idempotent_replay: boolean;
 };
 
+export type ApprovedMvDuetBaseComposite = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "EXECUTE_MV_DUET_BASE_COMPOSITE";
+  job_id: string;
+  job_status: "APPROVED";
+  approval_id: string;
+  approval_status: "APPROVED";
+  composite_execution_allowed: true;
+  provider_execution_allowed: false;
+  render_allowed: false;
+  approved_at: string;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -544,6 +559,85 @@ export function buildMvDuetBaseCompositeManifest(
       next_action: "APPROVE_MV_DUET_BASE_COMPOSITE",
     },
     prepared_at: preparedAt,
+  };
+}
+
+export function planMvDuetBaseCompositeApproval(
+  projectRow: string[],
+  jobRow: string[] | undefined,
+  approvalRow: string[] | undefined,
+  now = new Date(),
+): ApprovedMvDuetBaseComposite & { submission_id: string } {
+  const submissionId = String(projectRow[0] ?? "").trim();
+  const projectId = String(projectRow[1] ?? "").trim();
+  const nextAction = String(projectRow[19] ?? "").trim();
+  if (
+    !projectId ||
+    String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" ||
+    String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Dự án ${projectId || "EMPTY"} chưa đủ điều kiện duyệt base composite song ca`,
+    );
+  }
+  if (
+    !jobRow ||
+    String(jobRow[1] ?? "").trim() !== projectId ||
+    String(jobRow[2] ?? "").trim() !== "PRE_PRODUCTION" ||
+    String(jobRow[3] ?? "").trim() !== MV_DUET_BASE_COMPOSITE_JOB_TYPE
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Dự án ${projectId} chưa có base composite song ca hợp lệ`,
+    );
+  }
+  const jobId = String(jobRow[0] ?? "").trim();
+  if (
+    !approvalRow ||
+    String(approvalRow[1] ?? "").trim() !== projectId ||
+    String(approvalRow[2] ?? "").trim() !== MV_DUET_BASE_COMPOSITE_JOB_TYPE ||
+    String(approvalRow[3] ?? "").trim() !== jobId
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Approval base composite song ca của ${projectId} không hợp lệ`,
+    );
+  }
+  const jobStatus = String(jobRow[4] ?? "").trim();
+  const approvalStatus = String(approvalRow[4] ?? "").trim();
+  const approvedAt = String(approvalRow[6] ?? "").trim() || now.toISOString();
+  const result = {
+    submission_id: submissionId,
+    project_id: projectId,
+    current_stage: "PRE_PRODUCTION" as const,
+    next_action: "EXECUTE_MV_DUET_BASE_COMPOSITE" as const,
+    job_id: jobId,
+    job_status: "APPROVED" as const,
+    approval_id: String(approvalRow[0] ?? "").trim(),
+    approval_status: "APPROVED" as const,
+    composite_execution_allowed: true as const,
+    provider_execution_allowed: false as const,
+    render_allowed: false as const,
+    approved_at: approvedAt,
+  };
+  if (
+    nextAction === "EXECUTE_MV_DUET_BASE_COMPOSITE" &&
+    jobStatus === "APPROVED" &&
+    approvalStatus === "APPROVED"
+  ) {
+    return { ...result, idempotent_replay: true };
+  }
+  if (
+    nextAction !== "APPROVE_MV_DUET_BASE_COMPOSITE" ||
+    jobStatus !== "AWAITING_APPROVAL" ||
+    approvalStatus !== "PENDING"
+  ) {
+    throw new ProjectRegistryInvalidStateError(
+      `Không thể duyệt base composite song ca từ ${nextAction || "EMPTY"}/${jobStatus || "EMPTY"}/${approvalStatus || "EMPTY"}`,
+    );
+  }
+  return {
+    ...result,
+    approved_at: now.toISOString(),
+    idempotent_replay: false,
   };
 }
 
@@ -3424,6 +3518,213 @@ export class ProjectRegistryConnector {
       if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không lập được base composite song ca MV");
     }
+  }
+
+  async approveMvDuetBaseComposite(
+    projectId: string,
+  ): Promise<ApprovedMvDuetBaseComposite> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    const drive = this.createDriveClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] =
+        await Promise.all([
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+          sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+        ]);
+      const projects = projectsResponse.data.values ?? [];
+      const jobs = jobsResponse.data.values ?? [];
+      const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex(
+        (row, index) => index > 0 && String(row[1] ?? "").trim() === projectId,
+      );
+      if (projectIndex < 0) {
+        throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      }
+      const jobIndex = jobs.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[3] ?? "").trim() === MV_DUET_BASE_COMPOSITE_JOB_TYPE,
+      );
+      const jobId = jobIndex > 0 ? String(jobs[jobIndex][0] ?? "").trim() : "";
+      const approvalIndex = approvals.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[1] ?? "").trim() === projectId &&
+          String(row[2] ?? "").trim() === MV_DUET_BASE_COMPOSITE_JOB_TYPE &&
+          String(row[3] ?? "").trim() === jobId,
+      );
+      const transition = planMvDuetBaseCompositeApproval(
+        projects[projectIndex].map(String),
+        jobIndex > 0 ? jobs[jobIndex].map(String) : undefined,
+        approvalIndex > 0 ? approvals[approvalIndex].map(String) : undefined,
+      );
+      const result: ApprovedMvDuetBaseComposite = {
+        project_id: transition.project_id,
+        current_stage: transition.current_stage,
+        next_action: transition.next_action,
+        job_id: transition.job_id,
+        job_status: transition.job_status,
+        approval_id: transition.approval_id,
+        approval_status: transition.approval_status,
+        composite_execution_allowed: true,
+        provider_execution_allowed: false,
+        render_allowed: false,
+        approved_at: transition.approved_at,
+        idempotent_replay: transition.idempotent_replay,
+      };
+      if (transition.idempotent_replay) return result;
+
+      await this.markMvDuetBaseCompositeManifestApproved(
+        drive,
+        jobs[jobIndex].map(String),
+        transition,
+      );
+      const projectRow = projectIndex + 1;
+      const jobRow = jobIndex + 1;
+      const approvalRow = approvalIndex + 1;
+      const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: [
+            {
+              range: `'PROJECTS'!S${projectRow}:T${projectRow}`,
+              values: [["PRE_PRODUCTION", transition.next_action]],
+            },
+            {
+              range: `'PROJECTS'!X${projectRow}`,
+              values: [[transition.approved_at]],
+            },
+            {
+              range: `'PRODUCTION_JOBS'!E${jobRow}`,
+              values: [[transition.job_status]],
+            },
+            {
+              range: `'PRODUCTION_JOBS'!L${jobRow}`,
+              values: [[transition.approved_at]],
+            },
+            {
+              range: `'PRODUCTION_JOBS'!N${jobRow}`,
+              values: [[transition.approved_at]],
+            },
+            {
+              range: `'APPROVALS'!E${approvalRow}:H${approvalRow}`,
+              values: [[
+                transition.approval_status,
+                "PROJECT_OWNER",
+                transition.approved_at,
+                "Đã duyệt base composite RP015 từ hai nguồn riêng; chỉ mở dựng composite cục bộ. Provider và render vẫn khóa.",
+              ]],
+            },
+            {
+              range: `'APPROVALS'!J${approvalRow}`,
+              values: [[transition.approved_at]],
+            },
+            {
+              range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`,
+              values: [[
+                randomUUID(),
+                transition.project_id,
+                transition.submission_id,
+                "MV_DUET_BASE_COMPOSITE_APPROVED",
+                "SUCCEEDED",
+                "AI_EXECUTOR_WEB",
+                "Đã duyệt dựng base composite RP015; chưa gọi Runway, provider_execution_allowed=false và render_allowed=false.",
+                transition.approved_at,
+              ]],
+            },
+          ],
+        },
+      });
+      return result;
+    } catch (error) {
+      if (
+        error instanceof ProjectRegistryNotConfiguredError ||
+        error instanceof ProjectRegistryProjectNotFoundError ||
+        error instanceof ProjectRegistryInvalidStateError
+      ) throw error;
+      throw new ProjectRegistryUnavailableError(
+        error instanceof Error
+          ? error.message
+          : "Không duyệt được base composite song ca MV",
+      );
+    }
+  }
+
+  private async markMvDuetBaseCompositeManifestApproved(
+    drive: drive_v3.Drive,
+    jobRow: string[],
+    transition: ApprovedMvDuetBaseComposite,
+  ) {
+    const fileId = parseStringArray(jobRow[7])[0];
+    if (!fileId) {
+      throw new ProjectRegistryInvalidStateError(
+        `Job ${transition.job_id} chưa có base composite manifest`,
+      );
+    }
+    const response = await drive.files.get(
+      { fileId, alt: "media", supportsAllDrives: true },
+      { responseType: "text" },
+    );
+    const manifest =
+      typeof response.data === "string"
+        ? parseObject(response.data, "MV_DUET_BASE_COMPOSITE manifest")
+        : response.data as Record<string, unknown>;
+    const sources = Array.isArray(manifest.source_videos)
+      ? manifest.source_videos as Array<Record<string, unknown>>
+      : [];
+    const tuongVy = sources.find(
+      (source) => String(source.character_id ?? "") === "GDTH-CHAR-001",
+    );
+    const phuongAn = sources.find(
+      (source) => String(source.character_id ?? "") === "GDTH-CHAR-002",
+    );
+    if (
+      String(manifest.project_id ?? "") !== transition.project_id ||
+      String(manifest.composite_status ?? "") !== "AWAITING_APPROVAL" ||
+      String(manifest.output_readiness ?? "") !== "BLOCKED_PENDING_COMPOSITE_APPROVAL" ||
+      manifest.composite_execution_allowed !== false ||
+      manifest.provider_execution_allowed !== false ||
+      manifest.render_allowed !== false ||
+      sources.length !== 2 ||
+      !tuongVy ||
+      !phuongAn ||
+      String(tuongVy.file_id ?? "") === String(phuongAn.file_id ?? "") ||
+      tuongVy.close_up_allowed !== false ||
+      tuongVy.preserve_microphone !== true
+    ) {
+      throw new ProjectRegistryInvalidStateError(
+        `Base composite của ${transition.project_id} chưa an toàn để duyệt`,
+      );
+    }
+    const approved = {
+      ...manifest,
+      composite_status: "APPROVED",
+      output_readiness: "READY_FOR_LOCAL_COMPOSITE_EXECUTION",
+      composite_execution_allowed: true,
+      provider_execution_allowed: false,
+      render_allowed: false,
+      approval_gate: {
+        approval_status: "APPROVED",
+        reviewer: "PROJECT_OWNER",
+        approved_at: transition.approved_at,
+        next_action: transition.next_action,
+      },
+    };
+    await drive.files.update({
+      fileId,
+      media: {
+        mimeType: "application/json",
+        body: Readable.from([`${JSON.stringify(approved, null, 2)}\n`]),
+      },
+      fields: "id,modifiedTime",
+      supportsAllDrives: true,
+    });
   }
 
   private async markMvProviderSubmissionManifestApproved(drive: drive_v3.Drive, jobRow: string[], transition: ApprovedMvProviderSubmission) {

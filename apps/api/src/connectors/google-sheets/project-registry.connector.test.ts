@@ -20,6 +20,7 @@ import {
   planMvRenderPlanApproval,
   planMvRenderExecutionApproval,
   planMvProviderSubmissionApproval,
+  planMvDuetBaseCompositeApproval,
   planMvShotPlanApproval,
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
@@ -925,6 +926,66 @@ test("từ chối duyệt shot plan nếu job và approval không đồng bộ",
   job[4] = "APPROVED";
   assert.throws(
     () => planMvShotPlanApproval(project, job, approval),
+    ProjectRegistryInvalidStateError,
+  );
+});
+
+
+function pendingMvDuetBaseCompositeRows() {
+  const project = approvedMvProjectRow();
+  project[19] = "APPROVE_MV_DUET_BASE_COMPOSITE";
+  const job = Array.from({ length: 14 }, () => "");
+  Object.assign(job, {
+    0: "job-duet-base-composite",
+    1: project[1],
+    2: "PRE_PRODUCTION",
+    3: "MV_DUET_BASE_COMPOSITE",
+    4: "AWAITING_APPROVAL",
+  });
+  const approval = Array.from({ length: 10 }, () => "");
+  Object.assign(approval, {
+    0: "approval-duet-base-composite",
+    1: project[1],
+    2: "MV_DUET_BASE_COMPOSITE",
+    3: job[0],
+    4: "PENDING",
+  });
+  return { project, job, approval };
+}
+
+test("duyệt base composite chỉ mở dựng local và tiếp tục khóa provider/render", () => {
+  const { project, job, approval } = pendingMvDuetBaseCompositeRows();
+  const result = planMvDuetBaseCompositeApproval(
+    project,
+    job,
+    approval,
+    new Date("2026-08-07T01:30:00.000Z"),
+  );
+  assert.equal(result.next_action, "EXECUTE_MV_DUET_BASE_COMPOSITE");
+  assert.equal(result.job_status, "APPROVED");
+  assert.equal(result.approval_status, "APPROVED");
+  assert.equal(result.composite_execution_allowed, true);
+  assert.equal(result.provider_execution_allowed, false);
+  assert.equal(result.render_allowed, false);
+  assert.equal(result.idempotent_replay, false);
+});
+
+test("duyệt lại base composite đã APPROVED là idempotent", () => {
+  const { project, job, approval } = pendingMvDuetBaseCompositeRows();
+  project[19] = "EXECUTE_MV_DUET_BASE_COMPOSITE";
+  job[4] = "APPROVED";
+  approval[4] = "APPROVED";
+  approval[6] = "2026-08-07T01:30:00.000Z";
+  const result = planMvDuetBaseCompositeApproval(project, job, approval);
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.approved_at, "2026-08-07T01:30:00.000Z");
+});
+
+test("từ chối duyệt base composite khi job và approval lệch trạng thái", () => {
+  const { project, job, approval } = pendingMvDuetBaseCompositeRows();
+  job[4] = "APPROVED";
+  assert.throws(
+    () => planMvDuetBaseCompositeApproval(project, job, approval),
     ProjectRegistryInvalidStateError,
   );
 });
