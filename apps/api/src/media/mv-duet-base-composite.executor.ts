@@ -18,6 +18,8 @@ export const RP015_DUET_CUT_POINTS_SECONDS = [1.92, 3.84, 5.76, 7.68] as const;
 export const RP015_MIN_AUDIO_MEAN_DB = -45;
 export const RP015_MIN_AUDIO_MAX_DB = -40;
 export const RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS = 0.5;
+export const RP015_AUDIO_PROOF_MAX_LOOKBACK_SECONDS = 30;
+export const RP015_AUDIO_PROOF_LOOKBACK_STEP_SECONDS = 1;
 
 const DRIVE_AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
 const DRIVE_AUDIO_APPLICATION_MIME_TYPES = new Set([
@@ -57,18 +59,48 @@ export function resolveAudioWindowStart(
   return { start_seconds: Number((durationSeconds - requestedDurationSeconds).toFixed(6)), end_drift_seconds: Number(endDriftSeconds.toFixed(6)), adjusted: true as const };
 }
 
+export function buildBackwardAudioWindowCandidates(
+  preferredStartSeconds: number,
+  maximumLookbackSeconds: number,
+  stepSeconds: number,
+) {
+  if (!Number.isFinite(preferredStartSeconds) || preferredStartSeconds < 0 || !Number.isFinite(maximumLookbackSeconds) || maximumLookbackSeconds < 0 || !Number.isFinite(stepSeconds) || stepSeconds <= 0) {
+    throw new Error("Cấu hình quét cửa sổ audio không hợp lệ");
+  }
+  const candidates: number[] = [];
+  for (let lookback = 0; lookback <= maximumLookbackSeconds + 0.000001; lookback += stepSeconds) {
+    candidates.push(Number(Math.max(0, preferredStartSeconds - lookback).toFixed(6)));
+    if (candidates[candidates.length - 1] === 0) break;
+  }
+  return [...new Set(candidates)];
+}
+
 export type AudioAssetInspection = {
   codec_name: string;
   sample_rate_hz: number;
   channels: number;
   duration_seconds: number;
+  requested_start_seconds: number;
   inspected_start_seconds: number;
   inspected_duration_seconds: number;
   mean_volume_db: number;
   max_volume_db: number;
   end_drift_seconds: number;
+  lookback_seconds: number;
   window_adjusted: boolean;
 };
+
+async function measureAudioWindowLoudness(inputPath: string, startSeconds: number, durationSeconds: number) {
+  const loudness = await execFileAsync(
+    "ffmpeg",
+    [
+      "-hide_banner", "-ss", String(startSeconds), "-t", String(durationSeconds),
+      "-i", inputPath, "-vn", "-af", "volumedetect", "-f", "null", "-",
+    ],
+    { timeout: 60_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
+  );
+  return parseVoiceReferenceLoudness(loudness.stderr);
+}
 
 export async function inspectAudioAsset(
   inputPath: string,
@@ -78,6 +110,8 @@ export async function inspectAudioAsset(
     minimumMeanDb?: number;
     minimumMaxDb?: number;
     maximumEndDriftSeconds?: number;
+    maximumLookbackSeconds?: number;
+    lookbackStepSeconds?: number;
   },
 ): Promise<AudioAssetInspection> {
   const requiredStartSeconds = options?.requiredStartSeconds ?? 0;
@@ -96,32 +130,35 @@ export async function inspectAudioAsset(
   const stream = data.streams?.[0];
   const durationSeconds = Number(data.format?.duration ?? 0);
   if (!stream?.codec_name) throw new Error("FFprobe không tìm thấy audio stream");
-  const window = resolveAudioWindowStart(durationSeconds, requiredStartSeconds, requiredDurationSeconds, options?.maximumEndDriftSeconds ?? 0);
-  const loudness = await execFileAsync(
-    "ffmpeg",
-    [
-      "-hide_banner", "-ss", String(window.start_seconds), "-t", String(requiredDurationSeconds),
-      "-i", inputPath, "-vn", "-af", "volumedetect", "-f", "null", "-",
-    ],
-    { timeout: 60_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
+  const preferredWindow = resolveAudioWindowStart(durationSeconds, requiredStartSeconds, requiredDurationSeconds, options?.maximumEndDriftSeconds ?? 0);
+  const candidates = buildBackwardAudioWindowCandidates(
+    preferredWindow.start_seconds,
+    options?.maximumLookbackSeconds ?? 0,
+    options?.lookbackStepSeconds ?? 1,
   );
-  const { meanDb, maxDb } = parseVoiceReferenceLoudness(loudness.stderr);
-  if (!Number.isFinite(meanDb) || !Number.isFinite(maxDb)) throw new Error("Không đo được mức âm thanh");
-  if (meanDb < minimumMeanDb || maxDb < minimumMaxDb) {
-    throw new Error(`Audio im lặng hoặc quá nhỏ: mean=${meanDb}dB, max=${maxDb}dB`);
+  let loudest = { meanDb: -Infinity, maxDb: -Infinity, startSeconds: preferredWindow.start_seconds };
+  for (const startSeconds of candidates) {
+    const measured = await measureAudioWindowLoudness(inputPath, startSeconds, requiredDurationSeconds);
+    if (measured.meanDb > loudest.meanDb || measured.maxDb > loudest.maxDb) loudest = { ...measured, startSeconds };
+    if (Number.isFinite(measured.meanDb) && Number.isFinite(measured.maxDb) && measured.meanDb >= minimumMeanDb && measured.maxDb >= minimumMaxDb) {
+      const lookbackSeconds = Number((preferredWindow.start_seconds - startSeconds).toFixed(6));
+      return {
+        codec_name: stream.codec_name,
+        sample_rate_hz: Number(stream.sample_rate ?? 0),
+        channels: Number(stream.channels ?? 0),
+        duration_seconds: durationSeconds,
+        requested_start_seconds: requiredStartSeconds,
+        inspected_start_seconds: startSeconds,
+        inspected_duration_seconds: requiredDurationSeconds,
+        mean_volume_db: measured.meanDb,
+        max_volume_db: measured.maxDb,
+        end_drift_seconds: preferredWindow.end_drift_seconds,
+        lookback_seconds: lookbackSeconds,
+        window_adjusted: preferredWindow.adjusted || lookbackSeconds > 0,
+      };
+    }
   }
-  return {
-    codec_name: stream.codec_name,
-    sample_rate_hz: Number(stream.sample_rate ?? 0),
-    channels: Number(stream.channels ?? 0),
-    duration_seconds: durationSeconds,
-    inspected_start_seconds: window.start_seconds,
-    inspected_duration_seconds: requiredDurationSeconds,
-    mean_volume_db: meanDb,
-    max_volume_db: maxDb,
-    end_drift_seconds: window.end_drift_seconds,
-    window_adjusted: window.adjusted,
-  };
+  throw new Error(`Không tìm thấy cửa sổ audio ${requiredDurationSeconds}s nghe được trong ${options?.maximumLookbackSeconds ?? 0}s trước RP015; cửa sổ lớn nhất start=${loudest.startSeconds}s, mean=${loudest.meanDb}dB, max=${loudest.maxDb}dB`);
 }
 
 type VideoProbe = {

@@ -35,6 +35,7 @@ import {
   selectApprovedRp015VocalPilot,
 } from "./project-registry.connector";
 import {
+  buildBackwardAudioWindowCandidates,
   buildVoiceReferenceNormalizationFfmpegArgs,
   buildVoiceReferenceSeparationArgs,
   resolveDemucsVocalsPath,
@@ -45,6 +46,8 @@ import {
   parseVoiceReferenceLoudness,
   resolveAudioWindowStart,
   RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS,
+  RP015_AUDIO_PROOF_LOOKBACK_STEP_SECONDS,
+  RP015_AUDIO_PROOF_MAX_LOOKBACK_SECONDS,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
   RP015_PHUONG_AN_SOURCE_START_SECONDS,
@@ -83,6 +86,22 @@ test("metadata không phải âm thanh hoặc file rỗng bị từ chối", () 
 test("RP015 tự dịch cửa sổ audio khi cuối nguồn lệch không quá 0.5 giây", () => {
   const window = resolveAudioWindowStart(371.2986, 362, 9.62, RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS);
   assert.deepEqual(window, { start_seconds: 361.6786, end_drift_seconds: 0.3214, adjusted: true });
+});
+
+test("Final Proof quét cửa sổ âm thanh từ gần RP015 nhất về trước", () => {
+  const candidates = buildBackwardAudioWindowCandidates(
+    361.6786,
+    RP015_AUDIO_PROOF_MAX_LOOKBACK_SECONDS,
+    RP015_AUDIO_PROOF_LOOKBACK_STEP_SECONDS,
+  );
+  assert.equal(candidates[0], 361.6786);
+  assert.equal(candidates[1], 360.6786);
+  assert.equal(candidates.at(-1), 331.6786);
+  assert.equal(candidates.length, 31);
+});
+
+test("quét cửa sổ audio không đi qua đầu file hoặc tạo mốc trùng", () => {
+  assert.deepEqual(buildBackwardAudioWindowCandidates(1.2, 30, 1), [1.2, 0.2, 0]);
 });
 
 test("RP015 từ chối nguồn lệch cuối timeline quá 0.5 giây", () => {

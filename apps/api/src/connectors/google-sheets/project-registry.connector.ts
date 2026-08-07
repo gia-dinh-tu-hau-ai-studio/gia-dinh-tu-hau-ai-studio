@@ -22,6 +22,8 @@ import {
   inspectAudioAsset,
   isDriveAudioCandidate,
   RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS,
+  RP015_AUDIO_PROOF_LOOKBACK_STEP_SECONDS,
+  RP015_AUDIO_PROOF_MAX_LOOKBACK_SECONDS,
   RP015_DURATION_SECONDS,
   RP015_MASTER_AUDIO_START_SECONDS,
 } from "../../media/mv-duet-base-composite.executor";
@@ -391,6 +393,7 @@ export type CreatedRp015FinalProof = {
   audio_max_db: number;
   audio_start_seconds: number;
   audio_end_drift_seconds: number;
+  audio_lookback_seconds: number;
   audio_window_adjusted: boolean;
   provider_execution_allowed: false;
   render_allowed: false;
@@ -5192,6 +5195,8 @@ export class ProjectRegistryConnector {
           minimumMeanDb: -45,
           minimumMaxDb: -40,
           maximumEndDriftSeconds: RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS,
+          maximumLookbackSeconds: RP015_AUDIO_PROOF_MAX_LOOKBACK_SECONDS,
+          lookbackStepSeconds: RP015_AUDIO_PROOF_LOOKBACK_STEP_SECONDS,
         });
       } catch (error) {
         throw new ProjectRegistryInvalidStateError(
@@ -5219,13 +5224,13 @@ export class ProjectRegistryConnector {
         edit_mode: "FULL_FRAME_DUET_CUTS", layout_version: "FULL_FRAME_ALTERNATING_V3", voice_pilot_approval_id: voicePilotApprovalId, audio_source: "VOCAL_MASTER",
         audio_mean_db: proof.audio_mean_db, audio_max_db: proof.audio_max_db,
         audio_start_seconds: proof.audio_start_seconds, audio_end_drift_seconds: audioInspection.end_drift_seconds,
-        audio_window_adjusted: audioInspection.window_adjusted,
+        audio_lookback_seconds: audioInspection.lookback_seconds, audio_window_adjusted: audioInspection.window_adjusted,
         provider_execution_allowed: false, render_allowed: false, created_at: createdAt, idempotent_replay: false,
       };
       const jobRow = jobs.length + 1; const auditRow = (auditResponse.data.values ?? []).length + 1;
       await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
         { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[randomUUID(), projectId, "PRE_PRODUCTION", MV_RP015_FINAL_PROOF_JOB_TYPE, "SUCCEEDED", "LOCAL_FFMPEG", JSON.stringify([tuongVyFileId, phuongAnFileId, vocalMasterFileId]), JSON.stringify([outputFileId]), JSON.stringify(result), 2, createdAt, createdAt, createdAt, createdAt]] },
-        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_DUET_CUT_PROOF_V3_CREATED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã tạo RP015 V3 cắt luân phiên từng nhân vật toàn khung với vocal master; loudness mean=${proof.audio_mean_db}dB/max=${proof.audio_max_db}dB; audio_start=${proof.audio_start_seconds}s; end_drift=${audioInspection.end_drift_seconds}s; không gọi provider và không thay đổi rollout.`, createdAt]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_DUET_CUT_PROOF_V3_CREATED", "SUCCEEDED", "AI_EXECUTOR_WEB", `Đã tạo RP015 V3 cắt luân phiên từng nhân vật toàn khung với vocal master; loudness mean=${proof.audio_mean_db}dB/max=${proof.audio_max_db}dB; audio_start=${proof.audio_start_seconds}s; end_drift=${audioInspection.end_drift_seconds}s; lookback=${audioInspection.lookback_seconds}s; không gọi provider và không thay đổi rollout.`, createdAt]] },
       ] } });
       return result;
     } catch (error) {
