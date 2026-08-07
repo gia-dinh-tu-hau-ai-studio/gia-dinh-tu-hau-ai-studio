@@ -29,6 +29,7 @@ import {
 } from "./project-registry.connector";
 import {
   buildMvDuetBaseCompositeFfmpegArgs,
+  buildMvDuetBaseCompositeRolloutManifest,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
   RP015_PHUONG_AN_SOURCE_START_SECONDS,
@@ -1150,6 +1151,121 @@ test("từ chối duyệt review RP015 khi output chưa SUCCEEDED", () => {
   job[4] = "FAILED";
   assert.throws(
     () => planMvDuetBaseCompositeReviewApproval(project, job, approval, undefined),
+    ProjectRegistryInvalidStateError,
+  );
+});
+
+
+function approvedRenderPlanForRollout(projectId = "GDTH-MV-TEST") {
+  return {
+    schema_version: "1.0",
+    project_id: projectId,
+    render_plan_status: "APPROVED",
+    provider_execution_allowed: false,
+    render_allowed: false,
+    render_units: Array.from({ length: 15 }, (_, index) => {
+      const isPilot = index === 14;
+      const performer = isPilot ? "SONG_CA" : index % 2 === 0 ? "TUONG_VY_EM" : "PHUONG_AN";
+      return {
+        render_unit_id: `RP${String(index + 1).padStart(3, "0")}`,
+        cue_order: index + 1,
+        performer,
+        start_seconds: index * 20,
+        end_seconds: index * 20 + (isPilot ? 9.62 : 20),
+        duration_seconds: isPilot ? 9.62 : 20,
+        framing_constraints: {
+          close_up_allowed: performer === "PHUONG_AN",
+          preserve_microphone: performer !== "PHUONG_AN",
+          allowed_framings: performer === "PHUONG_AN"
+            ? ["CLOSE_UP", "MEDIUM", "FULL_BODY"]
+            : ["MEDIUM", "FULL_BODY"],
+        },
+        provider_execution_allowed: false,
+        render_allowed: false,
+      };
+    }),
+  };
+}
+
+function approvedPilotManifestForRollout(projectId = "GDTH-MV-TEST") {
+  return {
+    project_id: projectId,
+    composite_status: "PILOT_APPROVED",
+    output_readiness: "APPROVED_PILOT_REFERENCE",
+    provider_execution_allowed: false,
+    render_allowed: false,
+    output: {
+      file_id: "rp015-output-id",
+      width: 1920,
+      height: 1080,
+      duration_seconds: 9.633333,
+    },
+    review_gate: {
+      review_status: "APPROVED",
+    },
+  };
+}
+
+test("lập rollout plan đủ 15 render unit và tiếp tục khóa toàn bộ thực thi", () => {
+  const manifest = buildMvDuetBaseCompositeRolloutManifest(
+    "GDTH-MV-TEST",
+    "Gia Đình Tư Hậu",
+    "render-plan-id",
+    approvedRenderPlanForRollout(),
+    "pilot-manifest-id",
+    approvedPilotManifestForRollout(),
+    "rp015-output-id",
+    "2026-08-07T03:40:00.000Z",
+  );
+  assert.equal(manifest.rollout_status, "AWAITING_APPROVAL");
+  assert.equal(manifest.total_render_units, 15);
+  assert.equal(manifest.rollout_units.length, 15);
+  assert.equal(manifest.rollout_units[14].rollout_status, "PILOT_APPROVED_REFERENCE");
+  assert.equal(manifest.rollout_units[0].composite_execution_allowed, false);
+  assert.equal(manifest.composite_execution_allowed, false);
+  assert.equal(manifest.provider_execution_allowed, false);
+  assert.equal(manifest.render_allowed, false);
+  assert.equal(manifest.safety_policy.provider_execution_allowed, false);
+  assert.equal(manifest.safety_policy.render_allowed, false);
+  assert.equal(
+    manifest.approval_gate.next_action,
+    "APPROVE_MV_DUET_BASE_COMPOSITE_ROLLOUT",
+  );
+});
+
+test("từ chối rollout plan nếu unit có Tường Vy cho phép close-up", () => {
+  const renderPlan = approvedRenderPlanForRollout();
+  const first = renderPlan.render_units[0];
+  first.framing_constraints.close_up_allowed = true;
+  assert.throws(
+    () => buildMvDuetBaseCompositeRolloutManifest(
+      "GDTH-MV-TEST",
+      "Gia Đình Tư Hậu",
+      "render-plan-id",
+      renderPlan,
+      "pilot-manifest-id",
+      approvedPilotManifestForRollout(),
+      "rp015-output-id",
+      "2026-08-07T03:40:00.000Z",
+    ),
+    ProjectRegistryInvalidStateError,
+  );
+});
+
+test("từ chối rollout plan nếu pilot RP015 chưa được owner duyệt", () => {
+  const pilot = approvedPilotManifestForRollout();
+  pilot.review_gate.review_status = "PENDING";
+  assert.throws(
+    () => buildMvDuetBaseCompositeRolloutManifest(
+      "GDTH-MV-TEST",
+      "Gia Đình Tư Hậu",
+      "render-plan-id",
+      approvedRenderPlanForRollout(),
+      "pilot-manifest-id",
+      pilot,
+      "rp015-output-id",
+      "2026-08-07T03:40:00.000Z",
+    ),
     ProjectRegistryInvalidStateError,
   );
 });
