@@ -83,6 +83,7 @@ export function buildMvDuetBaseCompositeFfmpegArgs(
   const durationSeconds = options?.durationSeconds ?? RP015_DURATION_SECONDS;
   const tuongVyOffset = options?.tuongVyOffset ?? RP015_TUONG_VY_SOURCE_START_SECONDS;
   const phuongAnOffset = options?.phuongAnOffset ?? RP015_PHUONG_AN_SOURCE_START_SECONDS;
+  const loopInputs = Boolean(options);
   const filter = [
     "[0:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[left]",
     "[1:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[right]",
@@ -94,12 +95,14 @@ export function buildMvDuetBaseCompositeFfmpegArgs(
     "-loglevel",
     "error",
     "-y",
+    ...(loopInputs ? ["-stream_loop", "-1"] : []),
     "-ss",
     String(tuongVyOffset),
     "-t",
     String(durationSeconds),
     "-i",
     tuongVyInputPath,
+    ...(loopInputs ? ["-stream_loop", "-1"] : []),
     "-ss",
     String(phuongAnOffset),
     "-t",
@@ -231,10 +234,14 @@ export function selectRolloutSourceOffset(
   outputDurationSeconds: number,
   pilotSourceOffsetSeconds: number,
 ) {
-  const usableWindow = sourceDurationSeconds - outputDurationSeconds;
-  if (!Number.isFinite(usableWindow) || usableWindow < 0) {
-    throw new Error("Nguồn không đủ dài cho render unit rollout");
+  if (
+    !Number.isFinite(sourceDurationSeconds) || sourceDurationSeconds <= 0 ||
+    !Number.isFinite(outputDurationSeconds) || outputDurationSeconds <= 0
+  ) {
+    throw new Error("Thời lượng nguồn hoặc render unit rollout không hợp lệ");
   }
+  const usableWindow = sourceDurationSeconds - outputDurationSeconds;
+  if (usableWindow <= 0) return 0;
   if (usableWindow === 0) return 0;
   return Number(((timelineStartSeconds + pilotSourceOffsetSeconds) % usableWindow).toFixed(3));
 }
@@ -270,8 +277,12 @@ export async function executeMvDuetBaseCompositeUnit(
     unit.duration_seconds,
     RP015_PHUONG_AN_SOURCE_START_SECONDS,
   );
-  assertSourceWindow("Tường Vy", tuongVyProbe, tuongVyOffset, unit.duration_seconds);
-  assertSourceWindow("Phương An", phuongAnProbe, phuongAnOffset, unit.duration_seconds);
+  if (
+    tuongVyProbe.width <= 0 || tuongVyProbe.height <= 0 ||
+    phuongAnProbe.width <= 0 || phuongAnProbe.height <= 0
+  ) {
+    throw new Error("Nguồn rollout không có video stream hợp lệ");
+  }
   const args = buildMvDuetBaseCompositeFfmpegArgs(
     tuongVyInputPath,
     phuongAnInputPath,
