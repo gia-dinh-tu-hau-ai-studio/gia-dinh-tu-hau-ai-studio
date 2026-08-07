@@ -165,4 +165,9 @@ export class AppController {
   approveRp015CleanVoiceReferences(@Param("projectId") projectId: string) {
     return this.intakeService.approveRp015CleanVoiceReferences(projectId);
   }
+
+  @Post("projects/:projectId/approve-rp015-vocal-pilot")
+  approveRp015VocalPilot(@Param("projectId") projectId: string) {
+    return this.intakeService.approveRp015VocalPilot(projectId);
+  }
 }
