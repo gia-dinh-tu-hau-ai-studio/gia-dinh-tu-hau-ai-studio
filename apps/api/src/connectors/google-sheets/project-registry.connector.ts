@@ -401,6 +401,21 @@ export type CreatedRp015FinalProof = {
   idempotent_replay: boolean;
 };
 
+export type Rp015FinalProofJobStatus = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "WAIT_RP015_FINAL_PROOF" | "REVIEW_RP015_FINAL_PROOF" | "RETRY_RP015_FINAL_PROOF";
+  job_id: string;
+  job_status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+  result?: CreatedRp015FinalProof;
+  error_message?: string;
+  provider_execution_allowed: false;
+  render_allowed: false;
+  created_at: string;
+  updated_at: string;
+  idempotent_replay: boolean;
+};
+
 export type PreparedRp015VocalPilot = {
   project_id: string;
   current_stage: "PRE_PRODUCTION";
@@ -510,6 +525,8 @@ const MV_DUET_BASE_COMPOSITE_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_V1";
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_JOB_TYPE = "MV_DUET_BASE_COMPOSITE_ROLLOUT";
 const MV_DUET_BASE_COMPOSITE_ROLLOUT_FILE_PREFIX = "MV_DUET_BASE_COMPOSITE_ROLLOUT_V1";
 const MV_RP015_FINAL_PROOF_JOB_TYPE = "MV_RP015_NATURAL_DUET_STAGE_PROOF_V4";
+const MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE = "MV_RP015_NATURAL_DUET_STAGE_PROOF_V4_ASYNC";
+const MV_RP015_FINAL_PROOF_STALE_MS = 30 * 60 * 1000;
 const MV_RP015_VOCAL_PILOT_JOB_TYPE = "MV_RP015_VOCAL_PILOT_PREPARATION";
 const MV_RP015_LEGACY_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_CLEAN_VOICE_REFERENCES";
 const MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE = "MV_RP015_DEMUCS_VOCAL_STEMS_V2";
@@ -2502,6 +2519,7 @@ export function planRp015CleanVoiceReferencesApproval(
 
 @Injectable()
 export class ProjectRegistryConnector {
+  private readonly rp015FinalProofTasks = new Map<string, Promise<void>>();
   private createSheetsClient(): sheets_v4.Sheets {
     return google.sheets({
       version: "v4",
@@ -5111,7 +5129,116 @@ export class ProjectRegistryConnector {
     }
   }
 
-  async createRp015FinalProof(projectId: string, vocalMasterFileIdInput: string): Promise<CreatedRp015FinalProof> {
+  async startRp015FinalProof(projectId: string, vocalMasterFileIdInput: string): Promise<Rp015FinalProofJobStatus> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    try {
+      const [projectsResponse, jobsResponse, auditResponse] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+      ]);
+      const projects = projectsResponse.data.values ?? [];
+      const jobs = jobsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId);
+      if (projectIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const projectRow = projects[projectIndex].map(String);
+      if (String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" || String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION") {
+        throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không ở PRE_PRODUCTION`);
+      }
+      const vocalMasterFileId = normalizeDriveFileIdInput(vocalMasterFileIdInput, "vocal_master_file_id");
+      const completedProof = jobs.filter((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_FINAL_PROOF_JOB_TYPE && String(row[4] ?? "").trim() === "SUCCEEDED").at(-1)?.map(String);
+      if (completedProof) {
+        const result = parseObject(completedProof[8], "MV_RP015_FINAL_PROOF result") as unknown as CreatedRp015FinalProof;
+        return {
+          project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "REVIEW_RP015_FINAL_PROOF",
+          job_id: String(completedProof[0] ?? ""), job_status: "SUCCEEDED", result: { ...result, idempotent_replay: true },
+          provider_execution_allowed: false, render_allowed: false,
+          created_at: String(completedProof[12] ?? result.created_at), updated_at: String(completedProof[13] ?? result.created_at), idempotent_replay: true,
+        };
+      }
+      const activeControl = jobs.filter((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE && ["QUEUED", "RUNNING"].includes(String(row[4] ?? "").trim())).at(-1)?.map(String);
+      if (activeControl) {
+        const updatedAt = String(activeControl[13] ?? activeControl[12] ?? "");
+        const ageMs = Date.now() - Date.parse(updatedAt);
+        if (this.rp015FinalProofTasks.has(projectId) || !Number.isFinite(ageMs) || ageMs < MV_RP015_FINAL_PROOF_STALE_MS) {
+          return this.buildRp015FinalProofJobStatus(activeControl, true);
+        }
+      }
+      const now = new Date().toISOString();
+      const jobId = randomUUID();
+      const jobRow = jobs.length + 1;
+      const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
+        { range: `'PRODUCTION_JOBS'!A${jobRow}:N${jobRow}`, values: [[jobId, projectId, "PRE_PRODUCTION", MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE, "QUEUED", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message: "Final Proof V4 đã vào hàng đợi" }), 0, "", "", now, now]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projectRow[0] ?? ""), "MV_RP015_FINAL_PROOF_V4_QUEUED", "QUEUED", "AI_EXECUTOR_WEB", "Đã tạo job bất đồng bộ Final Proof V4; provider và render tổng vẫn khóa.", now]] },
+      ] } });
+      this.launchRp015FinalProofTask(projectId, vocalMasterFileId, jobRow, now);
+      return {
+        project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "WAIT_RP015_FINAL_PROOF",
+        job_id: jobId, job_status: "QUEUED", provider_execution_allowed: false, render_allowed: false,
+        created_at: now, updated_at: now, idempotent_replay: false,
+      };
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không tạo được job Final Proof V4");
+    }
+  }
+
+  async getRp015FinalProofStatus(projectId: string): Promise<Rp015FinalProofJobStatus> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    try {
+      const jobsResponse = await sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" });
+      const jobs = jobsResponse.data.values ?? [];
+      const control = jobs.filter((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_FINAL_PROOF_CONTROL_JOB_TYPE).at(-1)?.map(String);
+      if (!control) throw new ProjectRegistryInvalidStateError(`Chưa có job Final Proof V4 cho ${projectId}`);
+      return this.buildRp015FinalProofJobStatus(control, true);
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không đọc được trạng thái Final Proof V4");
+    }
+  }
+
+  private buildRp015FinalProofJobStatus(job: string[], idempotentReplay: boolean): Rp015FinalProofJobStatus {
+    const status = String(job[4] ?? "FAILED") as Rp015FinalProofJobStatus["job_status"];
+    const payload = (() => { try { return parseObject(job[8], "RP015 Final Proof async payload"); } catch { return {}; } })();
+    const result = status === "SUCCEEDED" ? payload as unknown as CreatedRp015FinalProof : undefined;
+    return {
+      project_id: String(job[1] ?? ""), current_stage: "PRE_PRODUCTION",
+      next_action: status === "SUCCEEDED" ? "REVIEW_RP015_FINAL_PROOF" : status === "FAILED" ? "RETRY_RP015_FINAL_PROOF" : "WAIT_RP015_FINAL_PROOF",
+      job_id: String(job[0] ?? ""), job_status: status, result,
+      error_message: status === "FAILED" ? String(payload.message ?? "Final Proof V4 thất bại") : undefined,
+      provider_execution_allowed: false, render_allowed: false,
+      created_at: String(job[12] ?? ""), updated_at: String(job[13] ?? job[12] ?? ""), idempotent_replay: idempotentReplay,
+    };
+  }
+
+  private launchRp015FinalProofTask(projectId: string, vocalMasterFileId: string, jobRow: number, createdAt: string) {
+    if (this.rp015FinalProofTasks.has(projectId)) return;
+    const task = new Promise<void>((resolve) => setImmediate(resolve)).then(async () => {
+      const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+      const sheets = this.createSheetsClient();
+      const startedAt = new Date().toISOString();
+      try {
+        await sheets.spreadsheets.values.update({ spreadsheetId, range: `'PRODUCTION_JOBS'!E${jobRow}:N${jobRow}`, valueInputOption: "RAW", requestBody: { values: [["RUNNING", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message: "Đang tách nền và dựng Final Proof V4" }), 0, startedAt, "", createdAt, startedAt]] } });
+        const result = await this.createRp015FinalProof(projectId, vocalMasterFileId);
+        const completedAt = new Date().toISOString();
+        await sheets.spreadsheets.values.update({ spreadsheetId, range: `'PRODUCTION_JOBS'!E${jobRow}:N${jobRow}`, valueInputOption: "RAW", requestBody: { values: [["SUCCEEDED", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), JSON.stringify([result.output_file_id]), JSON.stringify(result), 0, startedAt, completedAt, createdAt, completedAt]] } });
+      } catch (error) {
+        const failedAt = new Date().toISOString();
+        const message = error instanceof Error ? error.message : "Lỗi không xác định khi tạo Final Proof V4";
+        try {
+          await sheets.spreadsheets.values.update({ spreadsheetId, range: `'PRODUCTION_JOBS'!E${jobRow}:N${jobRow}`, valueInputOption: "RAW", requestBody: { values: [["FAILED", "LOCAL_FFMPEG", JSON.stringify([vocalMasterFileId]), "[]", JSON.stringify({ message }), 0, startedAt, failedAt, createdAt, failedAt]] } });
+        } catch {
+          // Tránh unhandled rejection làm dừng process; job QUEUED/RUNNING cũ sẽ hết hạn và cho phép retry.
+        }
+      }
+    }).catch(() => undefined).finally(() => this.rp015FinalProofTasks.delete(projectId));
+    this.rp015FinalProofTasks.set(projectId, task);
+  }
+
+  private async createRp015FinalProof(projectId: string, vocalMasterFileIdInput: string): Promise<CreatedRp015FinalProof> {
     const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
     const projectsRootFolderId = requiredSetting("GIA_DINH_TU_HAU_PROJECTS_FOLDER_ID");
     const sheets = this.createSheetsClient();
