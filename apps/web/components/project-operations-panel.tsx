@@ -11,6 +11,8 @@ type CleanVoiceReferenceResult = {
   job_status?: string;
   manifest_file_url?: string;
   cleaned_reference_status?: string;
+  approval_status?: string;
+  approved_at?: string;
   provider_execution_allowed?: boolean;
   render_allowed?: boolean;
   message?: string;
@@ -20,6 +22,7 @@ type CleanVoiceReferenceResult = {
 export function ProjectOperationsPanel() {
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT_ID);
   const [running, setRunning] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [result, setResult] = useState<CleanVoiceReferenceResult | null>(null);
   const [error, setError] = useState("");
 
@@ -47,6 +50,31 @@ export function ProjectOperationsPanel() {
       );
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function approveCleanVoiceReferences() {
+    const normalizedProjectId = projectId.trim();
+    if (!normalizedProjectId) return;
+
+    setApproving(true);
+    setResult(null);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(normalizedProjectId)}/approve-rp015-clean-voice-references`,
+        { method: "POST" },
+      );
+      const body = (await response.json()) as CleanVoiceReferenceResult;
+      setResult(body);
+      if (!response.ok) {
+        setError(body.message ?? body.code ?? "Không duyệt được hai vocal stem Demucs RP015.");
+      }
+    } catch {
+      setError("Không kết nối được API khi duyệt vocal stem RP015.");
+    } finally {
+      setApproving(false);
     }
   }
 
@@ -84,11 +112,18 @@ export function ProjectOperationsPanel() {
         >
           {running ? "Đang tách stem Demucs…" : "Tách 2 vocal stem RP015 bằng Demucs"}
         </button>
+        <button
+          disabled={running || approving || !projectId.trim()}
+          onClick={approveCleanVoiceReferences}
+          type="button"
+        >
+          {approving ? "Đang ghi phê duyệt…" : "Duyệt 2 vocal stem Demucs RP015"}
+        </button>
       </div>
 
       <p className="library-status">
-        Giữ nguyên trang này trong lúc xử lý. Kết quả bắt buộc dừng tại
-        REVIEW_RP015_CLEAN_VOICE_REFERENCES để chủ dự án nghe duyệt.
+        Sau khi nghe xác nhận hết nhạc nền, cổng duyệt chuyển sang
+        PREPARE_RP015_VOICE_CONVERSION_PILOT. Provider và render vẫn khóa.
       </p>
 
       {error && <p className="operation-error" role="alert">{error}</p>}
