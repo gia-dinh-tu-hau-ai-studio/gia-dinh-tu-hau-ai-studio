@@ -8,6 +8,7 @@ import {
   buildMvProviderSubmissionManifest,
   buildMvProviderPilotManifest,
   buildMvDuetBaseCompositeManifest,
+  buildMvDuetBaseCompositeRolloutManifest,
   buildMvTimecodeAlignmentManifest,
   assertProjectFolderWithinRoot,
   buildProjectId,
@@ -29,7 +30,6 @@ import {
 } from "./project-registry.connector";
 import {
   buildMvDuetBaseCompositeFfmpegArgs,
-  buildMvDuetBaseCompositeRolloutManifest,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
   RP015_PHUONG_AN_SOURCE_START_SECONDS,
