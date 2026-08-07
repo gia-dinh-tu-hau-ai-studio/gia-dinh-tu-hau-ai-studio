@@ -115,4 +115,9 @@ export class AppController {
   prepareMvDuetBaseComposite(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvDuetBaseComposite(projectId);
   }
+
+  @Post("projects/:projectId/approve-mv-duet-base-composite")
+  approveMvDuetBaseComposite(@Param("projectId") projectId: string) {
+    return this.intakeService.approveMvDuetBaseComposite(projectId);
+  }
 }
