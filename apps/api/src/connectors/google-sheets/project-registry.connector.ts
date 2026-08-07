@@ -418,6 +418,20 @@ export type PreparedRp015CleanVoiceReferences = {
   idempotent_replay: boolean;
 };
 
+export type ApprovedRp015CleanVoiceReferences = {
+  project_id: string;
+  current_stage: "PRE_PRODUCTION";
+  next_action: "PREPARE_RP015_VOICE_CONVERSION_PILOT";
+  job_id: string;
+  job_status: "APPROVED";
+  approval_id: string;
+  approval_status: "APPROVED";
+  approved_at: string;
+  provider_execution_allowed: false;
+  render_allowed: false;
+  idempotent_replay: boolean;
+};
+
 type MvProductionPreparationTransition = {
   project_id: string;
   submission_id: string;
@@ -2349,6 +2363,40 @@ export function selectNextMvDuetBaseCompositeRolloutUnit(
 }
 
 @Injectable()
+export function planRp015CleanVoiceReferencesApproval(
+  projectRow: string[],
+  jobRow: string[] | undefined,
+  approvalRow: string[] | undefined,
+  now = new Date(),
+): ApprovedRp015CleanVoiceReferences {
+  const projectId = String(projectRow[1] ?? "").trim();
+  if (!projectId || String(projectRow[3] ?? "").trim() !== "MUSIC_VIDEO" || String(projectRow[18] ?? "").trim() !== "PRE_PRODUCTION") {
+    throw new ProjectRegistryInvalidStateError(`Dự án ${projectId || "EMPTY"} chưa đủ điều kiện duyệt vocal stem RP015`);
+  }
+  if (!jobRow || String(jobRow[1] ?? "").trim() !== projectId || String(jobRow[3] ?? "").trim() !== MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE) {
+    throw new ProjectRegistryInvalidStateError(`Không tìm thấy job Demucs V2 của ${projectId}`);
+  }
+  const jobId = String(jobRow[0] ?? "").trim();
+  const result = parseObject(jobRow[8], "MV_RP015_DEMUCS_VOCAL_STEMS_V2 result") as Record<string, unknown>;
+  if (String(result.cleaned_reference_status ?? "") !== "CLEAN_REFERENCE_CANDIDATE" || result.provider_execution_allowed !== false || result.render_allowed !== false) {
+    throw new ProjectRegistryInvalidStateError("Kết quả Demucs RP015 không đủ điều kiện phê duyệt");
+  }
+  if (!approvalRow || String(approvalRow[1] ?? "").trim() !== projectId || String(approvalRow[2] ?? "").trim() !== MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE || String(approvalRow[3] ?? "").trim() !== jobId) {
+    throw new ProjectRegistryInvalidStateError(`Cổng duyệt Demucs V2 của ${projectId} không khớp`);
+  }
+  const jobStatus = String(jobRow[4] ?? "").trim();
+  const approvalId = String(approvalRow[0] ?? "").trim();
+  const approvalStatus = String(approvalRow[4] ?? "").trim();
+  const approvedAt = String(approvalRow[6] ?? "").trim() || now.toISOString();
+  if (jobStatus === "APPROVED" && approvalStatus === "APPROVED") {
+    return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "PREPARE_RP015_VOICE_CONVERSION_PILOT", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: approvedAt, provider_execution_allowed: false, render_allowed: false, idempotent_replay: true };
+  }
+  if (jobStatus !== "AWAITING_APPROVAL" || approvalStatus !== "PENDING") {
+    throw new ProjectRegistryInvalidStateError(`Không thể duyệt Demucs V2 từ ${jobStatus || "EMPTY"}/${approvalStatus || "EMPTY"}`);
+  }
+  return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "PREPARE_RP015_VOICE_CONVERSION_PILOT", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: now.toISOString(), provider_execution_allowed: false, render_allowed: false, idempotent_replay: false };
+}
+
 export class ProjectRegistryConnector {
   private createSheetsClient(): sheets_v4.Sheets {
     return google.sheets({
@@ -4886,6 +4934,41 @@ export class ProjectRegistryConnector {
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không chuẩn hóa được Voice Reference RP015");
     } finally {
       if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  }
+
+  async approveRp015CleanVoiceReferences(projectId: string): Promise<ApprovedRp015CleanVoiceReferences> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    try {
+      const [projectsResponse, jobsResponse, approvalsResponse, auditResponse] = await Promise.all([
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'PRODUCTION_JOBS'!A:N" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'APPROVALS'!A:J" }),
+        sheets.spreadsheets.values.get({ spreadsheetId, range: "'AUDIT_LOG'!A:H" }),
+      ]);
+      const projects = projectsResponse.data.values ?? [];
+      const jobs = jobsResponse.data.values ?? [];
+      const approvals = approvalsResponse.data.values ?? [];
+      const projectIndex = projects.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId);
+      if (projectIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const jobIndex = jobs.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[3] ?? "").trim() === MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE);
+      const job = jobIndex >= 0 ? jobs[jobIndex].map(String) : undefined;
+      const approvalIndex = approvals.findIndex((row, index) => index > 0 && String(row[1] ?? "").trim() === projectId && String(row[2] ?? "").trim() === MV_RP015_CLEAN_VOICE_REFERENCES_JOB_TYPE && String(row[3] ?? "").trim() === String(job?.[0] ?? "").trim());
+      const approval = approvalIndex >= 0 ? approvals[approvalIndex].map(String) : undefined;
+      const result = planRp015CleanVoiceReferencesApproval(projects[projectIndex].map(String), job, approval);
+      if (result.idempotent_replay) return result;
+      const auditRow = (auditResponse.data.values ?? []).length + 1;
+      await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data: [
+        { range: `'PROJECTS'!T${projectIndex + 1}`, values: [[result.next_action]] },
+        { range: `'PRODUCTION_JOBS'!E${jobIndex + 1}:N${jobIndex + 1}`, values: [["APPROVED", String(job?.[5] ?? "LOCAL_DEMUCS"), String(job?.[6] ?? "[]"), String(job?.[7] ?? "[]"), String(job?.[8] ?? ""), String(job?.[9] ?? "1"), String(job?.[10] ?? result.approved_at), result.approved_at, String(job?.[12] ?? result.approved_at), result.approved_at]] },
+        { range: `'APPROVALS'!E${approvalIndex + 1}:J${approvalIndex + 1}`, values: [["APPROVED", "PROJECT_OWNER", result.approved_at, "Chủ dự án xác nhận hai vocal stem Demucs RP015 đã hết nhạc nền.", String(approval?.[8] ?? result.approved_at), result.approved_at]] },
+        { range: `'AUDIT_LOG'!A${auditRow}:H${auditRow}`, values: [[randomUUID(), projectId, String(projects[projectIndex][0] ?? ""), "MV_RP015_DEMUCS_VOCAL_STEMS_APPROVED", "SUCCEEDED", "AI_EXECUTOR_WEB", "Đã duyệt hai vocal stem Demucs RP015; xác nhận hết nhạc nền. Provider và render vẫn khóa.", result.approved_at]] },
+      ] } });
+      return result;
+    } catch (error) {
+      if (error instanceof ProjectRegistryNotConfiguredError || error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không duyệt được vocal stem Demucs RP015");
     }
   }
 
