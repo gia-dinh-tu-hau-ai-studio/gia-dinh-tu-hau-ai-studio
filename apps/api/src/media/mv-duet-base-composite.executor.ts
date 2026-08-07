@@ -18,6 +18,90 @@ export const RP015_DUET_CUT_POINTS_SECONDS = [1.92, 3.84, 5.76, 7.68] as const;
 export const RP015_MIN_AUDIO_MEAN_DB = -45;
 export const RP015_MIN_AUDIO_MAX_DB = -40;
 
+const DRIVE_AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
+const DRIVE_AUDIO_APPLICATION_MIME_TYPES = new Set([
+  "application/mp3",
+  "application/x-mp3",
+  "application/octet-stream",
+]);
+
+export function isDriveAudioCandidate(nameInput: string, mimeTypeInput: string, sizeInput: string | number | null | undefined) {
+  const name = nameInput.trim().toLowerCase();
+  const mimeType = mimeTypeInput.trim().toLowerCase();
+  const extension = parse(name).ext;
+  const size = Number(sizeInput ?? 0);
+  return Number.isFinite(size) && size > 0 && (
+    mimeType.startsWith("audio/") ||
+    DRIVE_AUDIO_APPLICATION_MIME_TYPES.has(mimeType) ||
+    DRIVE_AUDIO_EXTENSIONS.has(extension)
+  );
+}
+
+export type AudioAssetInspection = {
+  codec_name: string;
+  sample_rate_hz: number;
+  channels: number;
+  duration_seconds: number;
+  inspected_start_seconds: number;
+  inspected_duration_seconds: number;
+  mean_volume_db: number;
+  max_volume_db: number;
+};
+
+export async function inspectAudioAsset(
+  inputPath: string,
+  options?: {
+    requiredStartSeconds?: number;
+    requiredDurationSeconds?: number;
+    minimumMeanDb?: number;
+    minimumMaxDb?: number;
+  },
+): Promise<AudioAssetInspection> {
+  const requiredStartSeconds = options?.requiredStartSeconds ?? 0;
+  const requiredDurationSeconds = options?.requiredDurationSeconds ?? 30;
+  const minimumMeanDb = options?.minimumMeanDb ?? RP015_MIN_AUDIO_MEAN_DB;
+  const minimumMaxDb = options?.minimumMaxDb ?? RP015_MIN_AUDIO_MAX_DB;
+  const probe = await execFileAsync(
+    "ffprobe",
+    ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name,sample_rate,channels:format=duration", "-of", "json", inputPath],
+    { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8" },
+  );
+  const data = JSON.parse(probe.stdout) as {
+    streams?: Array<{ codec_name?: string; sample_rate?: string; channels?: number }>;
+    format?: { duration?: string };
+  };
+  const stream = data.streams?.[0];
+  const durationSeconds = Number(data.format?.duration ?? 0);
+  const requiredEndSeconds = requiredStartSeconds + requiredDurationSeconds;
+  if (!stream?.codec_name) throw new Error("FFprobe không tìm thấy audio stream");
+  if (!Number.isFinite(durationSeconds) || durationSeconds + 0.05 < requiredEndSeconds) {
+    throw new Error(`Audio không đủ thời lượng: cần đến ${requiredEndSeconds.toFixed(2)}s, thực tế ${durationSeconds || 0}s`);
+  }
+  const loudness = await execFileAsync(
+    "ffmpeg",
+    [
+      "-hide_banner", "-ss", String(requiredStartSeconds), "-t", String(requiredDurationSeconds),
+      "-i", inputPath, "-vn", "-af", "volumedetect", "-f", "null", "-",
+    ],
+    { timeout: 60_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" },
+  );
+  const { meanDb, maxDb } = parseVoiceReferenceLoudness(loudness.stderr);
+  if (!Number.isFinite(meanDb) || !Number.isFinite(maxDb)) throw new Error("Không đo được mức âm thanh");
+  if (meanDb < minimumMeanDb || maxDb < minimumMaxDb) {
+    throw new Error(`Audio im lặng hoặc quá nhỏ: mean=${meanDb}dB, max=${maxDb}dB`);
+  }
+  return {
+    codec_name: stream.codec_name,
+    sample_rate_hz: Number(stream.sample_rate ?? 0),
+    channels: Number(stream.channels ?? 0),
+    duration_seconds: durationSeconds,
+    inspected_start_seconds: requiredStartSeconds,
+    inspected_duration_seconds: requiredDurationSeconds,
+    mean_volume_db: meanDb,
+    max_volume_db: maxDb,
+  };
+}
+
 type VideoProbe = {
   width: number;
   height: number;

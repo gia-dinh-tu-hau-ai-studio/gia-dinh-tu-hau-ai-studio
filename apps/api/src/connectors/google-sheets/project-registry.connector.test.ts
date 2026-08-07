@@ -41,6 +41,7 @@ import {
   buildMvDuetBaseCompositeFfmpegArgs,
   buildRp015FinalProofFfmpegArgs,
   classifyVoiceReference,
+  isDriveAudioCandidate,
   parseVoiceReferenceLoudness,
   RP015_DURATION_SECONDS,
   RP015_FFMPEG_TIMEOUT_MS,
@@ -64,6 +65,17 @@ test("đọc đúng loudness FFmpeg sau khi Demucs tách stem", () => {
   ].join("\n"));
   assert.deepEqual(parsed, { meanDb: -16.4, maxDb: -1.5 });
   assert.equal(classifyVoiceReference(42.1, parsed.meanDb, parsed.maxDb), "REFERENCE_CANDIDATE");
+});
+
+test("Drive application/mp3 được nhận là ứng viên âm thanh", () => {
+  assert.equal(isDriveAudioCandidate("vocal-master.mp3", "application/mp3", "14851944"), true);
+  assert.equal(isDriveAudioCandidate("vocal-master.MP3", "application/octet-stream", 1024), true);
+  assert.equal(isDriveAudioCandidate("vocal-master.wav", "", 1024), true);
+});
+
+test("metadata không phải âm thanh hoặc file rỗng bị từ chối", () => {
+  assert.equal(isDriveAudioCandidate("manifest.json", "application/json", 1024), false);
+  assert.equal(isDriveAudioCandidate("vocal-master.mp3", "application/mp3", 0), false);
 });
 
 test("duyệt hai vocal stem Demucs mở bước voice-conversion pilot nhưng không mở provider/render", () => {

@@ -19,6 +19,10 @@ import {
   executeMvDuetBaseComposite,
   executeMvDuetBaseCompositeUnit,
   executeRp015FinalProof,
+  inspectAudioAsset,
+  isDriveAudioCandidate,
+  RP015_DURATION_SECONDS,
+  RP015_MASTER_AUDIO_START_SECONDS,
 } from "../../media/mv-duet-base-composite.executor";
 
 export class ProjectRegistryNotConfiguredError extends Error {}
@@ -5154,8 +5158,17 @@ export class ProjectRegistryConnector {
       }
       const vocalMasterFileId = normalizeDriveFileIdInput(vocalMasterFileIdInput, "vocal_master_file_id");
       const vocalMetadata = await drive.files.get({ fileId: vocalMasterFileId, fields: "id,name,mimeType,size,trashed", supportsAllDrives: true });
-      if (!vocalMetadata.data.id || vocalMetadata.data.trashed === true || !String(vocalMetadata.data.mimeType ?? "").startsWith("audio/") || Number(vocalMetadata.data.size ?? 0) <= 0) {
-        throw new ProjectRegistryInvalidStateError("vocal_master_file_id phải là file âm thanh có giọng hát hợp lệ trên Drive");
+      if (!vocalMetadata.data.id || vocalMetadata.data.trashed === true) {
+        throw new ProjectRegistryInvalidStateError("vocal_master_file_id không tồn tại, đã bị xóa hoặc service account không truy cập được");
+      }
+      if (!isDriveAudioCandidate(
+        String(vocalMetadata.data.name ?? ""),
+        String(vocalMetadata.data.mimeType ?? ""),
+        vocalMetadata.data.size,
+      )) {
+        throw new ProjectRegistryInvalidStateError(
+          `Metadata vocal master không giống tài sản âm thanh: name=${String(vocalMetadata.data.name ?? "")}, mime=${String(vocalMetadata.data.mimeType ?? "")}, size=${String(vocalMetadata.data.size ?? "0")}`,
+        );
       }
       temporaryDirectory = await mkdtemp(join(tmpdir(), "gdth-rp015-final-proof-"));
       const tuongVyPath = join(temporaryDirectory, "tuong-vy.mp4");
@@ -5167,6 +5180,18 @@ export class ProjectRegistryConnector {
         await pipeline(response.data as Readable, createWriteStream(destination));
       };
       await Promise.all([download(tuongVyFileId, tuongVyPath), download(phuongAnFileId, phuongAnPath), download(vocalMasterFileId, audioPath)]);
+      try {
+        await inspectAudioAsset(audioPath, {
+          requiredStartSeconds: RP015_MASTER_AUDIO_START_SECONDS,
+          requiredDurationSeconds: RP015_DURATION_SECONDS,
+          minimumMeanDb: -45,
+          minimumMaxDb: -40,
+        });
+      } catch (error) {
+        throw new ProjectRegistryInvalidStateError(
+          `Vocal master không đạt kiểm tra nội dung bằng ffprobe/ffmpeg: ${error instanceof Error ? error.message : "lỗi không xác định"}`,
+        );
+      }
       const proof = await executeRp015FinalProof(tuongVyPath, phuongAnPath, audioPath, outputPath);
       if ((await stat(outputPath)).size <= 0) throw new ProjectRegistryInvalidStateError("FFmpeg không tạo được RP015 final proof");
       const compositeFolder = await this.findChildFolder(drive, projectFolderId, "03_ORIGINAL_FACE_COMPOSITE");
