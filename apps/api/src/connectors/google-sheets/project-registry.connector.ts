@@ -2410,10 +2410,12 @@ export function planRp015VocalPilotApproval(
   if (jobStatus === "APPROVED" && approvalStatus === "APPROVED") {
     return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "CREATE_RP015_FINAL_PROOF", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: approvedAt, provider_execution_allowed: false, render_allowed: false, idempotent_replay: true };
   }
-  if (jobStatus !== "AWAITING_APPROVAL" || approvalStatus !== "PENDING") {
+  const pendingApproval = jobStatus === "AWAITING_APPROVAL" && approvalStatus === "PENDING";
+  const approvedGateNeedsJobReconciliation = jobStatus === "AWAITING_APPROVAL" && approvalStatus === "APPROVED";
+  if (!pendingApproval && !approvedGateNeedsJobReconciliation) {
     throw new ProjectRegistryInvalidStateError(`Không thể duyệt Voice Reference Pilot RP015 từ ${jobStatus || "EMPTY"}/${approvalStatus || "EMPTY"}`);
   }
-  return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "CREATE_RP015_FINAL_PROOF", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: now.toISOString(), provider_execution_allowed: false, render_allowed: false, idempotent_replay: false };
+  return { project_id: projectId, current_stage: "PRE_PRODUCTION", next_action: "CREATE_RP015_FINAL_PROOF", job_id: jobId, job_status: "APPROVED", approval_id: approvalId, approval_status: "APPROVED", approved_at: approvedGateNeedsJobReconciliation ? approvedAt : now.toISOString(), provider_execution_allowed: false, render_allowed: false, idempotent_replay: false };
 }
 
 export function planRp015CleanVoiceReferencesApproval(
