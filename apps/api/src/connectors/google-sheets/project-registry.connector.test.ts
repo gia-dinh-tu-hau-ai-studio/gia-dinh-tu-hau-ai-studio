@@ -22,6 +22,7 @@ import {
   planMvProviderSubmissionApproval,
   planMvDuetBaseCompositeApproval,
   planMvDuetBaseCompositeExecution,
+  planMvDuetBaseCompositeReviewApproval,
   planMvShotPlanApproval,
   planMvTimecodeAlignmentApproval,
   ProjectRegistryInvalidStateError,
@@ -1084,4 +1085,71 @@ test("FFmpeg chỉ dựng RP015 9.62 giây, không gắn audio và xuất 1920x1
   assert.doesNotMatch(filterGraph, /;pad=/);
   assert.ok(filterGraph.includes("[left][right]hstack=inputs=2[outv]"));
   assert.equal(args.at(-1), "/tmp/rp015.mp4");
+});
+
+
+function executedMvDuetBaseCompositeReviewRows() {
+  const { project, job, approval } = approvedMvDuetBaseCompositeExecutionRows();
+  project[19] = "REVIEW_MV_DUET_BASE_COMPOSITE";
+  job[4] = "SUCCEEDED";
+  job[7] = '["duet-base-composite-manifest-id","rp015-output-id"]';
+  job[8] = JSON.stringify({
+    output_file_id: "rp015-output-id",
+    output_file_url: "https://drive.google.com/file/d/rp015-output-id/view",
+    duration_seconds: 9.633333,
+    width: 1920,
+    height: 1080,
+    provider_execution_allowed: false,
+    render_allowed: false,
+  });
+  return { project, job, approval };
+}
+
+test("duyệt review RP015 chỉ chốt pilot reference và tiếp tục khóa provider/render", () => {
+  const { project, job, approval } = executedMvDuetBaseCompositeReviewRows();
+  const result = planMvDuetBaseCompositeReviewApproval(
+    project,
+    job,
+    approval,
+    undefined,
+    new Date("2026-08-07T03:20:00.000Z"),
+  );
+  assert.equal(result.next_action, "PLAN_MV_DUET_BASE_COMPOSITE_ROLLOUT");
+  assert.equal(result.review_status, "APPROVED");
+  assert.equal(result.job_status, "SUCCEEDED");
+  assert.equal(result.output_file_id, "rp015-output-id");
+  assert.equal(result.provider_execution_allowed, false);
+  assert.equal(result.render_allowed, false);
+  assert.equal(result.idempotent_replay, false);
+});
+
+test("duyệt lại review RP015 đã APPROVED là idempotent", () => {
+  const { project, job, approval } = executedMvDuetBaseCompositeReviewRows();
+  project[19] = "PLAN_MV_DUET_BASE_COMPOSITE_ROLLOUT";
+  const reviewApproval = [
+    "review-approval-id",
+    project[1],
+    "MV_DUET_BASE_COMPOSITE_REVIEW",
+    job[0],
+    "APPROVED",
+    "OWNER",
+    "2026-08-07T03:20:00.000Z",
+  ];
+  const result = planMvDuetBaseCompositeReviewApproval(
+    project,
+    job,
+    approval,
+    reviewApproval,
+  );
+  assert.equal(result.idempotent_replay, true);
+  assert.equal(result.review_approval_id, "review-approval-id");
+});
+
+test("từ chối duyệt review RP015 khi output chưa SUCCEEDED", () => {
+  const { project, job, approval } = executedMvDuetBaseCompositeReviewRows();
+  job[4] = "FAILED";
+  assert.throws(
+    () => planMvDuetBaseCompositeReviewApproval(project, job, approval, undefined),
+    ProjectRegistryInvalidStateError,
+  );
 });
