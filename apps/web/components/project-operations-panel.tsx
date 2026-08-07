@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 const DEFAULT_PROJECT_ID = "GDTH-MV-20260804092100-63D8";
+const RP015_VERIFIED_VOCAL_MASTER_FILE_ID = "1k9sgXZfFwo42XY0Y0NoWKXUQ-CuA63M5";
 
 type CleanVoiceReferenceResult = {
   project_id?: string;
@@ -10,6 +11,10 @@ type CleanVoiceReferenceResult = {
   next_action?: string;
   job_status?: string;
   manifest_file_url?: string;
+  output_file_url?: string;
+  proof_status?: string;
+  layout_version?: string;
+  has_audio?: boolean;
   cleaned_reference_status?: string;
   approval_status?: string;
   approved_at?: string;
@@ -24,6 +29,7 @@ export function ProjectOperationsPanel() {
   const [running, setRunning] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approvingPilot, setApprovingPilot] = useState(false);
+  const [creatingProof, setCreatingProof] = useState(false);
   const [result, setResult] = useState<CleanVoiceReferenceResult | null>(null);
   const [error, setError] = useState("");
 
@@ -104,6 +110,39 @@ export function ProjectOperationsPanel() {
     }
   }
 
+  async function createFinalProofV4() {
+    const normalizedProjectId = projectId.trim();
+    if (!normalizedProjectId) return;
+
+    setCreatingProof(true);
+    setResult(null);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(normalizedProjectId)}/create-rp015-final-proof`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            vocal_master_file_id: RP015_VERIFIED_VOCAL_MASTER_FILE_ID,
+          }),
+        },
+      );
+      const body = (await response.json()) as CleanVoiceReferenceResult;
+      setResult(body);
+      if (!response.ok) {
+        setError(body.message ?? body.code ?? "Không tạo được Final Proof V4 RP015.");
+      }
+    } catch {
+      setError(
+        "Không kết nối được API khi tạo Final Proof V4. Hệ thống không tự động gửi lại để tránh tạo tác vụ trùng.",
+      );
+    } finally {
+      setCreatingProof(false);
+    }
+  }
+
   return (
     <section className="operations-panel" aria-labelledby="project-operations-title">
       <div className="section-heading">
@@ -139,30 +178,43 @@ export function ProjectOperationsPanel() {
           {running ? "Đang tách stem Demucs…" : "Tách 2 vocal stem RP015 bằng Demucs"}
         </button>
         <button
-          disabled={running || approving || approvingPilot || !projectId.trim()}
+          disabled={running || approving || approvingPilot || creatingProof || !projectId.trim()}
           onClick={approveCleanVoiceReferences}
           type="button"
         >
           {approving ? "Đang ghi phê duyệt…" : "Duyệt 2 vocal stem Demucs RP015"}
         </button>
         <button
-          disabled={running || approving || approvingPilot || !projectId.trim()}
+          disabled={running || approving || approvingPilot || creatingProof || !projectId.trim()}
           onClick={approveVocalPilot}
           type="button"
         >
           {approvingPilot ? "Đang ghi phê duyệt Pilot…" : "Duyệt 2 Voice Reference Pilot RP015"}
         </button>
+        <button
+          disabled={running || approving || approvingPilot || creatingProof || !projectId.trim()}
+          onClick={createFinalProofV4}
+          type="button"
+        >
+          {creatingProof ? "Đang dựng Final Proof V4…" : "Chạy Final Proof V4 RP015"}
+        </button>
       </div>
 
       <p className="library-status">
         Sau khi nghe xác nhận hết nhạc nền, cổng duyệt chuyển sang
-        PREPARE_RP015_VOICE_CONVERSION_PILOT. Provider và render vẫn khóa.
+        PREPARE_RP015_VOICE_CONVERSION_PILOT. Final Proof V4 dùng Vocal Master đã kiểm chứng;
+        provider và render tổng vẫn khóa.
       </p>
 
       {error && <p className="operation-error" role="alert">{error}</p>}
       {result && (
         <div className="operation-result">
           <pre>{JSON.stringify(result, null, 2)}</pre>
+          {result.output_file_url && (
+            <a href={result.output_file_url} rel="noreferrer" target="_blank">
+              Mở Final Proof V4 RP015 trên Drive
+            </a>
+          )}
           {result.manifest_file_url && (
             <a href={result.manifest_file_url} rel="noreferrer" target="_blank">
               Mở manifest và hai Voice Reference sạch trên Drive
