@@ -43,6 +43,7 @@ import {
   buildVoiceReferenceSeparationArgs,
   resolveDemucsVocalsPath,
   buildMvDuetBaseCompositeFfmpegArgs,
+  buildRp015FrameExtractionArgs,
   buildRp015FinalProofV4FfmpegArgs,
   classifyVoiceReference,
   isDriveAudioCandidate,
@@ -1671,4 +1672,10 @@ test("RP015 Final Proof V4 ghép hai lớp người trong suốt vào cùng sân
   assert.equal(args[vocalIndex - 5], "-ss");
   assert.equal(args[vocalIndex - 4], String(RP015_MASTER_AUDIO_START_SECONDS));
   assert.equal(args[vocalIndex - 2], String(RP015_DURATION_SECONDS));
+});
+
+test("RP015 Final Proof V4 giới hạn frame segmentation ở chiều cao composite", () => {
+  const args = buildRp015FrameExtractionArgs("source.mp4", 16.22, "frames/%06d.png");
+  const filter = args[args.indexOf("-vf") + 1];
+  assert.equal(filter, "fps=12,scale=-2:900:force_original_aspect_ratio=decrease");
 });
