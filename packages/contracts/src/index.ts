@@ -129,6 +129,30 @@ export const ShortFilmQcSchema = z.object({
   continuity: z.boolean(),
 });
 
+export const ShortFilmProviderConfigSchema = z.object({
+  script: z.literal("OPENAI_RESPONSES"),
+  image_to_video: z.literal("RUNWAY_IMAGE_TO_VIDEO"),
+  lip_sync: z.literal("SYNC_LIP_SYNC"),
+  voice: z.literal("APPROVED_VOICE_MASTER"),
+  execution_mode: z.literal("APPROVAL_GATED"),
+});
+
+export const ShortFilmScriptDraftSchema = z.object({
+  title: z.string().trim().min(1),
+  synopsis: z.string().trim().min(1),
+  full_script: z.string().trim().min(1),
+});
+
+export const ShortFilmScriptGenerationRequestSchema = z.object({
+  idea: z.string().trim().min(20).max(12_000),
+  target_duration_minutes: z.number().int().min(1).max(60),
+  language: z.string().trim().min(2).max(20).default("vi"),
+  characters: z.array(ShortFilmCharacterSchema).min(1).max(20),
+});
+
+export type ShortFilmScriptGenerationRequest = z.infer<typeof ShortFilmScriptGenerationRequestSchema>;
+export type ShortFilmScriptDraft = z.infer<typeof ShortFilmScriptDraftSchema>;
+
 export const ShortFilmWorkflowSchema = z
   .object({
     schema_version: z.literal("SHORT_FILM_FORM_V1"),
@@ -140,6 +164,9 @@ export const ShortFilmWorkflowSchema = z
       "PROJECT_OWNER_PROVIDED",
       "AI_DEVELOPED_FROM_IDEA",
     ]),
+    idea_brief: z.string().trim().min(20).max(12_000),
+    target_duration_minutes: z.number().int().min(1).max(60),
+    providers: ShortFilmProviderConfigSchema,
     script_title: z.string().trim().min(1),
     script_synopsis: z.string().trim().min(1),
     full_script: z.string().trim().min(1),

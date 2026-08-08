@@ -113,6 +113,8 @@ export function ProjectIntakeForm() {
   const [shotPlanPreparationResult, setShotPlanPreparationResult] = useState("");
   const [savingShortFilm, setSavingShortFilm] = useState(false);
   const [shortFilmSaveResult, setShortFilmSaveResult] = useState("");
+  const [generatingScript, setGeneratingScript] = useState(false);
+  const [shortFilmProviderStatus, setShortFilmProviderStatus] = useState<Record<string, { configured: boolean }>>({});
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -137,6 +139,13 @@ export function ProjectIntakeForm() {
       .catch((error: unknown) => {
         setLibraryMessage(error instanceof Error ? error.message : "Không đọc được thư viện nhân vật");
       });
+  }, []);
+
+  useEffect(() => {
+    void fetch("/api/short-film/providers/status")
+      .then((response) => response.json())
+      .then((body) => setShortFilmProviderStatus(body.providers ?? {}))
+      .catch(() => setShortFilmProviderStatus({}));
   }, []);
 
   function addCharacter() {
@@ -311,6 +320,42 @@ export function ProjectIntakeForm() {
       setShortFilmSaveResult("Không lưu được SHORT_FILM workflow. Không tự gửi lại để tránh ghi lặp approval.");
     } finally {
       setSavingShortFilm(false);
+    }
+  }
+
+  async function generateShortFilmScript() {
+    setGeneratingScript(true);
+    setShortFilmSaveResult("");
+    try {
+      const response = await fetch("/api/short-film/scripts/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          idea: shortFilmWorkflow.idea_brief,
+          target_duration_minutes: shortFilmWorkflow.target_duration_minutes,
+          language: shortFilmWorkflow.dialogue.language,
+          characters: shortFilmWorkflow.film_characters,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setShortFilmSaveResult(JSON.stringify(body, null, 2));
+        return;
+      }
+      setShortFilmWorkflow({
+        ...shortFilmWorkflow,
+        script_source: "AI_DEVELOPED_FROM_IDEA",
+        script_title: body.draft.title,
+        script_synopsis: body.draft.synopsis,
+        full_script: body.draft.full_script,
+        script_review: { decision: "PENDING", notes: "Bản nháp AI mới, chờ chủ dự án review.", reviewer: "PROJECT_OWNER" },
+      });
+      invalidateConfirmation();
+      setShortFilmSaveResult(`Đã nhận bản nháp từ ${body.provider}/${body.model}. SCRIPT_APPROVED vẫn đang khóa.`);
+    } catch {
+      setShortFilmSaveResult("Không kết nối được provider kịch bản. Chưa tạo hoặc lưu bản nháp.");
+    } finally {
+      setGeneratingScript(false);
     }
   }
 
@@ -527,6 +572,9 @@ export function ProjectIntakeForm() {
             <ShortFilmWorkflowForm
               eligibleCharacters={eligibleCharacters}
               value={shortFilmWorkflow}
+              generatingScript={generatingScript}
+              onGenerateScript={generateShortFilmScript}
+              providerStatus={shortFilmProviderStatus}
               onChange={(workflow) => {
                 invalidateConfirmation();
                 setShortFilmWorkflow(workflow);

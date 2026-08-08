@@ -6,6 +6,10 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
 
 - Ưu tiên sản xuất phim ngắn/Web Drama; MV ca nhạc tạm khóa trong Form.
 - Dùng `SHORT_FILM_FORM_V1` với cổng duyệt kịch bản, pilot và phim hoàn chỉnh.
+- AI phát triển bản nháp kịch bản từ ý tưởng qua OpenAI Responses API; bản nháp
+  luôn quay về `PENDING` và phải được chủ dự án duyệt trước Shot Plan.
+- Routing provider phim ngắn: OpenAI (kịch bản), Runway (ảnh thành video), Sync
+  (khẩu hình), APPROVED Voice Master (giọng); secret chỉ đọc từ runtime.
 - Chỉ dùng `MASTER_IDENTITY` ở trạng thái `APPROVED+LOCKED`; Tường Vy và Phương An là nguồn tạm trong giai đoạn chuyển đổi.
 - Không gọi workflow, webhook hoặc cơ sở dữ liệu của hệ thống cũ.
 - Không dùng kiến trúc sản xuất cũ.

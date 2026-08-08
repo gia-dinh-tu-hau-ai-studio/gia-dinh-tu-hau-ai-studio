@@ -70,6 +70,8 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .qc-grid { display: flex; flex-wrap: wrap; gap: 12px; padding: 14px; border-radius: 12px; background: #151114; }
 .qc-grid label { display: flex; align-items: center; gap: 7px; }
 .qc-grid input { width: auto; }
+.provider-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.provider-grid span { padding: 13px; border: 1px solid #3b2e33; border-radius: 10px; background: #151114; }
 .locked-stage { opacity: .52; }
 .locked-stage input, .locked-stage select, .locked-stage textarea { cursor: not-allowed; }
 .short-film-workflow video { width: 100%; max-height: 480px; border-radius: 12px; background: #000; }

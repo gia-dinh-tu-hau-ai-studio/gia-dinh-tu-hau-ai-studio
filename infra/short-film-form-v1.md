@@ -34,4 +34,16 @@ character API remains backward compatible and now exposes the derived readiness.
 3. Full-film production requires `PILOT_APPROVED` and all seven pilot QC checks.
 4. Publishing requires final-film approval and all seven final QC checks.
 
-No endpoint in this version invokes Runway, Luma, Sync, or another provider.
+## Provider routing
+
+- Script development: OpenAI Responses API with strict structured output. The API
+  reads `OPENAI_API_KEY` only from the runtime secret and defaults to
+  `gpt-5.6-terra`; `SHORT_FILM_SCRIPT_MODEL` may override the model.
+- Image-to-video: Runway, after script/Shot Plan approval and an explicit pilot
+  submission action.
+- Lip sync: Sync, only for approved pilot/full-film units that require dialogue.
+- Voice: an APPROVED Voice Master; no raw source voice is promoted automatically.
+
+Generating a script returns a draft with `PENDING` review and never approves it,
+creates a Shot Plan, submits media, or unlocks production. Provider API keys are
+not accepted in request bodies and are never persisted in project JSON or logs.

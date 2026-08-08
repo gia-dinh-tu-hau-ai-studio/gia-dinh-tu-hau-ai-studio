@@ -47,6 +47,16 @@ export class AppController {
     return this.intakeService.saveShortFilmWorkflow(projectId, body);
   }
 
+  @Post("short-film/scripts/generate")
+  generateShortFilmScript(@Body() body: unknown) {
+    return this.intakeService.generateShortFilmScript(body);
+  }
+
+  @Get("short-film/providers/status")
+  shortFilmProviderStatus() {
+    return this.intakeService.shortFilmProviderStatus();
+  }
+
   @Post("projects/:projectId/prepare-mv-production")
   prepareMvProduction(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvProduction(projectId);

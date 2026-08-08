@@ -12,6 +12,9 @@ type Props = {
   eligibleCharacters: LibraryActor[];
   value: ShortFilmWorkflow;
   onChange: (value: ShortFilmWorkflow) => void;
+  onGenerateScript?: () => Promise<void>;
+  generatingScript?: boolean;
+  providerStatus?: Record<string, { configured: boolean }>;
 };
 
 const temporaryActors = [
@@ -43,6 +46,15 @@ export function createInitialShortFilmWorkflow(): ShortFilmWorkflow {
       appearance: "Bám Character Master đã duyệt",
     })),
     script_source: "AI_DEVELOPED_FROM_IDEA",
+    idea_brief: "Nhập ý tưởng phim, xung đột chính, thông điệp và kết thúc mong muốn tại đây.",
+    target_duration_minutes: 8,
+    providers: {
+      script: "OPENAI_RESPONSES",
+      image_to_video: "RUNWAY_IMAGE_TO_VIDEO",
+      lip_sync: "SYNC_LIP_SYNC",
+      voice: "APPROVED_VOICE_MASTER",
+      execution_mode: "APPROVAL_GATED",
+    },
     script_title: "Kịch bản chưa đặt tên",
     script_synopsis: "Chờ chủ dự án nhập ý tưởng và duyệt synopsis.",
     full_script: "Kịch bản đầy đủ sẽ được review tại đây trước khi lập Shot Plan.",
@@ -61,7 +73,7 @@ function allQcPassed(qc: typeof emptyQc) {
   return Object.values(qc).every(Boolean);
 }
 
-export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange }: Props) {
+export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, generatingScript = false, providerStatus }: Props) {
   const libraryActors = eligibleCharacters
     .filter((actor) => actor.readiness?.master_identity === "APPROVED_LOCKED")
     .map((actor) => ({
@@ -125,10 +137,20 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange }: P
       <fieldset>
         <legend>Kịch bản và SCRIPT_APPROVED</legend>
         <label><span>Nguồn kịch bản</span><select value={value.script_source} onChange={(event) => patch({ script_source: event.target.value as ShortFilmWorkflow["script_source"] })}><option value="AI_GENERATED">AI tạo</option><option value="PROJECT_OWNER_PROVIDED">Chủ dự án cung cấp</option><option value="AI_DEVELOPED_FROM_IDEA">AI phát triển từ ý tưởng</option></select></label>
+        <label><span>Nhà cung cấp kịch bản</span><select disabled value={value.providers.script}><option value="OPENAI_RESPONSES">OpenAI Responses API</option></select></label>
+        <label><span>Thời lượng mục tiêu (phút)</span><input min={1} max={60} type="number" value={value.target_duration_minutes} onChange={(event) => patch({ target_duration_minutes: Number(event.target.value) })} /></label>
+        <label className="wide-field"><span>Ý tưởng để AI phát triển</span><textarea rows={6} value={value.idea_brief} onChange={(event) => patch({ idea_brief: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
+        {value.script_source !== "PROJECT_OWNER_PROVIDED" && onGenerateScript && <button disabled={generatingScript || value.idea_brief.trim().length < 20} onClick={onGenerateScript} type="button">{generatingScript ? "AI đang tạo kịch bản…" : "Tạo bản nháp kịch bản từ ý tưởng"}</button>}
         <label><span>Tên kịch bản</span><input value={value.script_title} onChange={(event) => patch({ script_title: event.target.value })} /></label>
         <label><span>Synopsis</span><textarea value={value.script_synopsis} onChange={(event) => patch({ script_synopsis: event.target.value })} /></label>
         <label className="wide-field"><span>Review toàn bộ kịch bản</span><textarea rows={14} value={value.full_script} onChange={(event) => patch({ full_script: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
         <div className="approval-gate"><strong>Script gate</strong><select value={value.script_review.decision} onChange={(event) => patch({ script_review: { ...value.script_review, decision: event.target.value as ShortFilmWorkflow["script_review"]["decision"], reviewed_at: new Date().toISOString() } })}><option value="PENDING">Chờ review</option><option value="REQUEST_CHANGES">REQUEST_CHANGES</option><option value="APPROVE">APPROVE</option><option value="REJECT">REJECT</option></select><textarea placeholder="Ghi chú review" value={value.script_review.notes} onChange={(event) => patch({ script_review: { ...value.script_review, notes: event.target.value } })} /></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Liên kết nhà cung cấp theo chức năng</legend>
+        <p className="gate-note">Kịch bản: OpenAI Responses API · ảnh thành video: Runway · khẩu hình: Sync · giọng: Voice Master đã duyệt. Secret chỉ nằm ở runtime; mọi tác vụ media vẫn chờ approval gate.</p>
+        <div className="provider-grid"><span>Script — {value.providers.script} · {providerStatus?.script?.configured ? "CONNECTED" : "NOT_CONFIGURED"}</span><span>Video — {value.providers.image_to_video} · {providerStatus?.image_to_video?.configured ? "CONNECTED" : "NOT_CONFIGURED"}</span><span>Lip-sync — {value.providers.lip_sync} · {providerStatus?.lip_sync?.configured ? "CONNECTED" : "NOT_CONFIGURED"}</span><span>Voice — {value.providers.voice} · {providerStatus?.voice?.configured ? "READY" : "NOT_READY"}</span></div>
       </fieldset>
 
       <fieldset>

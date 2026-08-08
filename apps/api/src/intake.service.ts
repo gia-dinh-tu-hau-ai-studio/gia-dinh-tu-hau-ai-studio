@@ -9,6 +9,7 @@ import {
 import {
   normalizeProjectIntake,
   ProjectSubmitRequestSchema,
+  ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowUpdateRequestSchema,
 } from "@tu-hau/contracts";
 import { randomUUID } from "node:crypto";
@@ -24,12 +25,18 @@ import {
   ProjectRegistryProjectNotFoundError,
   ProjectRegistryUnavailableError,
 } from "./connectors/google-sheets/project-registry.connector";
+import {
+  ShortFilmScriptProvider,
+  ShortFilmScriptProviderNotConfiguredError,
+  ShortFilmScriptProviderUnavailableError,
+} from "./providers/short-film-script.provider";
 
 @Injectable()
 export class IntakeService {
   constructor(
     private readonly characterLibrary: CharacterLibraryConnector,
     private readonly projectRegistry: ProjectRegistryConnector,
+    private readonly shortFilmScriptProvider: ShortFilmScriptProvider,
   ) {}
 
   async listEligibleCharacters() {
@@ -171,6 +178,36 @@ export class IntakeService {
       }
       this.handleShortFilmWorkflowError(error);
     }
+  }
+
+  async generateShortFilmScript(body: unknown) {
+    try {
+      const request = ShortFilmScriptGenerationRequestSchema.parse(body);
+      return await this.shortFilmScriptProvider.generate(request);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BadRequestException({ code: "SHORT_FILM_SCRIPT_REQUEST_INVALID", errors: error.issues });
+      }
+      if (error instanceof ShortFilmScriptProviderNotConfiguredError) {
+        throw new ServiceUnavailableException({ code: "SHORT_FILM_SCRIPT_PROVIDER_NOT_CONFIGURED", message: error.message });
+      }
+      if (error instanceof ShortFilmScriptProviderUnavailableError) {
+        throw new BadGatewayException({ code: "SHORT_FILM_SCRIPT_PROVIDER_UNAVAILABLE", message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  shortFilmProviderStatus() {
+    return {
+      secret_values_exposed: false,
+      providers: {
+        script: { provider: "OPENAI_RESPONSES", configured: Boolean(process.env.OPENAI_API_KEY?.trim()) },
+        image_to_video: { provider: "RUNWAY_IMAGE_TO_VIDEO", configured: Boolean(process.env.RUNWAYML_API_SECRET?.trim()) },
+        lip_sync: { provider: "SYNC_LIP_SYNC", configured: Boolean(process.env.SYNC_API_KEY?.trim()) },
+        voice: { provider: "APPROVED_VOICE_MASTER", configured: true },
+      },
+    };
   }
 
   async prepareMvProduction(projectIdInput: string) {
