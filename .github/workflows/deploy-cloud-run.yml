@@ -71,10 +71,16 @@ jobs:
 
       - name: Deploy web
         run: |
+          API_URL="$(gcloud run services describe "$API_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format='value(status.url)')"
+          test -n "$API_URL"
           gcloud run services update "$WEB_SERVICE" \
             --project="$GCP_PROJECT_ID" \
             --region="$GCP_REGION" \
             --image="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$WEB_SERVICE:latest" \
+            --update-env-vars="API_URL=$API_URL" \
             --quiet
 
       - name: Report deployed services
