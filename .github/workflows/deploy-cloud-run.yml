@@ -54,7 +54,8 @@ jobs:
             --project="$GCP_PROJECT_ID" \
             --region="$GCP_REGION" \
             --image="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$API_SERVICE:latest" \
-            --memory=2Gi \
+            --cpu=2 \
+            --memory=4Gi \
             --timeout=900 \
             --concurrency=1 \
             --min-instances=1 \

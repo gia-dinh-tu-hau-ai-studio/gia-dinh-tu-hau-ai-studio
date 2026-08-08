@@ -21,6 +21,7 @@ export const RP015_AUDIO_END_DRIFT_TOLERANCE_SECONDS = 0.5;
 export const RP015_AUDIO_PROOF_MAX_LOOKBACK_SECONDS = 30;
 export const RP015_AUDIO_PROOF_LOOKBACK_STEP_SECONDS = 1;
 export const RP015_V4_SEGMENTATION_FPS = 12;
+export const RP015_V4_SEGMENTATION_HEIGHT = 900;
 export const RP015_V4_BACKGROUND_PATH = "/app/assets/RP015_V4_PRO_STAGE_BACKGROUND_1920x1080.png";
 export const RP015_V4_SEGMENTATION_SCRIPT_PATH = "/app/scripts/rp015_remove_background.py";
 
@@ -631,6 +632,21 @@ export function buildRp015FinalProofV4FfmpegArgs(
   ];
 }
 
+export function buildRp015FrameExtractionArgs(
+  inputPath: string,
+  startSeconds: number,
+  outputPattern: string,
+) {
+  return [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-ss", String(startSeconds),
+    "-t", String(RP015_DURATION_SECONDS),
+    "-i", inputPath,
+    "-vf", `fps=${RP015_V4_SEGMENTATION_FPS},scale=-2:${RP015_V4_SEGMENTATION_HEIGHT}:force_original_aspect_ratio=decrease`,
+    outputPattern,
+  ];
+}
+
 export async function executeRp015FinalProof(
   tuongVyInputPath: string,
   phuongAnInputPath: string,
@@ -651,7 +667,7 @@ export async function executeRp015FinalProof(
   const runStage = async (stage: Rp015FinalProofExecutionStage) => options?.onStage?.(stage);
   const extractFrames = (inputPath: string, startSeconds: number, outputPattern: string) => execFileAsync(
     "ffmpeg",
-    ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(startSeconds), "-t", String(RP015_DURATION_SECONDS), "-i", inputPath, "-vf", `fps=${RP015_V4_SEGMENTATION_FPS}`, outputPattern],
+    buildRp015FrameExtractionArgs(inputPath, startSeconds, outputPattern),
     { timeout: RP015_FFMPEG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, signal: options?.signal },
   );
   await runStage("EXTRACTING_FRAMES");

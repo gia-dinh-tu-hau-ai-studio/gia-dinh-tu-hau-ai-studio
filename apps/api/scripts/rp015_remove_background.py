@@ -13,17 +13,16 @@ def main() -> None:
     if not frames:
         raise RuntimeError(f"No RP015 source frames found in {source}")
     session = new_session("u2net_human_seg")
-    for frame in frames:
+    for index, frame in enumerate(frames, start=1):
         with Image.open(frame) as image:
             foreground = remove(
                 image.convert("RGBA"),
                 session=session,
-                alpha_matting=True,
-                alpha_matting_foreground_threshold=240,
-                alpha_matting_background_threshold=10,
-                alpha_matting_erode_size=8,
+                alpha_matting=False,
             )
             foreground.save(destination / frame.name, "PNG")
+        if index == 1 or index % 12 == 0 or index == len(frames):
+            print(f"RP015_BACKGROUND_REMOVAL_PROGRESS {index}/{len(frames)}", flush=True)
 
 
 if __name__ == "__main__":
