@@ -6,7 +6,11 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { normalizeProjectIntake, ProjectSubmitRequestSchema } from "@tu-hau/contracts";
+import {
+  normalizeProjectIntake,
+  ProjectSubmitRequestSchema,
+  ShortFilmWorkflowUpdateRequestSchema,
+} from "@tu-hau/contracts";
 import { randomUUID } from "node:crypto";
 import { ZodError } from "zod";
 import {
@@ -142,6 +146,30 @@ export class IntakeService {
         });
       }
       throw error;
+    }
+  }
+
+  async getShortFilmWorkflow(projectIdInput: string) {
+    const projectId = projectIdInput.trim();
+    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
+    try {
+      return await this.projectRegistry.getShortFilmWorkflow(projectId);
+    } catch (error) {
+      this.handleShortFilmWorkflowError(error);
+    }
+  }
+
+  async saveShortFilmWorkflow(projectIdInput: string, body: unknown) {
+    const projectId = projectIdInput.trim();
+    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
+    try {
+      const request = ShortFilmWorkflowUpdateRequestSchema.parse(body);
+      return await this.projectRegistry.saveShortFilmWorkflow(projectId, request.workflow);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BadRequestException({ code: "SHORT_FILM_WORKFLOW_INVALID", errors: error.issues });
+      }
+      this.handleShortFilmWorkflowError(error);
     }
   }
 
@@ -732,6 +760,22 @@ export class IntakeService {
       if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
       throw error;
     }
+  }
+
+  private handleShortFilmWorkflowError(error: unknown): never {
+    if (error instanceof ProjectRegistryProjectNotFoundError) {
+      throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
+    }
+    if (error instanceof ProjectRegistryInvalidStateError) {
+      throw new ConflictException({ code: "SHORT_FILM_WORKFLOW_INVALID_STATE", message: error.message });
+    }
+    if (error instanceof ProjectRegistryNotConfiguredError) {
+      throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
+    }
+    if (error instanceof ProjectRegistryUnavailableError) {
+      throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
+    }
+    throw error;
   }
 
   private async validateContract(body: unknown) {

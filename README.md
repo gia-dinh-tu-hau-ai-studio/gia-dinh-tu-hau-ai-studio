@@ -4,9 +4,9 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
 
 ## Nguyên tắc vận hành đã khóa
 
-- Sản xuất MV ca nhạc với nhân vật thật trước.
-- Web Drama tạm khóa cho đến khi quy trình MV đạt yêu cầu.
-- Giữ danh tính gương mặt bằng `ORIGINAL_FACE_COMPOSITE`.
+- Ưu tiên sản xuất phim ngắn/Web Drama; MV ca nhạc tạm khóa trong Form.
+- Dùng `SHORT_FILM_FORM_V1` với cổng duyệt kịch bản, pilot và phim hoàn chỉnh.
+- Chỉ dùng `MASTER_IDENTITY` ở trạng thái `APPROVED+LOCKED`; Tường Vy và Phương An là nguồn tạm trong giai đoạn chuyển đổi.
 - Không gọi workflow, webhook hoặc cơ sở dữ liệu của hệ thống cũ.
 - Không dùng kiến trúc sản xuất cũ.
 
@@ -14,12 +14,12 @@ Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
 
 1. Web Form kiểm tra hợp đồng đầu vào và nhân vật đủ điều kiện trong `CHARACTER_LIBRARY`.
 2. Người dùng bấm xác nhận tạo dự án.
-3. API tạo `project_id` dạng `GDTH-MV-*`, thư mục Drive riêng và ghi hợp đồng vào `PROJECTS`.
+3. API tạo `project_id` dạng `GDTH-FILM-*` cho phim ngắn, thư mục Drive riêng và ghi hợp đồng vào `PROJECTS`.
 4. Các nhân vật được ghi vào `PROJECT_CHARACTERS`; sự kiện được ghi vào `AUDIT_LOG`.
 5. Trạng thái đầu tiên là `CONTRACT`, hành động tiếp theo là `APPROVE_CONTRACT`.
 6. Nút duyệt hợp đồng cập nhật đúng dòng theo `project_id`, ghi sự kiện
    `CONTRACT_APPROVED`, rồi chuyển sang `PRE_PRODUCTION` với hành động
-   `PREPARE_MV_PRODUCTION`. Gọi lại cùng `project_id` không ghi lặp sự kiện.
+   `REVIEW_SHORT_FILM_SCRIPT` cho phim ngắn. Gọi lại cùng `project_id` không ghi lặp sự kiện.
 7. Nút lập kế hoạch PRE_PRODUCTION kiểm tra hợp đồng MV đã duyệt, video gốc của
    từng nhân vật và `ORIGINAL_FACE_COMPOSITE`; sau đó tạo
    `MV_PRODUCTION_PLAN_V1_<project_id>.json` trong `02_SAN_XUAT_MV`.

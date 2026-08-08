@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { IntakeService } from "./intake.service";
 
 @Controller()
@@ -11,8 +11,9 @@ export class AppController {
       service: "gia-dinh-tu-hau-ai-executor-api",
       status: "ok",
       architecture: "gia-dinh-tu-hau-v1",
-      production_priority: "MUSIC_VIDEO_FIRST",
-      face_identity_pipeline: "ORIGINAL_FACE_COMPOSITE",
+      production_priority: "SHORT_FILM_FIRST",
+      short_film_form: "SHORT_FILM_FORM_V1",
+      identity_pipeline: "MASTER_IDENTITY_APPROVED_LOCKED",
     };
   }
 
@@ -34,6 +35,16 @@ export class AppController {
   @Post("projects/:projectId/approve-contract")
   approveContract(@Param("projectId") projectId: string) {
     return this.intakeService.approveContract(projectId);
+  }
+
+  @Get("projects/:projectId/short-film/workflow")
+  getShortFilmWorkflow(@Param("projectId") projectId: string) {
+    return this.intakeService.getShortFilmWorkflow(projectId);
+  }
+
+  @Put("projects/:projectId/short-film/workflow")
+  saveShortFilmWorkflow(@Param("projectId") projectId: string, @Body() body: unknown) {
+    return this.intakeService.saveShortFilmWorkflow(projectId, body);
   }
 
   @Post("projects/:projectId/prepare-mv-production")

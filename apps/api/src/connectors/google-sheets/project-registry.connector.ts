@@ -1,5 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import type { NormalizedProjectIntake } from "@tu-hau/contracts";
+import {
+  shortFilmNextAction,
+  ShortFilmWorkflowSchema,
+  type NormalizedProjectIntake,
+  type ShortFilmWorkflow,
+} from "@tu-hau/contracts";
 import { randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
@@ -45,11 +50,19 @@ export type RegisteredProject = {
   idempotent_replay: boolean;
 };
 
+export type StoredShortFilmWorkflow = {
+  project_id: string;
+  project_type: "SHORT_FILM";
+  workflow: ShortFilmWorkflow;
+  next_action: ReturnType<typeof shortFilmNextAction>;
+  updated_at: string;
+};
+
 export type ApprovedContract = {
   project_id: string;
   approval_status: "APPROVED";
   current_stage: "PRE_PRODUCTION";
-  next_action: "PREPARE_MV_PRODUCTION";
+  next_action: "PREPARE_MV_PRODUCTION" | "REVIEW_SHORT_FILM_SCRIPT";
   approved_at: string;
   idempotent_replay: boolean;
 };
@@ -1428,6 +1441,10 @@ export function planContractApproval(
   const contractStatus = String(row[16] ?? "").trim();
   const approvalStatus = String(row[17] ?? "").trim();
   const nextAction = String(row[19] ?? "").trim();
+  const projectType = String(row[3] ?? "").trim();
+  const approvedNextAction = projectType === "SHORT_FILM"
+    ? "REVIEW_SHORT_FILM_SCRIPT" as const
+    : "PREPARE_MV_PRODUCTION" as const;
   const approvedAt = String(row[23] ?? "").trim() || now.toISOString();
 
   if (!projectId) {
@@ -1443,7 +1460,7 @@ export function planContractApproval(
       project_id: projectId,
       approval_status: "APPROVED",
       current_stage: "PRE_PRODUCTION",
-      next_action: "PREPARE_MV_PRODUCTION",
+      next_action: approvedNextAction,
       approved_at: approvedAt,
       idempotent_replay: true,
     };
@@ -1458,7 +1475,7 @@ export function planContractApproval(
     project_id: projectId,
     approval_status: "APPROVED",
     current_stage: "PRE_PRODUCTION",
-    next_action: "PREPARE_MV_PRODUCTION",
+    next_action: approvedNextAction,
     approved_at: now.toISOString(),
     idempotent_replay: false,
   };
@@ -2588,14 +2605,26 @@ export class ProjectRegistryConnector {
       const projectFolderId = projectFolder.data.id;
       if (!projectFolderId) throw new Error("Google Drive không trả project folder id");
 
-      await Promise.all([
-        "00_HOP_DONG",
-        "01_NHAN_VAT",
-        "02_SAN_XUAT_MV",
-        "03_ORIGINAL_FACE_COMPOSITE",
-        "04_DUYET_NOI_DUNG",
-        "05_KET_QUA",
-      ].map((name) => drive.files.create({
+      const projectFolders = contract.project_type === "SHORT_FILM"
+        ? [
+            "00_HOP_DONG",
+            "01_NHAN_VAT",
+            "02_KICH_BAN",
+            "03_SHOT_PLAN",
+            "04_PILOT",
+            "05_SAN_XUAT_PHIM",
+            "06_QC_DUYET_PHIM",
+            "07_XUAT_BAN",
+          ]
+        : [
+            "00_HOP_DONG",
+            "01_NHAN_VAT",
+            "02_SAN_XUAT_MV",
+            "03_ORIGINAL_FACE_COMPOSITE",
+            "04_DUYET_NOI_DUNG",
+            "05_KET_QUA",
+          ];
+      await Promise.all(projectFolders.map((name) => drive.files.create({
         requestBody: {
           name,
           mimeType: "application/vnd.google-apps.folder",
@@ -2626,6 +2655,89 @@ export class ProjectRegistryConnector {
       throw new ProjectRegistryUnavailableError(
         error instanceof Error ? error.message : "Không tạo được dự án Gia Đình Tư Hậu",
       );
+    }
+  }
+
+  async getShortFilmWorkflow(projectId: string): Promise<StoredShortFilmWorkflow> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    try {
+      const response = await sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" });
+      const row = (response.data.values ?? []).find(
+        (candidate, index) => index > 0 && String(candidate[1] ?? "").trim() === projectId,
+      );
+      if (!row) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      if (String(row[3] ?? "").trim() !== "SHORT_FILM") {
+        throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không phải SHORT_FILM`);
+      }
+      const contract = parseObject(row[24], "contract_json");
+      const workflow = ShortFilmWorkflowSchema.parse(contract.short_film_workflow);
+      return {
+        project_id: projectId,
+        project_type: "SHORT_FILM",
+        workflow,
+        next_action: shortFilmNextAction(workflow),
+        updated_at: String(row[23] ?? row[22] ?? ""),
+      };
+    } catch (error) {
+      if (error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không đọc được SHORT_FILM workflow");
+    }
+  }
+
+  async saveShortFilmWorkflow(projectId: string, input: unknown): Promise<StoredShortFilmWorkflow> {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    try {
+      const workflow = ShortFilmWorkflowSchema.parse(input);
+      const response = await sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" });
+      const rows = response.data.values ?? [];
+      const rowIndex = rows.findIndex(
+        (candidate, index) => index > 0 && String(candidate[1] ?? "").trim() === projectId,
+      );
+      if (rowIndex < 0) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const row = rows[rowIndex];
+      if (String(row[3] ?? "").trim() !== "SHORT_FILM") {
+        throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không phải SHORT_FILM`);
+      }
+      const contract = parseObject(row[24], "contract_json");
+      const existing = contract.short_film_workflow
+        ? ShortFilmWorkflowSchema.parse(contract.short_film_workflow)
+        : undefined;
+      if (
+        existing?.script_review.decision === "APPROVE" &&
+        existing.full_script !== workflow.full_script &&
+        workflow.script_review.decision === "APPROVE"
+      ) {
+        throw new ProjectRegistryInvalidStateError("Kịch bản đã thay đổi phải được review lại trước khi giữ SCRIPT_APPROVED");
+      }
+      const nextAction = shortFilmNextAction(workflow);
+      const updatedAt = new Date().toISOString();
+      const sheetRow = rowIndex + 1;
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: [
+            { range: `'PROJECTS'!T${sheetRow}`, values: [[nextAction]] },
+            { range: `'PROJECTS'!X${sheetRow}:Y${sheetRow}`, values: [[updatedAt, JSON.stringify({ ...contract, short_film_workflow: workflow })]] },
+          ],
+        },
+      });
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: "'AUDIT_LOG'!A:H",
+        valueInputOption: "RAW",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: { values: [[
+          randomUUID(), projectId, String(row[0] ?? ""), "SHORT_FILM_WORKFLOW_UPDATED", "SUCCEEDED",
+          "AI_EXECUTOR_WEB", `SHORT_FILM_FORM_V1 cập nhật; next_action=${nextAction}. Không gọi provider.`, updatedAt,
+        ]] },
+      });
+      return { project_id: projectId, project_type: "SHORT_FILM", workflow, next_action: nextAction, updated_at: updatedAt };
+    } catch (error) {
+      if (error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không lưu được SHORT_FILM workflow");
     }
   }
 
@@ -2678,7 +2790,9 @@ export class ProjectRegistryConnector {
             "CONTRACT_APPROVED",
             "SUCCEEDED",
             "AI_EXECUTOR_WEB",
-            "Hợp đồng đã được duyệt; dự án chuyển sang chuẩn bị sản xuất MV.",
+            transition.next_action === "REVIEW_SHORT_FILM_SCRIPT"
+              ? "Hợp đồng đã được duyệt; dự án chuyển sang review kịch bản phim ngắn. Provider và sản xuất vẫn khóa."
+              : "Hợp đồng đã được duyệt; dự án chuyển sang chuẩn bị sản xuất MV.",
             transition.approved_at,
           ]],
         },

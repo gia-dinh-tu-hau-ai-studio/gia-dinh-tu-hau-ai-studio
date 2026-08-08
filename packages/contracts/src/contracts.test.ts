@@ -1,6 +1,41 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeProjectIntake } from "./index";
+import {
+  normalizeProjectIntake,
+  shortFilmNextAction,
+  ShortFilmWorkflowSchema,
+} from "./index";
+
+const shortFilmWorkflow = {
+  schema_version: "SHORT_FILM_FORM_V1",
+  character_count: 1,
+  source_actors: [{
+    source_actor_id: "CHAR_TUONG_VY",
+    source_actor_name: "Tường Vy",
+    source_kind: "TEMPORARY_APPROVED_SOURCE",
+    master_identity_status: "TEMPORARY",
+  }],
+  film_characters: [{
+    source_actor_id: "CHAR_TUONG_VY",
+    film_character_name: "Vy",
+    film_role: "PROTAGONIST",
+    relationships: "Chị của An",
+    personality: "Điềm tĩnh",
+    appearance: "Trang phục đời thường",
+  }],
+  script_source: "AI_DEVELOPED_FROM_IDEA",
+  script_title: "Gia đình",
+  script_synopsis: "Hai chị em hóa giải hiểu lầm.",
+  full_script: "CẢNH 1 – NỘI – NHÀ – NGÀY\nVy và An trò chuyện.",
+  script_review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+  dialogue: {
+    language: "vi",
+    dialogue_mode: "DIALOGUE",
+    voice_master_mode: "APPROVED_VOICE_MASTER_ONLY",
+    singing_scene: false,
+    singing_scene_notes: "",
+  },
+} as const;
 
 const common = {
   project_name: "Pilot Gia Đình Tư Hậu",
@@ -38,6 +73,7 @@ test("chuẩn hóa payload SHORT_FILM", () => {
     primary_setting: "Đoàn Lô Tô",
     ending_direction: "Kết thúc trọn vẹn",
     dialogue_source: "AI_GENERATED",
+    short_film_workflow: shortFilmWorkflow,
   });
 
   assert.equal(result.project_type, "SHORT_FILM");
@@ -85,6 +121,7 @@ test("chấp nhận nhân vật thư viện với costume và voice APPROVED", (
     primary_setting: "Đoàn Lô Tô",
     ending_direction: "Kết thúc trọn vẹn",
     dialogue_source: "AI_GENERATED",
+    short_film_workflow: shortFilmWorkflow,
   });
 
   assert.equal(result.characters[0]?.character_id, "CHAR_TUONG_VY");
@@ -131,7 +168,68 @@ test("chấp nhận nhân vật hợp lệ khi chưa chọn costume", () => {
     primary_setting: "Đoàn Lô Tô",
     ending_direction: "Kết thúc trọn vẹn",
     dialogue_source: "AI_GENERATED",
+    short_film_workflow: shortFilmWorkflow,
   });
 
   assert.deepEqual(result.characters[0]?.selected_costume_ids, []);
+});
+
+test("khóa Shot Plan khi SCRIPT_APPROVED chưa đạt", () => {
+  assert.throws(() => ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
+  }));
+});
+
+test("khóa toàn phim khi PILOT_APPROVED chưa đạt", () => {
+  assert.throws(() => ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
+    pilot: {
+      duration_seconds: 15,
+      video_url: "https://drive.google.com/file/d/pilot/view",
+      qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true },
+      review: { decision: "REQUEST_CHANGES", notes: "Sửa khẩu hình", reviewer: "PROJECT_OWNER" },
+    },
+    full_film: {
+      video_url: "https://drive.google.com/file/d/full/view",
+      qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true },
+      review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+    },
+  }));
+});
+
+test("chỉ READY_TO_PUBLISH sau SCRIPT, PILOT và phim hoàn chỉnh được duyệt QC", () => {
+  const approved = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
+    pilot: {
+      duration_seconds: 15,
+      video_url: "https://drive.google.com/file/d/pilot/view",
+      qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true },
+      review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
+    },
+    full_film: {
+      video_url: "https://drive.google.com/file/d/full/view",
+      qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true },
+      review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
+    },
+  });
+  assert.equal(shortFilmNextAction(approved), "READY_TO_PUBLISH");
+});
+
+test("không cho PILOT_APPROVED khi một mục QC chưa đạt", () => {
+  assert.throws(() => ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
+    pilot: {
+      duration_seconds: 15,
+      video_url: "https://drive.google.com/file/d/pilot/view",
+      qc: { identity: true, motion: true, lip_sync: false, voice: true, background: true, lighting: true, continuity: true },
+      review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+    },
+  }));
 });

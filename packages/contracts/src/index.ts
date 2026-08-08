@@ -81,6 +81,191 @@ export type CharacterAssignment = z.infer<typeof CharacterAssignmentSchema>;
 
 const OptionalText = z.string().trim().min(1).optional();
 
+export const ReviewDecisionSchema = z.enum([
+  "PENDING",
+  "REQUEST_CHANGES",
+  "APPROVE",
+  "REJECT",
+]);
+
+export const ShortFilmRoleSchema = z.enum([
+  "PROTAGONIST",
+  "ANTAGONIST",
+  "SUPPORTING",
+  "CAMEO",
+  "EXTRA",
+]);
+
+export const ShortFilmSourceActorSchema = z.object({
+  source_actor_id: z.string().trim().min(1),
+  source_actor_name: z.string().trim().min(1),
+  source_kind: z.enum(["TEMPORARY_APPROVED_SOURCE", "CHARACTER_LIBRARY_MASTER"]),
+  master_identity_status: z.enum(["TEMPORARY", "APPROVED_LOCKED"]),
+});
+
+export const ShortFilmCharacterSchema = z.object({
+  source_actor_id: z.string().trim().min(1),
+  film_character_name: z.string().trim().min(1),
+  film_role: ShortFilmRoleSchema,
+  relationships: z.string().trim().min(1),
+  personality: z.string().trim().min(1),
+  appearance: z.string().trim().min(1),
+});
+
+export const ShortFilmReviewSchema = z.object({
+  decision: ReviewDecisionSchema,
+  notes: z.string().trim().default(""),
+  reviewer: z.literal("PROJECT_OWNER").default("PROJECT_OWNER"),
+  reviewed_at: z.string().datetime().optional(),
+});
+
+export const ShortFilmQcSchema = z.object({
+  identity: z.boolean(),
+  motion: z.boolean(),
+  lip_sync: z.boolean(),
+  voice: z.boolean(),
+  background: z.boolean(),
+  lighting: z.boolean(),
+  continuity: z.boolean(),
+});
+
+export const ShortFilmWorkflowSchema = z
+  .object({
+    schema_version: z.literal("SHORT_FILM_FORM_V1"),
+    character_count: z.number().int().min(1).max(20),
+    source_actors: z.array(ShortFilmSourceActorSchema).min(1),
+    film_characters: z.array(ShortFilmCharacterSchema).min(1),
+    script_source: z.enum([
+      "AI_GENERATED",
+      "PROJECT_OWNER_PROVIDED",
+      "AI_DEVELOPED_FROM_IDEA",
+    ]),
+    script_title: z.string().trim().min(1),
+    script_synopsis: z.string().trim().min(1),
+    full_script: z.string().trim().min(1),
+    script_review: ShortFilmReviewSchema,
+    dialogue: z.object({
+      language: z.string().trim().min(1),
+      dialogue_mode: z.enum(["DIALOGUE", "VOICE_OVER", "MIXED"]),
+      voice_master_mode: z.enum([
+        "APPROVED_VOICE_MASTER_ONLY",
+        "OWNER_RECORDED_DIALOGUE",
+        "NO_DIALOGUE",
+      ]),
+      singing_scene: z.boolean(),
+      singing_scene_notes: z.string().trim().default(""),
+    }),
+    shot_plan: z
+      .object({
+        summary: z.string().trim().min(1),
+        shots: z.array(z.string().trim().min(1)).min(1),
+      })
+      .optional(),
+    pilot: z
+      .object({
+        duration_seconds: z.number().min(10).max(20),
+        video_url: z.url(),
+        qc: ShortFilmQcSchema,
+        review: ShortFilmReviewSchema,
+      })
+      .optional(),
+    full_film: z
+      .object({
+        video_url: z.url(),
+        qc: ShortFilmQcSchema,
+        review: ShortFilmReviewSchema,
+      })
+      .optional(),
+  })
+  .superRefine((workflow, context) => {
+    if (workflow.film_characters.length !== workflow.character_count) {
+      context.addIssue({
+        code: "custom",
+        message: "Số nhân vật phải khớp danh sách vai diễn",
+        path: ["film_characters"],
+      });
+    }
+    const actorIds = new Set(workflow.source_actors.map((actor) => actor.source_actor_id));
+    workflow.film_characters.forEach((character, index) => {
+      if (!actorIds.has(character.source_actor_id)) {
+        context.addIssue({
+          code: "custom",
+          message: "Diễn viên nguồn không nằm trong danh sách đã chọn",
+          path: ["film_characters", index, "source_actor_id"],
+        });
+      }
+    });
+    if (workflow.dialogue.singing_scene && !workflow.dialogue.singing_scene_notes) {
+      context.addIssue({
+        code: "custom",
+        message: "Cảnh hát phải có mô tả và nguồn giọng",
+        path: ["dialogue", "singing_scene_notes"],
+      });
+    }
+    if (workflow.script_review.decision !== "APPROVE" && workflow.shot_plan) {
+      context.addIssue({
+        code: "custom",
+        message: "SCRIPT_APPROVED là bắt buộc trước Shot Plan",
+        path: ["shot_plan"],
+      });
+    }
+    if (workflow.pilot && (!workflow.shot_plan || workflow.script_review.decision !== "APPROVE")) {
+      context.addIssue({
+        code: "custom",
+        message: "Pilot chỉ được khai báo sau SCRIPT_APPROVED và Shot Plan",
+        path: ["pilot"],
+      });
+    }
+    if (workflow.pilot?.review.decision === "APPROVE" && !shortFilmQcPassed(workflow.pilot.qc)) {
+      context.addIssue({
+        code: "custom",
+        message: "Không thể đặt PILOT_APPROVED khi checklist QC chưa đạt toàn bộ",
+        path: ["pilot", "review"],
+      });
+    }
+    if (workflow.full_film && workflow.pilot?.review.decision !== "APPROVE") {
+      context.addIssue({
+        code: "custom",
+        message: "PILOT_APPROVED là bắt buộc trước sản xuất toàn phim",
+        path: ["full_film"],
+      });
+    }
+    if (workflow.full_film?.review.decision === "APPROVE" && !shortFilmQcPassed(workflow.full_film.qc)) {
+      context.addIssue({
+        code: "custom",
+        message: "Không thể duyệt phim hoàn chỉnh khi checklist QC chưa đạt toàn bộ",
+        path: ["full_film", "review"],
+      });
+    }
+  });
+
+export type ShortFilmWorkflow = z.infer<typeof ShortFilmWorkflowSchema>;
+
+export const ShortFilmWorkflowUpdateRequestSchema = z.object({
+  workflow: ShortFilmWorkflowSchema,
+});
+
+export type ShortFilmWorkflowUpdateRequest = z.infer<typeof ShortFilmWorkflowUpdateRequestSchema>;
+
+export function shortFilmQcPassed(qc: z.infer<typeof ShortFilmQcSchema>) {
+  return Object.values(qc).every(Boolean);
+}
+
+export function shortFilmNextAction(workflow: ShortFilmWorkflow) {
+  if (workflow.script_review.decision === "REJECT") return "SCRIPT_REJECTED" as const;
+  if (workflow.script_review.decision !== "APPROVE") return "REVIEW_SHORT_FILM_SCRIPT" as const;
+  if (!workflow.shot_plan) return "PREPARE_SHORT_FILM_SHOT_PLAN" as const;
+  if (!workflow.pilot) return "PREPARE_SHORT_FILM_PILOT" as const;
+  if (workflow.pilot.review.decision !== "APPROVE" || !shortFilmQcPassed(workflow.pilot.qc)) {
+    return "REVIEW_SHORT_FILM_PILOT" as const;
+  }
+  if (!workflow.full_film) return "PRODUCE_SHORT_FILM" as const;
+  if (workflow.full_film.review.decision !== "APPROVE" || !shortFilmQcPassed(workflow.full_film.qc)) {
+    return "REVIEW_SHORT_FILM_FINAL" as const;
+  }
+  return "READY_TO_PUBLISH" as const;
+}
+
 export const CommonProjectInputSchema = z.object({
   project_name: z.string().trim().min(1, "Tên dự án là bắt buộc"),
   project_type: FormProjectTypeSchema,
@@ -106,6 +291,7 @@ const ShortFilmBranchSchema = z.object({
   primary_setting: z.string().trim().min(1),
   ending_direction: z.string().trim().min(1),
   dialogue_source: z.string().trim().min(1),
+  short_film_workflow: ShortFilmWorkflowSchema,
 });
 
 const MusicVideoBranchSchema = z.object({
