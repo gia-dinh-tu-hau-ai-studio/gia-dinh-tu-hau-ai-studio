@@ -38,6 +38,7 @@ export type EligibleCharacter = {
     character: "ACTIVE";
     image: "IMAGE_READY";
     legal: "LEGAL_CLEARED";
+    master_identity: "APPROVED_LOCKED" | "NOT_READY";
   };
 };
 
@@ -108,6 +109,9 @@ export class CharacterLibraryConnector {
           character: "ACTIVE",
           image: "IMAGE_READY",
           legal: "LEGAL_CLEARED",
+          master_identity: this.masterIdentityApprovedLocked(row)
+            ? "APPROVED_LOCKED"
+            : "NOT_READY",
         },
       }));
   }
@@ -132,5 +136,16 @@ export class CharacterLibraryConnector {
       ["APPROVED", "CLEARED", "LEGAL_CLEARED"].includes(row.rights_status);
 
     return active && imageReady && legalCleared;
+  }
+
+  private masterIdentityApprovedLocked(row: CharacterLibraryRow) {
+    try {
+      const identity = JSON.parse(row.visual_identity_json || "{}") as Record<string, unknown>;
+      const status = String(identity.master_identity_status ?? identity.approval_status ?? "").toUpperCase();
+      const lock = String(identity.lock_status ?? identity.master_identity_lock ?? "").toUpperCase();
+      return status === "APPROVED" && lock === "LOCKED";
+    } catch {
+      return false;
+    }
   }
 }

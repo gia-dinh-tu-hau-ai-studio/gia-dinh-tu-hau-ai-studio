@@ -725,6 +725,7 @@ function projectRow(overrides: Record<number, string> = {}) {
   const row = Array.from({ length: 25 }, () => "");
   row[0] = "submission-001";
   row[1] = "GDTH-MV-20260804092100-63D8";
+  row[3] = "MUSIC_VIDEO";
   row[16] = "CONFIRMED";
   row[17] = "PENDING";
   row[18] = "CONTRACT";
@@ -756,6 +757,15 @@ test("duyệt lại hợp đồng đã APPROVED là idempotent", () => {
   }));
   assert.equal(result.idempotent_replay, true);
   assert.equal(result.approved_at, "2026-08-04T09:30:00.000Z");
+});
+
+test("duyệt hợp đồng SHORT_FILM chuyển sang review kịch bản, không vào pipeline MV", () => {
+  const result = planContractApproval(projectRow({
+    1: "GDTH-FILM-20260808150000-ABCD",
+    3: "SHORT_FILM",
+  }), new Date("2026-08-08T15:00:00.000Z"));
+  assert.equal(result.next_action, "REVIEW_SHORT_FILM_SCRIPT");
+  assert.equal(result.current_stage, "PRE_PRODUCTION");
 });
 
 test("từ chối duyệt hợp đồng sai trạng thái", () => {

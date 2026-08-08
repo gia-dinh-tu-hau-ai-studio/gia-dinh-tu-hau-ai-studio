@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import type { ShortFilmWorkflow } from "@tu-hau/contracts";
+import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
 type IdentityMode = "LIBRARY_MASTER" | "ORIGINAL_FACE_COMPOSITE";
@@ -15,6 +17,7 @@ type EligibleCharacter = {
     character: "ACTIVE";
     image: "IMAGE_READY";
     legal: "LEGAL_CLEARED";
+    master_identity: "APPROVED_LOCKED" | "NOT_READY";
   };
 };
 
@@ -43,12 +46,20 @@ type CreatedProject = {
     | "PREPARE_MV_ASSETS"
     | "APPROVE_MV_ASSETS"
     | "PREPARE_MV_SHOT_PLAN"
-    | "APPROVE_MV_SHOT_PLAN";
+    | "APPROVE_MV_SHOT_PLAN"
+    | "REVIEW_SHORT_FILM_SCRIPT"
+    | "PREPARE_SHORT_FILM_SHOT_PLAN"
+    | "PREPARE_SHORT_FILM_PILOT"
+    | "REVIEW_SHORT_FILM_PILOT"
+    | "PRODUCE_SHORT_FILM"
+    | "REVIEW_SHORT_FILM_FINAL"
+    | "READY_TO_PUBLISH"
+    | "SCRIPT_REJECTED";
 };
 
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
-  { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Tạm khóa; chỉ mở sau khi quy trình MV đạt.", disabled: true },
-  { value: "MUSIC_VIDEO", label: "MV ca nhạc", description: "Ưu tiên hiện tại: MV người thật, lyrics, music và vocal." },
+  { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Hướng sản xuất hiện tại: phim ngắn có thoại." },
+  { value: "MUSIC_VIDEO", label: "MV ca nhạc", description: "Tạm khóa trong giai đoạn chuyển sang phim ngắn.", disabled: true },
   { value: "SHORT_MUSIC_CLIP", label: "Clip ca nhạc ngắn", description: "Đoạn biểu diễn 30 giây–3 phút." },
 ];
 
@@ -75,7 +86,8 @@ function TextField({ name, label, required = true, type = "text" }: { name: stri
 }
 
 export function ProjectIntakeForm() {
-  const [projectType, setProjectType] = useState<FormProjectType>("MUSIC_VIDEO");
+  const [projectType, setProjectType] = useState<FormProjectType>("SHORT_FILM");
+  const [shortFilmWorkflow, setShortFilmWorkflow] = useState<ShortFilmWorkflow>(createInitialShortFilmWorkflow);
   const [eligibleCharacters, setEligibleCharacters] = useState<EligibleCharacter[]>([]);
   const [characters, setCharacters] = useState<CharacterSelection[]>([]);
   const [characterToAdd, setCharacterToAdd] = useState("");
@@ -99,6 +111,10 @@ export function ProjectIntakeForm() {
   const [assetApprovalResult, setAssetApprovalResult] = useState("");
   const [preparingShotPlan, setPreparingShotPlan] = useState(false);
   const [shotPlanPreparationResult, setShotPlanPreparationResult] = useState("");
+  const [savingShortFilm, setSavingShortFilm] = useState(false);
+  const [shortFilmSaveResult, setShortFilmSaveResult] = useState("");
+  const [generatingScript, setGeneratingScript] = useState(false);
+  const [shortFilmProviderStatus, setShortFilmProviderStatus] = useState<Record<string, { configured: boolean }>>({});
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -125,6 +141,13 @@ export function ProjectIntakeForm() {
       });
   }, []);
 
+  useEffect(() => {
+    void fetch("/api/short-film/providers/status")
+      .then((response) => response.json())
+      .then((body) => setShortFilmProviderStatus(body.providers ?? {}))
+      .catch(() => setShortFilmProviderStatus({}));
+  }, []);
+
   function addCharacter() {
     if (!characterToAdd || characters.some((item) => item.character_id === characterToAdd)) {
       return;
@@ -137,7 +160,7 @@ export function ProjectIntakeForm() {
       {
         character_id: characterToAdd,
         project_role: current.length === 0 ? "MAIN" : "SUPPORTING",
-        performance_role: "SINGER",
+        performance_role: "ACTOR",
         voice_required: false,
         lip_sync_required: false,
         identity_mode: "ORIGINAL_FACE_COMPOSITE",
@@ -168,6 +191,7 @@ export function ProjectIntakeForm() {
         [...form.entries()].filter(([, value]) => String(value).trim() !== ""),
       ),
       platforms: form.getAll("platforms").map(String),
+      short_film_workflow: projectType === "SHORT_FILM" ? shortFilmWorkflow : undefined,
       characters: characters.map((character) => {
         const libraryCharacter = eligibleCharacters.find(
           (item) => item.character_id === character.character_id,
@@ -274,6 +298,71 @@ export function ProjectIntakeForm() {
       );
     } finally {
       setApproving(false);
+    }
+  }
+
+  async function saveShortFilmWorkflow() {
+    if (!createdProject) return;
+    setSavingShortFilm(true);
+    setShortFilmSaveResult("");
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/workflow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workflow: shortFilmWorkflow }),
+      });
+      const body = await response.json();
+      setShortFilmSaveResult(JSON.stringify(body, null, 2));
+      if (response.ok && typeof body.next_action === "string") {
+        setCreatedProject({ ...createdProject, next_action: body.next_action as CreatedProject["next_action"] });
+      }
+    } catch {
+      setShortFilmSaveResult("Không lưu được SHORT_FILM workflow. Không tự gửi lại để tránh ghi lặp approval.");
+    } finally {
+      setSavingShortFilm(false);
+    }
+  }
+
+  async function generateShortFilmScript() {
+    setGeneratingScript(true);
+    setShortFilmSaveResult("");
+    try {
+      const response = await fetch("/api/short-film/scripts/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          idea: shortFilmWorkflow.idea_brief,
+          target_duration_minutes: shortFilmWorkflow.target_duration_minutes,
+          language: shortFilmWorkflow.dialogue.language,
+          characters: shortFilmWorkflow.film_characters,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setShortFilmSaveResult(JSON.stringify(body, null, 2));
+        return;
+      }
+      setShortFilmWorkflow({
+        ...shortFilmWorkflow,
+        script_source: "AI_DEVELOPED_FROM_IDEA",
+        script_title: body.draft.title,
+        script_synopsis: body.draft.synopsis,
+        full_script: body.draft.full_script,
+        script_generation: {
+          provider: body.provider,
+          model: body.model,
+          provider_request_id: body.provider_request_id,
+          generated_at: body.generated_at,
+          usage: body.usage,
+        },
+        script_review: { decision: "PENDING", notes: "Bản nháp AI mới, chờ chủ dự án review.", reviewer: "PROJECT_OWNER" },
+      });
+      invalidateConfirmation();
+      setShortFilmSaveResult(`Đã nhận bản nháp từ ${body.provider}/${body.model}. SCRIPT_APPROVED vẫn đang khóa.`);
+    } catch {
+      setShortFilmSaveResult("Không kết nối được provider kịch bản. Chưa tạo hoặc lưu bản nháp.");
+    } finally {
+      setGeneratingScript(false);
     }
   }
 
@@ -487,6 +576,17 @@ export function ProjectIntakeForm() {
             <TextField name="primary_setting" label="Bối cảnh chính" />
             <TextField name="ending_direction" label="Hướng kết thúc" />
             <TextField name="dialogue_source" label="Nguồn hội thoại" />
+            <ShortFilmWorkflowForm
+              eligibleCharacters={eligibleCharacters}
+              value={shortFilmWorkflow}
+              generatingScript={generatingScript}
+              onGenerateScript={generateShortFilmScript}
+              providerStatus={shortFilmProviderStatus}
+              onChange={(workflow) => {
+                invalidateConfirmation();
+                setShortFilmWorkflow(workflow);
+              }}
+            />
           </>}
 
           {projectType === "MUSIC_VIDEO" && <>
@@ -589,11 +689,30 @@ export function ProjectIntakeForm() {
             </p>
           </div>
           <button disabled={approving} onClick={approveContract} type="button">
-            {approving ? "Đang duyệt hợp đồng…" : "Duyệt hợp đồng và chuẩn bị sản xuất MV"}
+            {approving
+              ? "Đang duyệt hợp đồng…"
+              : projectType === "SHORT_FILM"
+                ? "Duyệt hợp đồng và chuyển sang review kịch bản"
+                : "Duyệt hợp đồng và chuẩn bị sản xuất MV"}
           </button>
         </section>
       )}
       {approvalResult && <pre className="creation-result">{approvalResult}</pre>}
+      {createdProject && projectType === "SHORT_FILM" && createdProject.next_action !== "APPROVE_CONTRACT" && (
+        <section className="operations-panel">
+          <div>
+            <h2>SHORT_FILM workflow — {createdProject.next_action}</h2>
+            <p className="library-status">
+              Lưu toàn bộ review và QC vào contract JSON versioned trong PROJECTS. Không gọi provider;
+              Shot Plan, pilot, toàn phim và xuất bản chỉ mở theo approval gate ở trên.
+            </p>
+          </div>
+          <button disabled={savingShortFilm} onClick={saveShortFilmWorkflow} type="button">
+            {savingShortFilm ? "Đang lưu workflow…" : "Lưu SHORT_FILM workflow và approval gates"}
+          </button>
+          {shortFilmSaveResult && <pre className="creation-result">{shortFilmSaveResult}</pre>}
+        </section>
+      )}
       {createdProject?.next_action === "PREPARE_MV_PRODUCTION" && (
         <section className="confirmation-panel">
           <div>
