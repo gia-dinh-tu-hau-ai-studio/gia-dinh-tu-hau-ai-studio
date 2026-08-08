@@ -30,6 +30,7 @@ import {
   ShortFilmScriptProviderNotConfiguredError,
   ShortFilmScriptProviderUnavailableError,
 } from "./providers/short-film-script.provider";
+import { getShortFilmProviderStatus } from "./providers/short-film-provider-status";
 
 @Injectable()
 export class IntakeService {
@@ -199,15 +200,7 @@ export class IntakeService {
   }
 
   shortFilmProviderStatus() {
-    return {
-      secret_values_exposed: false,
-      providers: {
-        script: { provider: "OPENAI_RESPONSES", configured: Boolean(process.env.OPENAI_API_KEY?.trim()) },
-        image_to_video: { provider: "RUNWAY_IMAGE_TO_VIDEO", configured: Boolean(process.env.RUNWAYML_API_SECRET?.trim()) },
-        lip_sync: { provider: "SYNC_LIP_SYNC", configured: Boolean(process.env.SYNC_API_KEY?.trim()) },
-        voice: { provider: "APPROVED_VOICE_MASTER", configured: true },
-      },
-    };
+    return getShortFilmProviderStatus(process.env);
   }
 
   async prepareMvProduction(projectIdInput: string) {

@@ -143,6 +143,18 @@ export const ShortFilmScriptDraftSchema = z.object({
   full_script: z.string().trim().min(1),
 });
 
+export const ShortFilmScriptGenerationRecordSchema = z.object({
+  provider: z.literal("OPENAI_RESPONSES"),
+  model: z.string().trim().min(1),
+  provider_request_id: z.string().trim().min(1).nullable(),
+  generated_at: z.string().datetime(),
+  usage: z.object({
+    input_tokens: z.number().int().nonnegative().optional(),
+    output_tokens: z.number().int().nonnegative().optional(),
+    total_tokens: z.number().int().nonnegative().optional(),
+  }).nullable(),
+});
+
 export const ShortFilmScriptGenerationRequestSchema = z.object({
   idea: z.string().trim().min(20).max(12_000),
   target_duration_minutes: z.number().int().min(1).max(60),
@@ -167,6 +179,7 @@ export const ShortFilmWorkflowSchema = z
     idea_brief: z.string().trim().min(20).max(12_000),
     target_duration_minutes: z.number().int().min(1).max(60),
     providers: ShortFilmProviderConfigSchema,
+    script_generation: ShortFilmScriptGenerationRecordSchema.optional(),
     script_title: z.string().trim().min(1),
     script_synopsis: z.string().trim().min(1),
     full_script: z.string().trim().min(1),

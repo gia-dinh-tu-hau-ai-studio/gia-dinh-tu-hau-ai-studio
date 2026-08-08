@@ -91,6 +91,7 @@ export class ShortFilmScriptProvider {
       provider: "OPENAI_RESPONSES" as const,
       model,
       provider_request_id: payload.id ?? null,
+      generated_at: new Date().toISOString(),
       draft: parseShortFilmScriptResponse(payload),
       usage: payload.usage ?? null,
       approval_status: "PENDING" as const,

@@ -46,7 +46,7 @@ export function createInitialShortFilmWorkflow(): ShortFilmWorkflow {
       appearance: "Bám Character Master đã duyệt",
     })),
     script_source: "AI_DEVELOPED_FROM_IDEA",
-    idea_brief: "Nhập ý tưởng phim, xung đột chính, thông điệp và kết thúc mong muốn tại đây.",
+    idea_brief: "",
     target_duration_minutes: 8,
     providers: {
       script: "OPENAI_RESPONSES",
@@ -55,9 +55,9 @@ export function createInitialShortFilmWorkflow(): ShortFilmWorkflow {
       voice: "APPROVED_VOICE_MASTER",
       execution_mode: "APPROVAL_GATED",
     },
-    script_title: "Kịch bản chưa đặt tên",
-    script_synopsis: "Chờ chủ dự án nhập ý tưởng và duyệt synopsis.",
-    full_script: "Kịch bản đầy đủ sẽ được review tại đây trước khi lập Shot Plan.",
+    script_title: "",
+    script_synopsis: "",
+    full_script: "",
     script_review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
     dialogue: {
       language: "vi",
@@ -139,7 +139,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         <label><span>Nguồn kịch bản</span><select value={value.script_source} onChange={(event) => patch({ script_source: event.target.value as ShortFilmWorkflow["script_source"] })}><option value="AI_GENERATED">AI tạo</option><option value="PROJECT_OWNER_PROVIDED">Chủ dự án cung cấp</option><option value="AI_DEVELOPED_FROM_IDEA">AI phát triển từ ý tưởng</option></select></label>
         <label><span>Nhà cung cấp kịch bản</span><select disabled value={value.providers.script}><option value="OPENAI_RESPONSES">OpenAI Responses API</option></select></label>
         <label><span>Thời lượng mục tiêu (phút)</span><input min={1} max={60} type="number" value={value.target_duration_minutes} onChange={(event) => patch({ target_duration_minutes: Number(event.target.value) })} /></label>
-        <label className="wide-field"><span>Ý tưởng để AI phát triển</span><textarea rows={6} value={value.idea_brief} onChange={(event) => patch({ idea_brief: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
+        <label className="wide-field"><span>Ý tưởng để AI phát triển</span><textarea placeholder="Nhập xung đột chính, thông điệp, bối cảnh và hướng kết thúc (tối thiểu 20 ký tự)." rows={6} value={value.idea_brief} onChange={(event) => patch({ idea_brief: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
         {value.script_source !== "PROJECT_OWNER_PROVIDED" && onGenerateScript && <button disabled={generatingScript || value.idea_brief.trim().length < 20} onClick={onGenerateScript} type="button">{generatingScript ? "AI đang tạo kịch bản…" : "Tạo bản nháp kịch bản từ ý tưởng"}</button>}
         <label><span>Tên kịch bản</span><input value={value.script_title} onChange={(event) => patch({ script_title: event.target.value })} /></label>
         <label><span>Synopsis</span><textarea value={value.script_synopsis} onChange={(event) => patch({ script_synopsis: event.target.value })} /></label>

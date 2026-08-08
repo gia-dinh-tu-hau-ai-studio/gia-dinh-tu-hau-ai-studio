@@ -348,6 +348,13 @@ export function ProjectIntakeForm() {
         script_title: body.draft.title,
         script_synopsis: body.draft.synopsis,
         full_script: body.draft.full_script,
+        script_generation: {
+          provider: body.provider,
+          model: body.model,
+          provider_request_id: body.provider_request_id,
+          generated_at: body.generated_at,
+          usage: body.usage,
+        },
         script_review: { decision: "PENDING", notes: "Bản nháp AI mới, chờ chủ dự án review.", reviewer: "PROJECT_OWNER" },
       });
       invalidateConfirmation();

@@ -242,3 +242,18 @@ test("không cho PILOT_APPROVED khi một mục QC chưa đạt", () => {
     },
   }));
 });
+
+test("lưu provenance bản nháp AI nhưng không ảnh hưởng SCRIPT_APPROVED", () => {
+  const result = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_generation: {
+      provider: "OPENAI_RESPONSES",
+      model: "gpt-5.6-terra",
+      provider_request_id: "resp_test",
+      generated_at: "2026-08-08T14:00:00.000Z",
+      usage: { input_tokens: 100, output_tokens: 500, total_tokens: 600 },
+    },
+  });
+  assert.equal(result.script_generation?.provider_request_id, "resp_test");
+  assert.equal(result.script_review.decision, "PENDING");
+});
