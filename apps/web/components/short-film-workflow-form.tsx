@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import type { ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
@@ -86,6 +87,29 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
   const scriptApproved = value.script_review.decision === "APPROVE";
   const pilotApproved = Boolean(value.pilot && value.pilot.review.decision === "APPROVE" && allQcPassed(value.pilot.qc));
   const finalApproved = Boolean(value.full_film && value.full_film.review.decision === "APPROVE" && allQcPassed(value.full_film.qc));
+
+  useEffect(() => {
+    if (libraryActors.length === 0) return;
+
+    const libraryActorIds = new Set(libraryActors.map((actor) => actor.source_actor_id));
+    const needsLibraryMigration = value.source_actors.some(
+      (actor) => actor.master_identity_status !== "APPROVED_LOCKED",
+    ) || value.film_characters.some((character) => !libraryActorIds.has(character.source_actor_id));
+    if (!needsLibraryMigration) return;
+
+    const filmCharacters = value.film_characters.map((character, index) => ({
+      ...character,
+      source_actor_id: libraryActorIds.has(character.source_actor_id)
+        ? character.source_actor_id
+        : libraryActors[index % libraryActors.length].source_actor_id,
+    }));
+    const selectedActorIds = new Set(filmCharacters.map((character) => character.source_actor_id));
+    onChange({
+      ...value,
+      film_characters: filmCharacters,
+      source_actors: libraryActors.filter((actor) => selectedActorIds.has(actor.source_actor_id)),
+    });
+  }, [eligibleCharacters, value, onChange]);
 
   function patch(patchValue: Partial<ShortFilmWorkflow>) {
     onChange({ ...value, ...patchValue });

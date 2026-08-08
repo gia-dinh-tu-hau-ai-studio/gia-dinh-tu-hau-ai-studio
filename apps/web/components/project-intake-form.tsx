@@ -60,7 +60,7 @@ type CreatedProject = {
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
   { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Hướng sản xuất hiện tại: phim ngắn có thoại." },
   { value: "MUSIC_VIDEO", label: "MV ca nhạc", description: "Tạm khóa trong giai đoạn chuyển sang phim ngắn.", disabled: true },
-  { value: "SHORT_MUSIC_CLIP", label: "Clip ca nhạc ngắn", description: "Đoạn biểu diễn 30 giây–3 phút." },
+  { value: "SHORT_MUSIC_CLIP", label: "Clip ca nhạc ngắn", description: "Tạm khóa cùng pipeline MV ca nhạc.", disabled: true },
 ];
 
 const projectRoles = ["MAIN", "SUPPORTING", "GUEST", "CAMEO", "BACKGROUND"];
