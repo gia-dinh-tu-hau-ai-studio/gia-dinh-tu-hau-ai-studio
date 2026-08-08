@@ -47,3 +47,21 @@ character API remains backward compatible and now exposes the derived readiness.
 Generating a script returns a draft with `PENDING` review and never approves it,
 creates a Shot Plan, submits media, or unlocks production. Provider API keys are
 not accepted in request bodies and are never persisted in project JSON or logs.
+
+### Runtime secret matrix
+
+| Function | Provider | Runtime secret | Form/API behavior when missing |
+| --- | --- | --- | --- |
+| Script draft | OpenAI Responses | `OPENAI_API_KEY` | Generate returns `SHORT_FILM_SCRIPT_PROVIDER_NOT_CONFIGURED` |
+| Image-to-video | Runway | `RUNWAYML_API_SECRET` | Status is `NOT_CONFIGURED`; no media submission is enabled |
+| Lip-sync | Sync | `SYNC_API_KEY` | Status is `NOT_CONFIGURED`; no lip-sync submission is enabled |
+| Character voice | Approved Voice Master | none in this form | Requires an approved library asset |
+
+`GET /v1/short-film/providers/status` returns only provider identifiers and
+booleans. It never returns secret values. `POST /v1/short-film/scripts/generate`
+is the only provider-executing endpoint introduced here and runs only after an
+explicit button action; tests do not invoke it.
+
+Runway media submission remains a separate, cost-incurring production action.
+When that action is implemented/enabled, it must poll the task and copy successful
+output into project-owned storage because provider output URLs are temporary.
