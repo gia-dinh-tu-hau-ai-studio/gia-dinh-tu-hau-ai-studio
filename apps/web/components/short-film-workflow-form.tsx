@@ -92,7 +92,7 @@ function allQcPassed(qc: typeof emptyQc) {
   return Object.values(qc).every(Boolean);
 }
 
-export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, providerBudgetApproved = false, providerStatus }: Props) {
+export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, providerBudgetApproved = false }: Props) {
   const libraryActors = eligibleCharacters
     .filter((actor) => actor.readiness?.master_identity === "APPROVED_LOCKED")
     .map((actor) => ({
@@ -228,21 +228,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
       <fieldset>
         <legend>Diễn viên nguồn và nhân vật trong phim</legend>
         <label><span>Số lượng nhân vật</span><input min={1} max={20} type="number" value={value.character_count} onChange={(event) => setCharacterCount(Number(event.target.value))} /></label>
-        <p className="gate-note">Gallery chỉ hiển thị nguồn trong CHARACTER_LIBRARY có MASTER_IDENTITY APPROVED+LOCKED. Ảnh chính diện và toàn thân phải được xem trước khi duyệt Production Readiness.</p>
-        <div className="character-master-gallery">
-          {libraryActors.map((actor) => <article className="character-master-preview" key={actor.source_actor_id}>
-            <header><strong>{actor.source_actor_name}</strong><span>{actor.character_type}</span></header>
-            <div className="character-master-images">
-              <ReferenceImage label="Chính diện" url={actor.face_reference_url} />
-              <ReferenceImage label="Toàn thân" url={actor.body_reference_url} />
-            </div>
-            <dl>
-              <div><dt>Identity</dt><dd>{actor.master_identity_status}</dd></div>
-              <div><dt>Voice</dt><dd>{actor.voice_master_status ?? "NOT_READY"}</dd></div>
-              <div><dt>Master ID</dt><dd>{actor.master_identity_id ?? "MISSING"}</dd></div>
-            </dl>
-          </article>)}
-        </div>
+        <p className="gate-note">Chọn nhân vật và vai diễn. Hệ thống tự áp dụng hình ảnh, giọng nói và các thiết lập đã chốt.</p>
         {value.film_characters.map((character, index) => (
           <article className="workflow-card" key={`${index}-${character.source_actor_id}`}>
             <h4>Nhân vật {index + 1}</h4>
@@ -255,7 +241,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             <label><span>Vai diễn</span><select value={character.film_role} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_role: event.target.value as typeof character.film_role }; patch({ film_characters: next }); }}><option value="PROTAGONIST">Nhân vật chính</option><option value="ANTAGONIST">Đối trọng</option><option value="SUPPORTING">Hỗ trợ</option><option value="CAMEO">Khách mời</option><option value="EXTRA">Quần chúng</option></select></label>
             <label><span>Quan hệ</span><input placeholder="Ví dụ: chị của An, con của Má Lan" value={character.relationships} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, relationships: event.target.value }; patch({ film_characters: next }); }} /></label>
             <label><span>Tính cách</span><textarea placeholder="Ví dụ: mạnh mẽ, chân thành, phản ứng nhanh" value={character.personality} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, personality: event.target.value }; patch({ film_characters: next }); }} /></label>
-            <label><span>Ngoại hình</span><textarea placeholder="Chỉ mô tả trang phục hoặc tạo hình trong phim; gương mặt luôn bám Character Master" value={character.appearance} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, appearance: event.target.value }; patch({ film_characters: next }); }} /></label>
+            <label><span>Ngoại hình trong cảnh</span><textarea placeholder="Chỉ mô tả trang phục hoặc tạo hình cần thấy trong phim" value={character.appearance} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, appearance: event.target.value }; patch({ film_characters: next }); }} /></label>
           </article>
         ))}
       </fieldset>
@@ -296,17 +282,10 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         </div>
       </fieldset>
 
-      <fieldset className="provider-status" aria-label="Trạng thái dịch vụ">
-        <legend>Liên kết nhà cung cấp theo chức năng</legend>
-        <p className="gate-note">Kịch bản: OpenAI Responses API · ảnh thành video: Runway · khẩu hình: Sync · giọng: Voice Master đã duyệt. Secret chỉ nằm ở runtime; mọi tác vụ media vẫn chờ approval gate.</p>
-        <div className="provider-grid"><span>Script — {value.providers.script} · {providerStatus?.script?.configured ? "CONNECTED" : "NOT_CONFIGURED"}</span><span>Video — {value.providers.image_to_video} · {providerStatus?.image_to_video?.configured ? "CONNECTED" : "NOT_CONFIGURED"}</span><span>Lip-sync — {value.providers.lip_sync} · {providerStatus?.lip_sync?.configured ? "CONNECTED" : "NOT_CONFIGURED"}</span><span>Voice — {value.providers.voice} · {providerStatus?.voice?.configured ? "READY" : "NOT_READY"}</span></div>
-      </fieldset>
-
       <fieldset>
         <legend>Thoại, ngôn ngữ và cảnh hát</legend>
         <label><span>Ngôn ngữ</span><input value={value.dialogue.language} onChange={(event) => patch({ dialogue: { ...value.dialogue, language: event.target.value } })} /></label>
         <label><span>Cấu hình thoại</span><select value={value.dialogue.dialogue_mode} onChange={(event) => patch({ dialogue: { ...value.dialogue, dialogue_mode: event.target.value as ShortFilmWorkflow["dialogue"]["dialogue_mode"] } })}><option value="DIALOGUE">Đối thoại</option><option value="VOICE_OVER">Voice-over</option><option value="MIXED">Kết hợp</option></select></label>
-        <label><span>Voice master</span><select value={value.dialogue.voice_master_mode} onChange={(event) => patch({ dialogue: { ...value.dialogue, voice_master_mode: event.target.value as ShortFilmWorkflow["dialogue"]["voice_master_mode"] } })}><option value="APPROVED_VOICE_MASTER_ONLY">Chỉ Voice Master đã duyệt</option><option value="OWNER_RECORDED_DIALOGUE">Chủ dự án thu thoại</option><option value="NO_DIALOGUE">Không thoại</option></select></label>
         <label><input checked={value.dialogue.singing_scene} type="checkbox" onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene: event.target.checked } })} /> Có cảnh hát</label>
         {value.dialogue.singing_scene && <label><span>Mô tả/nguồn cảnh hát</span><textarea value={value.dialogue.singing_scene_notes} onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene_notes: event.target.value } })} /></label>}
       </fieldset>
@@ -324,15 +303,15 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
       </fieldset>
 
       <fieldset disabled={!scriptApproved || !value.shot_plan} className={!scriptApproved || !value.shot_plan ? "locked-stage" : ""}>
-        <legend>Production readiness — khóa trước mọi provider media</legend>
-        <p className="gate-note">Chỉ dùng Character Master và Voice Master APPROVED+LOCKED từ kho. Mỗi keyframe phải được duyệt Identity/Continuity; cảnh nhiều mặt bắt buộc MANUAL_FACE_TRACK.</p>
-        {!value.production_readiness && <button type="button" onClick={initializeProductionReadiness}>Nạp khóa từ CHARACTER_LIBRARY</button>}
+        <legend>Kiểm tra cảnh quay trước khi sản xuất</legend>
+        <p className="gate-note">Xem và duyệt các cảnh cần thiết. Những thiết lập nhân vật và giọng đã chốt được hệ thống tự áp dụng.</p>
+        {!value.production_readiness && <button type="button" onClick={initializeProductionReadiness}>Chuẩn bị danh sách kiểm tra</button>}
         {value.production_readiness && <>
-          <div className="provider-grid">
+          <div className="provider-grid system-only">
             <span>Identity Masters — {value.production_readiness.identity_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</span>
             <span>Voice Masters — {value.production_readiness.voice_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</span>
           </div>
-          {value.production_readiness.voice_masters.map((voice) => <article className="workflow-card" key={voice.source_actor_id}>
+          {value.production_readiness.voice_masters.map((voice) => <article className="workflow-card system-only" key={voice.source_actor_id}>
             <h4>Voice &amp; Lip-sync Readiness — {availableActors.find((actor) => actor.source_actor_id === voice.source_actor_id)?.source_actor_name ?? voice.source_actor_id}</h4>
             <label><span>Độ tuổi cảm nhận</span><select value={voice.perceived_age_band ?? ""} onChange={(event) => {
               const voice_masters = value.production_readiness!.voice_masters.map((item) => item.source_actor_id === voice.source_actor_id ? { ...item, perceived_age_band: event.target.value as "YOUNG_ADULT" | "ADULT" | "MIDDLE_AGED" | "OLDER_ADULT" } : item);
@@ -439,7 +418,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             if (!value.production_readiness) return;
             patch({ production_readiness: { ...value.production_readiness, review: { ...value.production_readiness.review, decision, reviewed_at: new Date().toISOString() } } });
           }} /><textarea value={value.production_readiness.review.notes} onChange={(event) => patch({ production_readiness: { ...value.production_readiness!, review: { ...value.production_readiness!.review, notes: event.target.value } } })} /></div>
-          <p className="gate-note">{productionReady ? "PROVIDER_EXECUTION_ALLOWED" : `PROVIDER_LOCKED: ${readinessBlockers.join(", ")}`}</p>
+          <p className="gate-note">{productionReady ? "Đã hoàn tất kiểm tra và có thể sang bước tiếp theo." : "Còn nội dung cần kiểm tra trước khi tiếp tục."}</p>
         </>}
       </fieldset>
 
@@ -495,15 +474,4 @@ function ReviewDecisionButtons({ value, onChange, approveDisabled = false, simpl
     {!simple && <button className={value === "REJECT" ? "remove-button selected" : "remove-button"} onClick={() => onChange("REJECT")} type="button">× Từ chối</button>}
     {simple && <button className={value === "PENDING" ? "secondary-button selected" : "secondary-button"} onClick={() => onChange("PENDING")} type="button">Chưa duyệt</button>}
   </div>;
-}
-
-function ReferenceImage({ label, url }: { label: string; url?: string }) {
-  if (!url) return <div className="reference-image-missing"><span>{label}</span><strong>Thiếu ảnh</strong></div>;
-  const previewUrl = drivePreviewUrl(url);
-  return <figure><a href={url} rel="noreferrer" target="_blank"><img alt={`${label} Character Master`} loading="lazy" src={previewUrl} /></a><figcaption>{label} · mở ảnh gốc</figcaption></figure>;
-}
-
-function drivePreviewUrl(url: string) {
-  const driveId = url.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1] ?? url.match(/[?&]id=([a-zA-Z0-9_-]+)/)?.[1];
-  return driveId ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200` : url;
 }
