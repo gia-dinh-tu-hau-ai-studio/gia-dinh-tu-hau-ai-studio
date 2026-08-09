@@ -34,11 +34,16 @@ export type EligibleCharacter = {
   character_type: string;
   default_costume_id: string;
   voice_available: boolean;
+  master_identity_id?: string;
+  master_identity_version?: string;
+  voice_master_id?: string;
+  voice_casting_profile?: string;
   readiness: {
     character: "ACTIVE";
     image: "IMAGE_READY";
     legal: "LEGAL_CLEARED";
     master_identity: "APPROVED_LOCKED" | "NOT_READY";
+    voice_master: "APPROVED_LOCKED" | "NOT_READY";
   };
 };
 
@@ -99,21 +104,30 @@ export class CharacterLibraryConnector {
       .slice(1)
       .map((row) => this.mapRow(row, indexByColumn))
       .filter((row) => this.isEligible(row))
-      .map((row) => ({
-        character_id: row.character_id,
-        character_name: row.character_name,
-        character_type: row.character_type,
-        default_costume_id: row.default_costume_id,
-        voice_available: Boolean(row.voice_reference_url),
-        readiness: {
-          character: "ACTIVE",
-          image: "IMAGE_READY",
-          legal: "LEGAL_CLEARED",
-          master_identity: this.masterIdentityApprovedLocked(row)
-            ? "APPROVED_LOCKED"
-            : "NOT_READY",
-        },
-      }));
+      .map((row) => {
+        const identity = this.parseJson(row.visual_identity_json);
+        const voice = this.parseJson(row.voice_identity_json);
+        const identityLocked = this.masterIdentityApprovedLocked(row);
+        const voiceLocked = this.voiceMasterApprovedLocked(row);
+        return {
+          character_id: row.character_id,
+          character_name: row.character_name,
+          character_type: row.character_type,
+          default_costume_id: row.default_costume_id,
+          voice_available: voiceLocked,
+          master_identity_id: identityLocked ? String(identity.master_identity_id ?? "").trim() || undefined : undefined,
+          master_identity_version: identityLocked ? String(identity.reference_set_version ?? row.version).trim() || undefined : undefined,
+          voice_master_id: voiceLocked ? String(voice.voice_master_id ?? "").trim() || undefined : undefined,
+          voice_casting_profile: voiceLocked ? String(voice.casting_profile ?? "").trim() || undefined : undefined,
+          readiness: {
+            character: "ACTIVE" as const,
+            image: "IMAGE_READY" as const,
+            legal: "LEGAL_CLEARED" as const,
+            master_identity: identityLocked ? "APPROVED_LOCKED" as const : "NOT_READY" as const,
+            voice_master: voiceLocked ? "APPROVED_LOCKED" as const : "NOT_READY" as const,
+          },
+        };
+      });
   }
 
   private mapRow(
@@ -146,6 +160,21 @@ export class CharacterLibraryConnector {
       return status === "APPROVED" && lock === "LOCKED";
     } catch {
       return false;
+    }
+  }
+
+  private voiceMasterApprovedLocked(row: CharacterLibraryRow) {
+    const voice = this.parseJson(row.voice_identity_json);
+    const status = String(voice.voice_master_status ?? voice.approval_status ?? "").toUpperCase();
+    const lock = String(voice.lock_status ?? voice.voice_master_lock ?? "").toUpperCase();
+    return status === "APPROVED" && lock === "LOCKED" && Boolean(String(voice.voice_master_id ?? "").trim());
+  }
+
+  private parseJson(value: string): Record<string, unknown> {
+    try {
+      return JSON.parse(value || "{}") as Record<string, unknown>;
+    } catch {
+      return {};
     }
   }
 }

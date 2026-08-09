@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   normalizeProjectIntake,
+  shortFilmMediaExecutionDecision,
   shortFilmNextAction,
+  shortFilmProductionReadinessBlockers,
   ShortFilmWorkflowSchema,
 } from "./index";
 
@@ -12,8 +14,8 @@ const shortFilmWorkflow = {
   source_actors: [{
     source_actor_id: "CHAR_TUONG_VY",
     source_actor_name: "Tường Vy",
-    source_kind: "TEMPORARY_APPROVED_SOURCE",
-    master_identity_status: "TEMPORARY",
+    source_kind: "CHARACTER_LIBRARY_MASTER",
+    master_identity_status: "APPROVED_LOCKED",
   }],
   film_characters: [{
     source_actor_id: "CHAR_TUONG_VY",
@@ -43,6 +45,42 @@ const shortFilmWorkflow = {
     voice_master_mode: "APPROVED_VOICE_MASTER_ONLY",
     singing_scene: false,
     singing_scene_notes: "",
+  },
+} as const;
+
+const productionReadiness = {
+  identity_masters: [{
+    source_actor_id: "CHAR_TUONG_VY",
+    master_identity_id: "TUONG_VY_MASTER_IDENTITY_V1",
+    reference_set_version: "V1",
+    status: "APPROVED_LOCKED",
+  }],
+  voice_masters: [{
+    source_actor_id: "CHAR_TUONG_VY",
+    voice_master_id: "TUONG_VY_VOICE_MASTER_AI_V1",
+    casting_profile: "Vietnamese female Mekong Delta adult",
+    status: "APPROVED_LOCKED",
+  }],
+  keyframes: [{
+    shot_id: "SHOT-001",
+    approved_image_url: "https://drive.google.com/file/d/keyframe/view",
+    identity_decision: "APPROVE",
+    continuity_decision: "APPROVE",
+    reviewer: "PROJECT_OWNER",
+    reviewed_at: "2026-08-09T00:00:00.000Z",
+  }],
+  speaker_locks: [{
+    shot_id: "SHOT-001",
+    speaker_source_actor_id: "CHAR_TUONG_VY",
+    voice_master_id: "TUONG_VY_VOICE_MASTER_AI_V1",
+    visible_face_count: 1,
+    selection_mode: "SINGLE_VISIBLE_FACE",
+  }],
+  review: {
+    decision: "APPROVE",
+    notes: "Identity, voice, keyframe and speaker mapping locked",
+    reviewer: "PROJECT_OWNER",
+    reviewed_at: "2026-08-09T00:00:00.000Z",
   },
 } as const;
 
@@ -195,6 +233,7 @@ test("khóa toàn phim khi PILOT_APPROVED chưa đạt", () => {
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
     shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
+    production_readiness: productionReadiness,
     pilot: {
       duration_seconds: 15,
       video_url: "https://drive.google.com/file/d/pilot/view",
@@ -214,6 +253,7 @@ test("chỉ READY_TO_PUBLISH sau SCRIPT, PILOT và phim hoàn chỉnh được d
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
     shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
+    production_readiness: productionReadiness,
     pilot: {
       duration_seconds: 15,
       video_url: "https://drive.google.com/file/d/pilot/view",
@@ -234,6 +274,7 @@ test("không cho PILOT_APPROVED khi một mục QC chưa đạt", () => {
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
     shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
+    production_readiness: productionReadiness,
     pilot: {
       duration_seconds: 15,
       video_url: "https://drive.google.com/file/d/pilot/view",
@@ -256,4 +297,80 @@ test("lưu provenance bản nháp AI nhưng không ảnh hưởng SCRIPT_APPROVE
   });
   assert.equal(result.script_generation?.provider_request_id, "resp_test");
   assert.equal(result.script_review.decision, "PENDING");
+});
+
+test("media providers remain locked when production readiness is missing", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"] },
+  });
+  assert.deepEqual(shortFilmProductionReadinessBlockers(parsed), ["PRODUCTION_READINESS_MISSING"]);
+  assert.equal(shortFilmMediaExecutionDecision(parsed).provider_execution_allowed, false);
+  assert.equal(shortFilmNextAction(parsed), "LOCK_SHORT_FILM_PRODUCTION_READINESS");
+});
+
+test("pilot is blocked when a Character Master is not APPROVED_LOCKED", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    source_actors: [{ ...shortFilmWorkflow.source_actors[0], master_identity_status: "TEMPORARY" }],
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"] },
+    production_readiness: productionReadiness,
+    pilot: {
+      duration_seconds: 10,
+      video_url: "https://drive.google.com/file/d/pilot/view",
+      qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true },
+      review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+    },
+  });
+  assert.equal(shortFilmMediaExecutionDecision(parsed).provider_execution_allowed, false);
+  assert.match(shortFilmProductionReadinessBlockers(parsed).join(","), /IDENTITY_MASTER_NOT_LOCKED/);
+});
+
+test("pilot is blocked when an approved Voice Master is missing", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"] },
+    production_readiness: { ...productionReadiness, voice_masters: [] },
+    pilot: {
+      duration_seconds: 10,
+      video_url: "https://drive.google.com/file/d/pilot/view",
+      qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true },
+      review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+    },
+  });
+  assert.equal(shortFilmMediaExecutionDecision(parsed).provider_execution_allowed, false);
+  assert.match(shortFilmProductionReadinessBlockers(parsed).join(","), /VOICE_MASTER_NOT_LOCKED/);
+});
+
+test("multi-face dialogue rejects automatic single-face selection", () => {
+  assert.throws(() => ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Two-shot"] },
+    production_readiness: {
+      ...productionReadiness,
+      speaker_locks: [{
+        ...productionReadiness.speaker_locks[0],
+        visible_face_count: 2,
+        selection_mode: "SINGLE_VISIBLE_FACE",
+      }],
+    },
+  }));
+});
+
+test("media providers unlock only after all production readiness gates pass", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"] },
+    production_readiness: productionReadiness,
+  });
+  assert.deepEqual(shortFilmMediaExecutionDecision(parsed), {
+    provider_execution_allowed: true,
+    blockers: [],
+  });
+  assert.equal(shortFilmNextAction(parsed), "PREPARE_SHORT_FILM_PILOT");
 });

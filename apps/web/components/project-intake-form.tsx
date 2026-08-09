@@ -13,11 +13,16 @@ type EligibleCharacter = {
   character_type: string;
   default_costume_id: string;
   voice_available: boolean;
+  master_identity_id?: string;
+  master_identity_version?: string;
+  voice_master_id?: string;
+  voice_casting_profile?: string;
   readiness: {
     character: "ACTIVE";
     image: "IMAGE_READY";
     legal: "LEGAL_CLEARED";
     master_identity: "APPROVED_LOCKED" | "NOT_READY";
+    voice_master: "APPROVED_LOCKED" | "NOT_READY";
   };
 };
 
@@ -49,6 +54,7 @@ type CreatedProject = {
     | "APPROVE_MV_SHOT_PLAN"
     | "REVIEW_SHORT_FILM_SCRIPT"
     | "PREPARE_SHORT_FILM_SHOT_PLAN"
+    | "LOCK_SHORT_FILM_PRODUCTION_READINESS"
     | "PREPARE_SHORT_FILM_PILOT"
     | "REVIEW_SHORT_FILM_PILOT"
     | "PRODUCE_SHORT_FILM"

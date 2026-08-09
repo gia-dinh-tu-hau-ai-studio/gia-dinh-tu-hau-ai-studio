@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect } from "react";
-import type { ShortFilmWorkflow } from "@tu-hau/contracts";
+import { shortFilmProductionReadinessBlockers, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
   character_name: string;
-  readiness?: { master_identity?: "APPROVED_LOCKED" | "NOT_READY" };
+  master_identity_id?: string;
+  master_identity_version?: string;
+  voice_master_id?: string;
+  voice_casting_profile?: string;
+  readiness?: {
+    master_identity?: "APPROVED_LOCKED" | "NOT_READY";
+    voice_master?: "APPROVED_LOCKED" | "NOT_READY";
+  };
 };
 
 type Props = {
@@ -82,6 +89,11 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     source_actor_name: actor.character_name,
     source_kind: "CHARACTER_LIBRARY_MASTER" as const,
     master_identity_status: "APPROVED_LOCKED" as const,
+    master_identity_id: actor.master_identity_id,
+    master_identity_version: actor.master_identity_version,
+    voice_master_id: actor.voice_master_id,
+    voice_casting_profile: actor.voice_casting_profile,
+    voice_master_status: actor.readiness?.voice_master,
     }));
   const availableActors = libraryActors.length > 0 ? libraryActors : temporaryActors;
   const scriptApproved = value.script_review.decision === "APPROVE";
@@ -129,6 +141,50 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     );
     patch({ character_count: characterCount, film_characters: filmCharacters });
   }
+
+  function initializeProductionReadiness() {
+    if (!value.shot_plan) return;
+    const usedActorIds = new Set(value.film_characters.map((character) => character.source_actor_id));
+    const usedActors = libraryActors.filter((actor) => usedActorIds.has(actor.source_actor_id));
+    const firstActor = usedActors[0];
+    patch({
+      production_readiness: {
+        identity_masters: usedActors
+          .filter((actor) => actor.master_identity_id && actor.master_identity_version)
+          .map((actor) => ({
+            source_actor_id: actor.source_actor_id,
+            master_identity_id: actor.master_identity_id as string,
+            reference_set_version: actor.master_identity_version as string,
+            status: "APPROVED_LOCKED" as const,
+          })),
+        voice_masters: usedActors
+          .filter((actor) => actor.voice_master_status === "APPROVED_LOCKED" && actor.voice_master_id && actor.voice_casting_profile)
+          .map((actor) => ({
+            source_actor_id: actor.source_actor_id,
+            voice_master_id: actor.voice_master_id as string,
+            casting_profile: actor.voice_casting_profile as string,
+            status: "APPROVED_LOCKED" as const,
+          })),
+        keyframes: [],
+        dialogue_shot_ids: value.dialogue.dialogue_mode === "DIALOGUE"
+          ? value.shot_plan.shots.map((_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`)
+          : [],
+        speaker_locks: value.dialogue.dialogue_mode === "DIALOGUE" ? value.shot_plan.shots.map((_, index) => ({
+          shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+          speaker_source_actor_id: firstActor?.source_actor_id ?? "",
+          voice_master_id: firstActor?.voice_master_id ?? "",
+          visible_face_count: 1,
+          selection_mode: "SINGLE_VISIBLE_FACE" as const,
+        })) : [],
+        review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+      },
+    });
+  }
+
+  const readinessBlockers = value.production_readiness
+    ? shortFilmProductionReadinessBlockers(value)
+    : ["PRODUCTION_READINESS_MISSING"];
+  const productionReady = readinessBlockers.length === 0;
 
   return (
     <div className="short-film-workflow">
@@ -193,6 +249,75 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
       </fieldset>
 
       <fieldset disabled={!scriptApproved || !value.shot_plan} className={!scriptApproved || !value.shot_plan ? "locked-stage" : ""}>
+        <legend>Production readiness — khóa trước mọi provider media</legend>
+        <p className="gate-note">Chỉ dùng Character Master và Voice Master APPROVED+LOCKED từ kho. Mỗi keyframe phải được duyệt Identity/Continuity; cảnh nhiều mặt bắt buộc MANUAL_FACE_TRACK.</p>
+        {!value.production_readiness && <button type="button" onClick={initializeProductionReadiness}>Nạp khóa từ CHARACTER_LIBRARY</button>}
+        {value.production_readiness && <>
+          <div className="provider-grid">
+            <span>Identity Masters — {value.production_readiness.identity_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</span>
+            <span>Voice Masters — {value.production_readiness.voice_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</span>
+          </div>
+          {(value.shot_plan?.shots ?? []).map((shot, index) => {
+            const shotId = `SHOT-${String(index + 1).padStart(3, "0")}`;
+            const keyframe = value.production_readiness?.keyframes.find((item) => item.shot_id === shotId);
+            const speaker = value.production_readiness?.speaker_locks.find((item) => item.shot_id === shotId);
+            const isDialogueShot = value.dialogue.dialogue_mode === "DIALOGUE" || Boolean(value.production_readiness?.dialogue_shot_ids.includes(shotId));
+            return <article className="workflow-card" key={shotId}>
+              <h4>{shotId} — {shot}</h4>
+              <label><span>Keyframe URL đã duyệt</span><input type="url" value={keyframe?.approved_image_url ?? ""} onChange={(event) => {
+                if (!value.production_readiness) return;
+                const keyframes = value.production_readiness.keyframes.filter((item) => item.shot_id !== shotId);
+                if (event.target.value) keyframes.push({ shot_id: shotId, approved_image_url: event.target.value, identity_decision: "APPROVE", continuity_decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() });
+                patch({ production_readiness: { ...value.production_readiness, keyframes, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+              }} /></label>
+              {value.dialogue.dialogue_mode === "MIXED" && <label><input checked={isDialogueShot} type="checkbox" onChange={(event) => {
+                if (!value.production_readiness) return;
+                const dialogue_shot_ids = event.target.checked
+                  ? [...new Set([...value.production_readiness.dialogue_shot_ids, shotId])]
+                  : value.production_readiness.dialogue_shot_ids.filter((item) => item !== shotId);
+                let speaker_locks = value.production_readiness.speaker_locks.filter((item) => item.shot_id !== shotId);
+                if (event.target.checked) {
+                  const actor = value.production_readiness.voice_masters[0];
+                  speaker_locks.push({ shot_id: shotId, speaker_source_actor_id: actor?.source_actor_id ?? "", voice_master_id: actor?.voice_master_id ?? "", visible_face_count: 1, selection_mode: "SINGLE_VISIBLE_FACE" });
+                }
+                patch({ production_readiness: { ...value.production_readiness, dialogue_shot_ids, speaker_locks, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+              }} /> Thoại trực diện cần lip-sync</label>}
+              {speaker && <>
+                <label><span>Nhân vật nói</span><select value={speaker.speaker_source_actor_id} onChange={(event) => {
+                  if (!value.production_readiness) return;
+                  const voice = value.production_readiness.voice_masters.find((item) => item.source_actor_id === event.target.value);
+                  const speaker_locks = value.production_readiness.speaker_locks.map((item) => item.shot_id === shotId ? { ...item, speaker_source_actor_id: event.target.value, voice_master_id: voice?.voice_master_id ?? "" } : item);
+                  patch({ production_readiness: { ...value.production_readiness, speaker_locks, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                }}>{value.film_characters.map((character) => <option key={character.source_actor_id} value={character.source_actor_id}>{character.film_character_name}</option>)}</select></label>
+                <label><span>Số khuôn mặt thấy được</span><input min={1} type="number" value={speaker.visible_face_count} onChange={(event) => {
+                  if (!value.production_readiness) return;
+                  const visible_face_count = Math.max(1, Number(event.target.value));
+                  const speaker_locks = value.production_readiness.speaker_locks.map((item) => item.shot_id === shotId ? { ...item, visible_face_count, selection_mode: visible_face_count > 1 ? "MANUAL_FACE_TRACK" as const : item.selection_mode } : item);
+                  patch({ production_readiness: { ...value.production_readiness, speaker_locks, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                }} /></label>
+                <label><span>Khóa người nói</span><select value={speaker.selection_mode} onChange={(event) => {
+                  if (!value.production_readiness) return;
+                  const selection_mode = event.target.value as typeof speaker.selection_mode;
+                  const speaker_locks = value.production_readiness.speaker_locks.map((item) => item.shot_id === shotId ? { ...item, selection_mode } : item);
+                  patch({ production_readiness: { ...value.production_readiness, speaker_locks, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                }}><option value="SINGLE_VISIBLE_FACE">Một khuôn mặt duy nhất</option><option value="MANUAL_FACE_TRACK">Manual face track</option></select></label>
+                {speaker.selection_mode === "MANUAL_FACE_TRACK" && <label><span>Face track ID</span><input value={speaker.face_track_id ?? ""} onChange={(event) => {
+                  if (!value.production_readiness) return;
+                  const speaker_locks = value.production_readiness.speaker_locks.map((item) => item.shot_id === shotId ? { ...item, face_track_id: event.target.value || undefined } : item);
+                  patch({ production_readiness: { ...value.production_readiness, speaker_locks, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                }} /></label>}
+              </>}
+            </article>;
+          })}
+          <div className="approval-gate"><strong>Production readiness gate</strong><select value={value.production_readiness.review.decision} onChange={(event) => {
+            if (!value.production_readiness) return;
+            patch({ production_readiness: { ...value.production_readiness, review: { ...value.production_readiness.review, decision: event.target.value as ShortFilmWorkflow["script_review"]["decision"], reviewed_at: new Date().toISOString() } } });
+          }}><option value="PENDING">Chờ review</option><option value="REQUEST_CHANGES">REQUEST_CHANGES</option><option disabled={readinessBlockers.some((blocker) => blocker !== "PRODUCTION_READINESS_NOT_APPROVED")} value="APPROVE">APPROVE</option><option value="REJECT">REJECT</option></select><textarea value={value.production_readiness.review.notes} onChange={(event) => patch({ production_readiness: { ...value.production_readiness!, review: { ...value.production_readiness!.review, notes: event.target.value } } })} /></div>
+          <p className="gate-note">{productionReady ? "PROVIDER_EXECUTION_ALLOWED" : `PROVIDER_LOCKED: ${readinessBlockers.join(", ")}`}</p>
+        </>}
+      </fieldset>
+
+      <fieldset disabled={!scriptApproved || !value.shot_plan || !productionReady} className={!scriptApproved || !value.shot_plan || !productionReady ? "locked-stage" : ""}>
         <legend>Pilot 10–20 giây và QC</legend>
         <label><span>Player URL</span><input type="url" value={value.pilot?.video_url ?? ""} onChange={(event) => patch({ pilot: { duration_seconds: value.pilot?.duration_seconds ?? 15, video_url: event.target.value, qc: value.pilot?.qc ?? { ...emptyQc }, review: value.pilot?.review ?? { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } } })} /></label>
         <label><span>Thời lượng</span><input min={10} max={20} type="number" value={value.pilot?.duration_seconds ?? 15} onChange={(event) => value.pilot && patch({ pilot: { ...value.pilot, duration_seconds: Number(event.target.value) } })} /></label>
