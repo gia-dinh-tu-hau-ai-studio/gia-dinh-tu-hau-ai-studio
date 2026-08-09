@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
-import { calculateSuggestedProviderBudget, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { calculateSuggestedProviderBudget, migrateShortFilmWorkflowDraft, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -409,7 +409,8 @@ export function ProjectIntakeForm() {
         const draft = JSON.parse(stored) as IntakeDraft;
         if (draft.version === 1) {
           setReferenceSources(draft.reference_sources ?? []);
-          setShortFilmWorkflow(draft.short_film_workflow ?? createInitialShortFilmWorkflow());
+          const defaults = createInitialShortFilmWorkflow();
+          setShortFilmWorkflow(migrateShortFilmWorkflowDraft(draft.short_film_workflow, defaults));
           setCharacters(draft.characters ?? []);
           setProviderBudget(draft.provider_budget ?? initialProviderBudget);
           setDurationTarget(draft.duration_target ?? fallbackDuration);
