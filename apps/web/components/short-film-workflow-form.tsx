@@ -6,6 +6,9 @@ import { shortFilmProductionReadinessBlockers, type ShortFilmWorkflow } from "@t
 type LibraryActor = {
   character_id: string;
   character_name: string;
+  character_type?: string;
+  face_reference_url?: string;
+  body_reference_url?: string;
   master_identity_id?: string;
   master_identity_version?: string;
   voice_master_id?: string;
@@ -87,6 +90,9 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     .map((actor) => ({
     source_actor_id: actor.character_id,
     source_actor_name: actor.character_name,
+    character_type: actor.character_type,
+    face_reference_url: actor.face_reference_url,
+    body_reference_url: actor.body_reference_url,
     source_kind: "CHARACTER_LIBRARY_MASTER" as const,
     master_identity_status: "APPROVED_LOCKED" as const,
     master_identity_id: actor.master_identity_id,
@@ -196,7 +202,21 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
       <fieldset>
         <legend>Diễn viên nguồn và nhân vật trong phim</legend>
         <label><span>Số lượng nhân vật</span><input min={1} max={20} type="number" value={value.character_count} onChange={(event) => setCharacterCount(Number(event.target.value))} /></label>
-        <p className="gate-note">Hiện dùng nguồn tạm Tường Vy/Phương An. Khi CHARACTER_LIBRARY trả MASTER_IDENTITY APPROVED+LOCKED, dropdown tự dùng danh sách đó.</p>
+        <p className="gate-note">Gallery chỉ hiển thị nguồn trong CHARACTER_LIBRARY có MASTER_IDENTITY APPROVED+LOCKED. Ảnh chính diện và toàn thân phải được xem trước khi duyệt Production Readiness.</p>
+        <div className="character-master-gallery">
+          {libraryActors.map((actor) => <article className="character-master-preview" key={actor.source_actor_id}>
+            <header><strong>{actor.source_actor_name}</strong><span>{actor.character_type}</span></header>
+            <div className="character-master-images">
+              <ReferenceImage label="Chính diện" url={actor.face_reference_url} />
+              <ReferenceImage label="Toàn thân" url={actor.body_reference_url} />
+            </div>
+            <dl>
+              <div><dt>Identity</dt><dd>{actor.master_identity_status}</dd></div>
+              <div><dt>Voice</dt><dd>{actor.voice_master_status ?? "NOT_READY"}</dd></div>
+              <div><dt>Master ID</dt><dd>{actor.master_identity_id ?? "MISSING"}</dd></div>
+            </dl>
+          </article>)}
+        </div>
         {value.film_characters.map((character, index) => (
           <article className="workflow-card" key={`${index}-${character.source_actor_id}`}>
             <h4>Nhân vật {index + 1}</h4>
@@ -346,4 +366,15 @@ function QcChecklist({ qc, onChange }: { qc: typeof emptyQc; onChange: (qc: type
 function ReviewGate({ label, review, onChange }: { label: string; review?: ShortFilmWorkflow["script_review"]; onChange: (review: ShortFilmWorkflow["script_review"]) => void }) {
   const current = review ?? { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" };
   return <div className="approval-gate"><strong>{label}</strong><select value={current.decision} onChange={(event) => onChange({ ...current, decision: event.target.value as typeof current.decision, reviewed_at: new Date().toISOString() })}><option value="PENDING">Chờ review</option><option value="REQUEST_CHANGES">REQUEST_CHANGES</option><option value="APPROVE">APPROVE</option><option value="REJECT">REJECT</option></select><textarea placeholder="Ghi chú review" value={current.notes} onChange={(event) => onChange({ ...current, notes: event.target.value })} /></div>;
+}
+
+function ReferenceImage({ label, url }: { label: string; url?: string }) {
+  if (!url) return <div className="reference-image-missing"><span>{label}</span><strong>Thiếu ảnh</strong></div>;
+  const previewUrl = drivePreviewUrl(url);
+  return <figure><a href={url} rel="noreferrer" target="_blank"><img alt={`${label} Character Master`} loading="lazy" src={previewUrl} /></a><figcaption>{label} · mở ảnh gốc</figcaption></figure>;
+}
+
+function drivePreviewUrl(url: string) {
+  const driveId = url.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1] ?? url.match(/[?&]id=([a-zA-Z0-9_-]+)/)?.[1];
+  return driveId ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200` : url;
 }

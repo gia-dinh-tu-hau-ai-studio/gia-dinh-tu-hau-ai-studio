@@ -64,6 +64,20 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .workflow-banner span, .gate-note { color: #cdbfb8; line-height: 1.5; }
 .workflow-card { display: grid; gap: 12px; padding: 16px; border: 1px solid #3b2e33; border-radius: 12px; background: #151114; }
 .workflow-card h4 { margin: 0; color: #ffe6aa; }
+.character-master-gallery { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.character-master-preview { overflow: hidden; border: 1px solid #47383e; border-radius: 14px; background: #151114; }
+.character-master-preview header { display: flex; justify-content: space-between; gap: 12px; padding: 14px 16px; color: #ffe6aa; }
+.character-master-preview header span { color: #aa9ca2; font-size: 12px; }
+.character-master-images { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; background: #3b2e33; }
+.character-master-images figure { margin: 0; background: #0c090b; }
+.character-master-images img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #050405; }
+.character-master-images figcaption { padding: 8px 10px; color: #c8b9bf; font-size: 12px; }
+.reference-image-missing { display: grid; min-height: 260px; place-content: center; gap: 6px; text-align: center; color: #aa9ca2; background: #0c090b; }
+.reference-image-missing strong { color: #ff8e8e; }
+.character-master-preview dl { display: grid; gap: 8px; margin: 0; padding: 14px 16px; }
+.character-master-preview dl div { display: flex; justify-content: space-between; gap: 12px; }
+.character-master-preview dt { color: #aa9ca2; }
+.character-master-preview dd { margin: 0; overflow-wrap: anywhere; text-align: right; }
 .wide-field, .approval-gate, .qc-grid, .gate-note, .short-film-workflow video { grid-column: 1 / -1; }
 .approval-gate { display: grid; grid-template-columns: auto minmax(180px, .5fr) 1fr; gap: 12px; align-items: center; padding: 15px; border: 1px solid var(--gold); border-radius: 12px; }
 .approval-gate textarea { min-height: 60px; }

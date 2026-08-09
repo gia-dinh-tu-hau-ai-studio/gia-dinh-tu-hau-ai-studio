@@ -13,6 +13,8 @@ type EligibleCharacter = {
   character_type: string;
   default_costume_id: string;
   voice_available: boolean;
+  face_reference_url: string;
+  body_reference_url: string;
   master_identity_id?: string;
   master_identity_version?: string;
   voice_master_id?: string;
