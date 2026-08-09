@@ -170,7 +170,8 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .progress-result li small { color: #aa9ca2; }
 .progress-result li.completed { color: #8fe2a1; }
 .progress-result li.current { color: #ffe6aa; border-color: var(--gold); }
-.locked-stage { display: none !important; }
+.locked-stage,
+.system-only { display: none !important; }
 .short-film-workflow video { width: 100%; max-height: 480px; border-radius: 12px; background: #000; }
 @media (max-width: 760px) { main { width: min(calc(100% - 20px), 1080px); padding-top: 28px; } .hero { margin-bottom: 24px; } .project-grid, .field-grid, .character-picker, .confirmation-panel, .reference-row, .budget-approval, .progress-search { grid-template-columns: 1fr; } section { padding: 18px; border-radius: 16px; } input, select, textarea { min-height: 48px; font-size: 16px; } button { width: 100%; justify-self: stretch; } .wizard-bar { position: static; align-items: stretch; flex-direction: column; } .frame-navigator { top: 8px; } .frame-navigator header { display: grid; } .frame-navigator ol { grid-template-columns: repeat(6, 38px); overflow-x: auto; } .frame-navigator button { display: grid; place-items: center; min-height: 38px; padding: 5px; } .frame-navigator button span { display: none; } .frame-actions { display: grid; grid-template-columns: 1fr; } .frame-actions .secondary-button { order: 2; } .frame-message { top: 150px; } }
 @media (max-width: 760px) { .short-film-workflow fieldset, .approval-gate, .script-approval-actions, .review-click-actions { grid-template-columns: 1fr; } }
