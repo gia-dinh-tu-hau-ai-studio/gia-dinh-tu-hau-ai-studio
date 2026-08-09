@@ -290,6 +290,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         {value.dialogue.singing_scene && <label><span>Mô tả/nguồn cảnh hát</span><textarea value={value.dialogue.singing_scene_notes} onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene_notes: event.target.value } })} /></label>}
       </fieldset>
 
+      <div className="system-only" aria-hidden="true">
       <fieldset disabled={!scriptApproved} className={!scriptApproved ? "locked-stage" : ""}>
         <legend>Shot Plan — chỉ mở sau SCRIPT_APPROVED</legend>
         <label><span>Tóm tắt Shot Plan</span><textarea value={value.shot_plan?.summary ?? ""} onChange={(event) => patch({ shot_plan: { summary: event.target.value, shots: value.shot_plan?.shots ?? ["Shot 01"], execution_shots: value.shot_plan?.execution_shots ?? [] } })} /></label>
@@ -453,6 +454,11 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         <ReviewGate label="Final film gate" review={value.full_film?.review} onChange={(review) => value.full_film && patch({ full_film: { ...value.full_film, review } })} />
         <p className="gate-note">{finalApproved ? "FULL_FILM_APPROVED — sẵn sàng xuất bản." : "Chưa thể xuất bản khi QC và cổng duyệt phim hoàn chỉnh chưa APPROVE."}</p>
       </fieldset>
+      </div>
+      <section className="post-intake-note">
+        <strong>Sau khi tạo dự án</strong>
+        <p>Hệ thống sẽ tự lập Shot Plan từ kịch bản đã duyệt. Khi kế hoạch sẵn sàng, bạn chỉ cần chọn <b>Duyệt</b> hoặc <b>Yêu cầu sửa</b>; không phải nhập danh sách cảnh hay thông số kỹ thuật tại form này.</p>
+      </section>
     </div>
   );
 }
