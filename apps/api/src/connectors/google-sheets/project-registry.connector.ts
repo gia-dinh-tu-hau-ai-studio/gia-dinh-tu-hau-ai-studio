@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import {
+  shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   ShortFilmWorkflowSchema,
   type NormalizedProjectIntake,
@@ -55,6 +56,7 @@ export type StoredShortFilmWorkflow = {
   project_type: "SHORT_FILM";
   workflow: ShortFilmWorkflow;
   next_action: ReturnType<typeof shortFilmNextAction>;
+  media_execution: ReturnType<typeof shortFilmMediaExecutionDecision>;
   updated_at: string;
 };
 
@@ -2677,6 +2679,7 @@ export class ProjectRegistryConnector {
         project_type: "SHORT_FILM",
         workflow,
         next_action: shortFilmNextAction(workflow),
+        media_execution: shortFilmMediaExecutionDecision(workflow),
         updated_at: String(row[23] ?? row[22] ?? ""),
       };
     } catch (error) {
@@ -2734,7 +2737,14 @@ export class ProjectRegistryConnector {
           "AI_EXECUTOR_WEB", `SHORT_FILM_FORM_V1 cập nhật; next_action=${nextAction}. Không gọi provider.`, updatedAt,
         ]] },
       });
-      return { project_id: projectId, project_type: "SHORT_FILM", workflow, next_action: nextAction, updated_at: updatedAt };
+      return {
+        project_id: projectId,
+        project_type: "SHORT_FILM",
+        workflow,
+        next_action: nextAction,
+        media_execution: shortFilmMediaExecutionDecision(workflow),
+        updated_at: updatedAt,
+      };
     } catch (error) {
       if (error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không lưu được SHORT_FILM workflow");

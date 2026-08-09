@@ -129,6 +129,64 @@ export const ShortFilmQcSchema = z.object({
   continuity: z.boolean(),
 });
 
+export const ShortFilmLockedIdentitySchema = z.object({
+  source_actor_id: z.string().trim().min(1),
+  master_identity_id: z.string().trim().min(1),
+  reference_set_version: z.string().trim().min(1),
+  status: z.literal("APPROVED_LOCKED"),
+});
+
+export const ShortFilmLockedVoiceSchema = z.object({
+  source_actor_id: z.string().trim().min(1),
+  voice_master_id: z.string().trim().min(1),
+  casting_profile: z.string().trim().min(1),
+  status: z.literal("APPROVED_LOCKED"),
+});
+
+export const ShortFilmKeyframeApprovalSchema = z.object({
+  shot_id: z.string().trim().min(1),
+  approved_image_url: z.url(),
+  identity_decision: z.literal("APPROVE"),
+  continuity_decision: z.literal("APPROVE"),
+  reviewer: z.literal("PROJECT_OWNER").default("PROJECT_OWNER"),
+  reviewed_at: z.string().datetime(),
+});
+
+export const ShortFilmSpeakerLockSchema = z
+  .object({
+    shot_id: z.string().trim().min(1),
+    speaker_source_actor_id: z.string().trim().min(1),
+    voice_master_id: z.string().trim().min(1),
+    visible_face_count: z.number().int().min(1),
+    selection_mode: z.enum(["SINGLE_VISIBLE_FACE", "MANUAL_FACE_TRACK"]),
+    face_track_id: z.string().trim().min(1).optional(),
+  })
+  .superRefine((lock, context) => {
+    if (lock.visible_face_count > 1 && lock.selection_mode !== "MANUAL_FACE_TRACK") {
+      context.addIssue({
+        code: "custom",
+        message: "Shots with multiple visible faces require MANUAL_FACE_TRACK",
+        path: ["selection_mode"],
+      });
+    }
+    if (lock.selection_mode === "MANUAL_FACE_TRACK" && !lock.face_track_id) {
+      context.addIssue({
+        code: "custom",
+        message: "MANUAL_FACE_TRACK requires face_track_id",
+        path: ["face_track_id"],
+      });
+    }
+  });
+
+export const ShortFilmProductionReadinessSchema = z.object({
+  identity_masters: z.array(ShortFilmLockedIdentitySchema).min(1),
+  voice_masters: z.array(ShortFilmLockedVoiceSchema).default([]),
+  keyframes: z.array(ShortFilmKeyframeApprovalSchema).min(1),
+  dialogue_shot_ids: z.array(z.string().trim().min(1)).default([]),
+  speaker_locks: z.array(ShortFilmSpeakerLockSchema).default([]),
+  review: ShortFilmReviewSchema,
+});
+
 export const ShortFilmProviderConfigSchema = z.object({
   script: z.literal("OPENAI_RESPONSES"),
   image_to_video: z.literal("RUNWAY_IMAGE_TO_VIDEO"),
@@ -201,6 +259,7 @@ export const ShortFilmWorkflowSchema = z
         shots: z.array(z.string().trim().min(1)).min(1),
       })
       .optional(),
+    production_readiness: ShortFilmProductionReadinessSchema.optional(),
     pilot: z
       .object({
         duration_seconds: z.number().min(10).max(20),
@@ -291,10 +350,78 @@ export function shortFilmQcPassed(qc: z.infer<typeof ShortFilmQcSchema>) {
   return Object.values(qc).every(Boolean);
 }
 
+export function shortFilmProductionReadinessBlockers(
+  workflow: Pick<
+    z.infer<typeof ShortFilmWorkflowSchema>,
+    "source_actors" | "film_characters" | "dialogue" | "shot_plan" | "production_readiness"
+  >,
+) {
+  const readiness = workflow.production_readiness;
+  if (!readiness) return ["PRODUCTION_READINESS_MISSING"];
+  const blockers: string[] = [];
+  const usedActorIds = new Set(workflow.film_characters.map((character) => character.source_actor_id));
+  const sourceActors = new Map(workflow.source_actors.map((actor) => [actor.source_actor_id, actor]));
+  const identityActorIds = new Set(readiness.identity_masters.map((master) => master.source_actor_id));
+  const voiceByActor = new Map(readiness.voice_masters.map((master) => [master.source_actor_id, master]));
+
+  for (const actorId of usedActorIds) {
+    if (sourceActors.get(actorId)?.master_identity_status !== "APPROVED_LOCKED" || !identityActorIds.has(actorId)) {
+      blockers.push(`IDENTITY_MASTER_NOT_LOCKED:${actorId}`);
+    }
+    if (workflow.dialogue.voice_master_mode === "APPROVED_VOICE_MASTER_ONLY" && !voiceByActor.has(actorId)) {
+      blockers.push(`VOICE_MASTER_NOT_LOCKED:${actorId}`);
+    }
+  }
+
+  const expectedKeyframes = workflow.shot_plan?.shots.length ?? 0;
+  const expectedShotIds = new Set(Array.from({ length: expectedKeyframes }, (_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`));
+  const approvedShotIds = new Set(readiness.keyframes.map((keyframe) => keyframe.shot_id));
+  if (expectedKeyframes === 0 || approvedShotIds.size !== expectedKeyframes || [...approvedShotIds].some((shotId) => !expectedShotIds.has(shotId))) {
+    blockers.push("KEYFRAME_IDENTITY_APPROVAL_INCOMPLETE");
+  }
+
+  const expectedDialogueShotIds = workflow.dialogue.dialogue_mode === "DIALOGUE"
+    ? expectedShotIds
+    : workflow.dialogue.dialogue_mode === "VOICE_OVER"
+      ? new Set<string>()
+      : new Set(readiness.dialogue_shot_ids);
+  const speakerShotIds = new Set(readiness.speaker_locks.map((lock) => lock.shot_id));
+  for (const lock of readiness.speaker_locks) {
+    if (!usedActorIds.has(lock.speaker_source_actor_id)) {
+      blockers.push(`SPEAKER_NOT_IN_CAST:${lock.shot_id}`);
+    }
+    const voice = voiceByActor.get(lock.speaker_source_actor_id);
+    if (!voice || voice.voice_master_id !== lock.voice_master_id) {
+      blockers.push(`SPEAKER_VOICE_MISMATCH:${lock.shot_id}`);
+    }
+  }
+
+  if (
+    expectedDialogueShotIds.size !== speakerShotIds.size ||
+    [...expectedDialogueShotIds].some((shotId) => !speakerShotIds.has(shotId)) ||
+    [...speakerShotIds].some((shotId) => !expectedDialogueShotIds.has(shotId))
+  ) {
+    blockers.push("SPEAKER_FACE_LOCKS_INCOMPLETE");
+  }
+  if (readiness.review.decision !== "APPROVE") blockers.push("PRODUCTION_READINESS_NOT_APPROVED");
+  return blockers;
+}
+
+export function shortFilmMediaExecutionDecision(workflow: ShortFilmWorkflow) {
+  const blockers = shortFilmProductionReadinessBlockers(workflow);
+  return {
+    provider_execution_allowed: blockers.length === 0,
+    blockers,
+  } as const;
+}
+
 export function shortFilmNextAction(workflow: ShortFilmWorkflow) {
   if (workflow.script_review.decision === "REJECT") return "SCRIPT_REJECTED" as const;
   if (workflow.script_review.decision !== "APPROVE") return "REVIEW_SHORT_FILM_SCRIPT" as const;
   if (!workflow.shot_plan) return "PREPARE_SHORT_FILM_SHOT_PLAN" as const;
+  if (shortFilmProductionReadinessBlockers(workflow).length > 0) {
+    return "LOCK_SHORT_FILM_PRODUCTION_READINESS" as const;
+  }
   if (!workflow.pilot) return "PREPARE_SHORT_FILM_PILOT" as const;
   if (workflow.pilot.review.decision !== "APPROVE" || !shortFilmQcPassed(workflow.pilot.qc)) {
     return "REVIEW_SHORT_FILM_PILOT" as const;
