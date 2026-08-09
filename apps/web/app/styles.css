@@ -118,6 +118,9 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .account-check-results { display: grid; gap: 10px; }
 .account-check-results article { display: grid; gap: 5px; padding: 12px; border: 1px solid #3b3430; border-radius: 10px; background: #100e0d; }
 .account-check-results span, .account-check-results small { color: #c9bbb2; }
+.provider-account-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.provider-account-links a { display: inline-flex; min-height: 38px; align-items: center; padding: 7px 12px; border: 1px solid #8f6f38; border-radius: 9px; color: #f3ce8d; font-weight: 700; text-decoration: none; }
+.provider-account-links a:focus-visible, .provider-account-links a:hover { border-color: #e0a94c; background: #2a2116; color: #ffe0a9; }
 .provider-budget-grid { margin-bottom: 20px; }
 .provider-budget-grid label { padding: 15px; border: 1px solid #3b2e33; border-radius: 12px; background: #151114; }
 .provider-budget-grid small { color: #aa9ca2; line-height: 1.4; }
