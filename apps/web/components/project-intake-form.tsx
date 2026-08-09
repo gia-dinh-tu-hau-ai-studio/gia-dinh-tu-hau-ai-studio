@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import type { ShortFilmWorkflow } from "@tu-hau/contracts";
+import type { ProviderBudgetPlan, ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -51,6 +51,33 @@ type ReferenceSource = {
   notes: string;
 };
 
+const initialProviderBudget: ProviderBudgetPlan = {
+  internal_services: {
+    post_production: "TUHAUAI_FFMPEG_CLOUD_RUN",
+    music_source: "NOT_SELECTED",
+  },
+  providers: {
+    script: "OPENAI_RESPONSES",
+    video: "RUNWAY",
+    voice: "ELEVENLABS",
+    lip_sync: "SYNC",
+  },
+  estimate: {
+    currency: "USD",
+    script: 0,
+    video: 0,
+    voice: 0,
+    lip_sync: 0,
+    contingency: 0,
+    total: 0,
+  },
+  approval: {
+    decision: "PENDING",
+    approved_limit: 0,
+    reviewer: "PROJECT_OWNER",
+  },
+};
+
 type CreatedProject = {
   project_id: string;
   current_stage: "CONTRACT" | "PRE_PRODUCTION";
@@ -71,6 +98,19 @@ type CreatedProject = {
     | "REVIEW_SHORT_FILM_FINAL"
     | "READY_TO_PUBLISH"
     | "SCRIPT_REJECTED";
+};
+
+type ProjectProgress = {
+  project_id: string;
+  project_name: string;
+  project_type: string;
+  current_stage: string;
+  next_action: string;
+  updated_at: string;
+  percent_complete: number;
+  completed_steps: number;
+  total_steps: number;
+  milestones: Array<{ action: string; label: string; status: "COMPLETED" | "CURRENT" | "PENDING" }>;
 };
 
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string }> = [
@@ -142,6 +182,62 @@ export function ProjectIntakeForm() {
   const [shortFilmSaveResult, setShortFilmSaveResult] = useState("");
   const [generatingScript, setGeneratingScript] = useState(false);
   const [shortFilmProviderStatus, setShortFilmProviderStatus] = useState<Record<string, { configured: boolean }>>({});
+  const [providerBudget, setProviderBudget] = useState<ProviderBudgetPlan>(initialProviderBudget);
+  const [progressProjectId, setProgressProjectId] = useState("");
+  const [projectProgress, setProjectProgress] = useState<ProjectProgress | null>(null);
+  const [progressMessage, setProgressMessage] = useState("");
+  const [checkingProgress, setCheckingProgress] = useState(false);
+
+  const budgetApproved = providerBudget.approval.decision === "APPROVE" &&
+    Boolean(providerBudget.approval.reviewed_at) &&
+    providerBudget.approval.approved_limit >= providerBudget.estimate.total;
+
+  function updateBudgetEstimate(key: keyof Omit<ProviderBudgetPlan["estimate"], "currency" | "total">, amount: number) {
+    setProviderBudget((current) => {
+      const estimate = { ...current.estimate, [key]: Number.isFinite(amount) ? Math.max(0, amount) : 0 };
+      estimate.total = estimate.script + estimate.video + estimate.voice + estimate.lip_sync + estimate.contingency;
+      return { ...current, estimate, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } };
+    });
+    invalidateConfirmation();
+  }
+
+  function approveBudget() {
+    setProviderBudget((current) => ({
+      ...current,
+      approval: {
+        ...current.approval,
+        decision: "APPROVE",
+        approved_limit: Math.max(current.approval.approved_limit, current.estimate.total),
+        reviewed_at: new Date().toISOString(),
+      },
+    }));
+    invalidateConfirmation();
+  }
+
+  async function checkProjectProgress(projectIdOverride?: string) {
+    const projectId = (projectIdOverride ?? progressProjectId).trim();
+    if (!projectId) {
+      setProgressMessage("Nhập mã dự án để kiểm tra tiến độ.");
+      return;
+    }
+    setCheckingProgress(true);
+    setProgressMessage("");
+    setProjectProgress(null);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/progress`);
+      const body = await response.json();
+      if (!response.ok) {
+        setProgressMessage(body.message ?? body.code ?? "Không đọc được tiến độ dự án.");
+        return;
+      }
+      setProjectProgress(body as ProjectProgress);
+      setProgressProjectId(projectId);
+    } catch {
+      setProgressMessage("Không kết nối được kho dự án TuhauAI.");
+    } finally {
+      setCheckingProgress(false);
+    }
+  }
 
   function invalidateConfirmation() {
     setValidatedSubmission(null);
@@ -231,6 +327,7 @@ export function ProjectIntakeForm() {
       ),
       platforms: form.getAll("platforms").map(String),
       reference_sources: referenceSources.filter((source) => source.url.trim()),
+      provider_budget: providerBudget,
       short_film_workflow: projectType === "SHORT_FILM" ? shortFilmWorkflow : undefined,
       characters: characters.map((character) => {
         const libraryCharacter = eligibleCharacters.find(
@@ -303,6 +400,8 @@ export function ProjectIntakeForm() {
       ) {
         setValidatedSubmission(null);
         setCreatedProject(body.project as CreatedProject);
+        setProgressProjectId(body.project.project_id);
+        void checkProjectProgress(body.project.project_id);
       }
     } catch {
       setCreationResult("Không kết nối được kho dự án TuhauAI. Không tự động gửi lại để tránh tạo trùng dự án.");
@@ -383,6 +482,7 @@ export function ProjectIntakeForm() {
           language: shortFilmWorkflow.dialogue.language,
           characters: shortFilmWorkflow.film_characters,
           reference_sources: referenceSources,
+          provider_budget: providerBudget,
         }),
       });
       const body = await response.json();
@@ -579,6 +679,18 @@ export function ProjectIntakeForm() {
         </div>
       </section>}
 
+      {!projectStarted && <section className="progress-lookup">
+        <div className="section-heading"><span>↻</span><div><h2>Kiểm tra tiến độ dự án</h2><p>Nhập mã dự án để xem phần trăm hoàn thành, giai đoạn hiện tại và bước đang chờ duyệt.</p></div></div>
+        <div className="progress-search"><label><span>Mã dự án</span><input placeholder="Ví dụ: GDTH-FILM-20260809150000-ABCD" value={progressProjectId} onChange={(event) => setProgressProjectId(event.target.value)} /></label><button disabled={checkingProgress || !progressProjectId.trim()} type="button" onClick={() => void checkProjectProgress()}>{checkingProgress ? "Đang kiểm tra…" : "Kiểm tra tiến độ"}</button></div>
+        {progressMessage && <p className="operation-error">{progressMessage}</p>}
+        {projectProgress && <div className="progress-result">
+          <header><div><strong>{projectProgress.project_name}</strong><small>{projectProgress.project_id}</small></div><b>{projectProgress.percent_complete}%</b></header>
+          <div className="progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={projectProgress.percent_complete}><span style={{ width: `${projectProgress.percent_complete}%` }} /></div>
+          <p>Giai đoạn: <strong>{projectProgress.current_stage}</strong> · Bước tiếp theo: <strong>{projectProgress.next_action}</strong></p>
+          <ol>{projectProgress.milestones.map((milestone) => <li className={milestone.status.toLowerCase()} key={milestone.action}><span>{milestone.status === "COMPLETED" ? "✓" : milestone.status === "CURRENT" ? "●" : "○"}</span><div><strong>{milestone.label}</strong><small>{milestone.status === "CURRENT" ? "Đang thực hiện/chờ duyệt" : milestone.status === "COMPLETED" ? "Đã hoàn thành" : "Chưa bắt đầu"}</small></div></li>)}</ol>
+        </div>}
+      </section>}
+
       {projectStarted && <>
       <input name="project_type" type="hidden" value={projectType} />
       <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => setProjectStarted(false)}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong></div>
@@ -639,6 +751,7 @@ export function ProjectIntakeForm() {
               value={shortFilmWorkflow}
               generatingScript={generatingScript}
               onGenerateScript={generateShortFilmScript}
+              providerBudgetApproved={budgetApproved}
               providerStatus={shortFilmProviderStatus}
               onChange={(workflow) => {
                 invalidateConfirmation();
@@ -668,8 +781,32 @@ export function ProjectIntakeForm() {
         </div>
       </section>
 
+      <section className="budget-panel">
+        <div className="section-heading"><span>05</span><div><h2>Nhà cung cấp &amp; dự toán kinh phí</h2><p>Chọn dịch vụ theo chức năng. Không nhà cung cấp nào được gọi trước khi kinh phí được duyệt.</p></div></div>
+        <div className="internal-service-grid">
+          <label><span>Hậu kỳ nội bộ</span><select disabled value={providerBudget.internal_services.post_production}><option value="TUHAUAI_FFMPEG_CLOUD_RUN">TuhauAI · FFmpeg · Cloud Run</option></select><small>Cắt ghép, mix âm thanh và xuất bản master trong pipeline nội bộ.</small></label>
+          <label><span>Nguồn nhạc phim</span><select value={providerBudget.internal_services.music_source} onChange={(event) => setProviderBudget((current) => ({ ...current, internal_services: { ...current.internal_services, music_source: event.target.value as ProviderBudgetPlan["internal_services"]["music_source"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="NOT_SELECTED">Chưa chọn</option><option value="PROJECT_OWNER_LICENSED">Chủ dự án cung cấp · đã có quyền</option><option value="LICENSED_LIBRARY">Thư viện nhạc đã cấp phép</option></select><small>Không sử dụng nhạc chưa xác nhận quyền.</small></label>
+        </div>
+        <div className="provider-budget-grid">
+          <label><span>Tạo kịch bản</span><select value={providerBudget.providers.script} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, script: event.target.value as ProviderBudgetPlan["providers"]["script"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="OPENAI_RESPONSES">OpenAI Responses API</option><option value="PROJECT_OWNER">Chủ dự án tự cung cấp</option></select><small>{providerBudget.providers.script === "OPENAI_RESPONSES" ? (shortFilmProviderStatus.script?.configured ? "Đã kết nối" : "Chưa cấu hình API") : "Không phát sinh phí AI"}</small></label>
+          <label><span>Tạo video</span><select value={providerBudget.providers.video} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, video: event.target.value as ProviderBudgetPlan["providers"]["video"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="RUNWAY">Runway</option><option value="NONE">Chưa sử dụng</option></select><small>{providerBudget.providers.video === "RUNWAY" ? (shortFilmProviderStatus.image_to_video?.configured ? "Đã kết nối" : "Chưa cấu hình API") : "Đã tắt"}</small></label>
+          <label><span>Giọng nói AI</span><select value={providerBudget.providers.voice} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, voice: event.target.value as ProviderBudgetPlan["providers"]["voice"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="ELEVENLABS">ElevenLabs</option><option value="APPROVED_VOICE_MASTER">Voice Master đã duyệt</option><option value="NONE">Không dùng giọng</option></select><small>{providerBudget.providers.voice === "ELEVENLABS" ? "Dùng Voice Master đã khóa qua ElevenLabs" : "Không gọi ElevenLabs"}</small></label>
+          <label><span>Khớp khẩu hình</span><select value={providerBudget.providers.lip_sync} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, lip_sync: event.target.value as ProviderBudgetPlan["providers"]["lip_sync"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="SYNC">Sync</option><option value="NONE">Không lip-sync</option></select><small>{providerBudget.providers.lip_sync === "SYNC" ? (shortFilmProviderStatus.lip_sync?.configured ? "Đã kết nối" : "Chưa cấu hình API") : "Đã tắt"}</small></label>
+        </div>
+        <div className="budget-estimate-grid">
+          <label><span>Đơn vị tiền</span><select value={providerBudget.estimate.currency} onChange={(event) => setProviderBudget((current) => ({ ...current, estimate: { ...current.estimate, currency: event.target.value as "USD" | "VND" }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="USD">USD</option><option value="VND">VND</option></select></label>
+          {(["script", "video", "voice", "lip_sync", "contingency"] as const).map((key) => <label key={key}><span>{({ script: "Kịch bản", video: "Video", voice: "Giọng nói", lip_sync: "Khẩu hình", contingency: "Dự phòng" } as const)[key]}</span><input min="0" inputMode="decimal" type="number" step={providerBudget.estimate.currency === "USD" ? "0.01" : "1000"} value={providerBudget.estimate[key]} onChange={(event) => updateBudgetEstimate(key, Number(event.target.value))} /></label>)}
+          <label><span>Tổng dự toán</span><input disabled value={`${providerBudget.estimate.total.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}`} /></label>
+          <label><span>Hạn mức tối đa được duyệt</span><input min={providerBudget.estimate.total} inputMode="decimal" type="number" step={providerBudget.estimate.currency === "USD" ? "0.01" : "1000"} value={providerBudget.approval.approved_limit} onChange={(event) => setProviderBudget((current) => ({ ...current, approval: { ...current.approval, approved_limit: Math.max(0, Number(event.target.value)), decision: "PENDING", reviewed_at: undefined } }))} /></label>
+        </div>
+        <div className={`budget-approval ${budgetApproved ? "approved" : "pending"}`}>
+          <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "KINH PHÍ CHƯA DUYỆT"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Provider vẫn chờ các approval gate sản xuất.` : "Hãy kiểm tra dự toán và bấm Duyệt kinh phí. Việc bấm duyệt không gọi provider và không trừ tiền."}</p></div>
+          <button type="button" onClick={approveBudget}>Duyệt kinh phí</button>
+        </div>
+      </section>
+
       <section>
-        <div className="section-heading"><span>05</span><div><h2>Nhân vật & vai trò</h2><p>Chỉ chọn nhân vật đã duyệt; hệ thống khóa đúng gương mặt, giọng và người nói.</p></div></div>
+        <div className="section-heading"><span>06</span><div><h2>Nhân vật & vai trò</h2><p>Chỉ chọn nhân vật đã duyệt; hệ thống khóa đúng gương mặt, giọng và người nói.</p></div></div>
         <p className="library-status">{libraryMessage}</p>
         <div className="character-picker">
           <label>
@@ -718,7 +855,7 @@ export function ProjectIntakeForm() {
         </div>
       </section>
 
-      <button disabled={submitting || characters.length === 0} type="submit">{submitting ? "Đang kiểm tra…" : "Kiểm tra dữ liệu"}</button>
+      <button disabled={submitting || characters.length === 0 || !budgetApproved} type="submit">{submitting ? "Đang kiểm tra…" : budgetApproved ? "Kiểm tra dữ liệu" : "Duyệt kinh phí trước khi tiếp tục"}</button>
       </>}
       {result && <ResultDetails value={result} />}
       {validatedSubmission && (

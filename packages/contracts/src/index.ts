@@ -268,12 +268,116 @@ export const ReferenceSourceSchema = z.object({
   }
 });
 
+export const ProviderBudgetPlanSchema = z.object({
+  internal_services: z.object({
+    post_production: z.literal("TUHAUAI_FFMPEG_CLOUD_RUN"),
+    music_source: z.enum(["PROJECT_OWNER_LICENSED", "LICENSED_LIBRARY", "NOT_SELECTED"]),
+  }),
+  providers: z.object({
+    script: z.enum(["OPENAI_RESPONSES", "PROJECT_OWNER"]),
+    video: z.enum(["RUNWAY", "NONE"]),
+    voice: z.enum(["ELEVENLABS", "APPROVED_VOICE_MASTER", "NONE"]),
+    lip_sync: z.enum(["SYNC", "NONE"]),
+  }),
+  estimate: z.object({
+    currency: z.enum(["VND", "USD"]),
+    script: z.number().min(0),
+    video: z.number().min(0),
+    voice: z.number().min(0),
+    lip_sync: z.number().min(0),
+    contingency: z.number().min(0),
+    total: z.number().min(0),
+  }),
+  approval: z.object({
+    decision: z.enum(["PENDING", "APPROVE", "REJECT"]),
+    approved_limit: z.number().min(0),
+    reviewer: z.literal("PROJECT_OWNER"),
+    reviewed_at: z.iso.datetime().optional(),
+  }),
+}).superRefine((plan, context) => {
+  const calculated = plan.estimate.script + plan.estimate.video + plan.estimate.voice + plan.estimate.lip_sync + plan.estimate.contingency;
+  if (Math.abs(calculated - plan.estimate.total) > 0.01) {
+    context.addIssue({ code: "custom", message: "Tổng dự toán không khớp các khoản chi phí", path: ["estimate", "total"] });
+  }
+  if (plan.approval.decision === "APPROVE") {
+    if (!plan.approval.reviewed_at) {
+      context.addIssue({ code: "custom", message: "Thiếu thời điểm duyệt kinh phí", path: ["approval", "reviewed_at"] });
+    }
+    if (plan.approval.approved_limit < plan.estimate.total) {
+      context.addIssue({ code: "custom", message: "Hạn mức duyệt phải lớn hơn hoặc bằng tổng dự toán", path: ["approval", "approved_limit"] });
+    }
+  }
+});
+
+export type ProviderBudgetPlan = z.infer<typeof ProviderBudgetPlanSchema>;
+
+export function providerBudgetApproved(plan: ProviderBudgetPlan) {
+  return plan.approval.decision === "APPROVE" &&
+    Boolean(plan.approval.reviewed_at) &&
+    plan.approval.approved_limit >= plan.estimate.total;
+}
+
+const ShortFilmProgressActions = [
+  ["APPROVE_CONTRACT", "Khởi tạo và duyệt hợp đồng"],
+  ["REVIEW_SHORT_FILM_SCRIPT", "Duyệt kịch bản"],
+  ["PREPARE_SHORT_FILM_SHOT_PLAN", "Lập Shot Plan"],
+  ["LOCK_SHORT_FILM_PRODUCTION_READINESS", "Khóa nhân vật, giọng và keyframe"],
+  ["PREPARE_SHORT_FILM_PILOT", "Tạo pilot"],
+  ["REVIEW_SHORT_FILM_PILOT", "QC và duyệt pilot"],
+  ["PRODUCE_SHORT_FILM", "Sản xuất toàn phim"],
+  ["REVIEW_SHORT_FILM_FINAL", "QC và duyệt phim hoàn chỉnh"],
+  ["READY_TO_PUBLISH", "Sẵn sàng xuất bản"],
+] as const;
+
+const MusicVideoProgressActions = [
+  ["APPROVE_CONTRACT", "Khởi tạo và duyệt hợp đồng"],
+  ["PREPARE_MV_PRODUCTION", "Lập kế hoạch sản xuất"],
+  ["APPROVE_MV_PRODUCTION_PLAN", "Duyệt kế hoạch sản xuất"],
+  ["PREPARE_MV_ASSETS", "Chuẩn bị tài sản"],
+  ["APPROVE_MV_ASSETS", "Duyệt tài sản"],
+  ["PREPARE_MV_SHOT_PLAN", "Lập Shot Plan"],
+  ["APPROVE_MV_SHOT_PLAN", "Duyệt Shot Plan"],
+  ["PREPARE_MV_TIMECODE_ALIGNMENT", "Căn timecode"],
+  ["APPROVE_MV_TIMECODE_ALIGNMENT", "Duyệt timecode"],
+  ["PREPARE_MV_RENDER_PLAN", "Lập kế hoạch render"],
+  ["APPROVE_MV_RENDER_PLAN", "Duyệt kế hoạch render"],
+  ["PREPARE_MV_RENDER_EXECUTION", "Chuẩn bị thực thi"],
+  ["APPROVE_MV_RENDER_EXECUTION", "Duyệt thực thi"],
+  ["PREPARE_MV_PROVIDER_SUBMISSION", "Chuẩn bị gửi nhà cung cấp"],
+  ["APPROVE_MV_PROVIDER_SUBMISSION", "Duyệt gửi nhà cung cấp"],
+  ["READY_TO_PUBLISH", "Sẵn sàng xuất bản"],
+] as const;
+
+export function calculateProjectProgress(projectType: string, nextAction: string) {
+  const steps = projectType === "SHORT_FILM" ? ShortFilmProgressActions : MusicVideoProgressActions;
+  const currentIndex = Math.max(0, steps.findIndex(([action]) => action === nextAction));
+  const completed = nextAction === "READY_TO_PUBLISH" ? steps.length : currentIndex;
+  return {
+    percent_complete: Math.round((completed / steps.length) * 100),
+    completed_steps: completed,
+    total_steps: steps.length,
+    milestones: steps.map(([action, label], index) => ({
+      action,
+      label,
+      status: index < completed ? "COMPLETED" as const : index === currentIndex ? "CURRENT" as const : "PENDING" as const,
+    })),
+  };
+}
+
 export const ShortFilmScriptGenerationRequestSchema = z.object({
   idea: z.string().trim().min(20).max(12_000),
   target_duration_minutes: z.number().int().min(1).max(60),
   language: z.string().trim().min(2).max(20).default("vi"),
   characters: z.array(ShortFilmCharacterSchema).min(1).max(20),
   reference_sources: z.array(ReferenceSourceSchema).max(5, "Chỉ được thêm tối đa 5 link tham khảo").default([]),
+  provider_budget: ProviderBudgetPlanSchema,
+}).superRefine((request, context) => {
+  if (request.provider_budget.providers.script !== "OPENAI_RESPONSES") {
+    context.addIssue({ code: "custom", message: "Phải chọn OpenAI Responses cho chức năng tạo kịch bản AI", path: ["provider_budget", "providers", "script"] });
+  }
+  if (!providerBudgetApproved(request.provider_budget)) {
+    context.addIssue({ code: "custom", message: "Kinh phí phải được duyệt trước khi gọi nhà cung cấp", path: ["provider_budget", "approval"] });
+  }
 });
 
 export type ShortFilmScriptGenerationRequest = z.infer<typeof ShortFilmScriptGenerationRequestSchema>;
@@ -526,6 +630,7 @@ export const CommonProjectInputSchema = z.object({
   duration_target: z.string().trim().min(1),
   aspect_ratio: z.string().trim().min(1),
   reference_sources: z.array(ReferenceSourceSchema).max(5, "Chỉ được thêm tối đa 5 link tham khảo").default([]),
+  provider_budget: ProviderBudgetPlanSchema,
   characters: z.array(CharacterAssignmentSchema).min(1, "Phải chọn ít nhất một nhân vật"),
 });
 
