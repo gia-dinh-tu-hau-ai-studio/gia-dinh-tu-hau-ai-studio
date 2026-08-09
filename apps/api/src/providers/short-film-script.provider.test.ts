@@ -29,7 +29,7 @@ const request = {
   provider_budget: {
     internal_services: { post_production: "TUHAUAI_FFMPEG_CLOUD_RUN" as const, music_source: "PROJECT_OWNER_LICENSED" as const },
     providers: { script: "OPENAI_RESPONSES" as const, video: "RUNWAY" as const, voice: "ELEVENLABS" as const, lip_sync: "SYNC" as const },
-    estimate: { currency: "USD" as const, script: 1, video: 0, voice: 0, lip_sync: 0, contingency: 0, total: 1 },
+    estimate: { basis_version: "TUHAUAI_BUDGET_2026-08-09" as const, estimated_duration_seconds: 60, currency: "USD" as const, script: 1, video: 0, voice: 0, lip_sync: 0, contingency: 0, total: 1 },
     approval: { decision: "APPROVE" as const, approved_limit: 1, reviewer: "PROJECT_OWNER" as const, reviewed_at: "2026-08-09T00:00:00.000Z" },
   },
 };

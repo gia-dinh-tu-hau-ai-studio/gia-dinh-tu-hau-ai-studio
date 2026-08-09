@@ -280,6 +280,8 @@ export const ProviderBudgetPlanSchema = z.object({
     lip_sync: z.enum(["SYNC", "NONE"]),
   }),
   estimate: z.object({
+    basis_version: z.literal("TUHAUAI_BUDGET_2026-08-09"),
+    estimated_duration_seconds: z.number().int().positive(),
     currency: z.enum(["VND", "USD"]),
     script: z.number().min(0),
     video: z.number().min(0),
@@ -310,6 +312,35 @@ export const ProviderBudgetPlanSchema = z.object({
 });
 
 export type ProviderBudgetPlan = z.infer<typeof ProviderBudgetPlanSchema>;
+
+export function calculateSuggestedProviderBudget(input: {
+  project_type: "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
+  duration_seconds: number;
+  providers: ProviderBudgetPlan["providers"];
+}): ProviderBudgetPlan["estimate"] {
+  const durationSeconds = Math.max(1, Math.round(input.duration_seconds));
+  const dialogueRatio = input.project_type === "MUSIC_VIDEO" ? 0.15 : input.project_type === "SHORT_MUSIC_CLIP" ? 0.1 : 0.35;
+  const dialogueSeconds = durationSeconds * dialogueRatio;
+  const script = input.providers.script === "OPENAI_RESPONSES" ? 1 : 0;
+  // Runway Gen-4.5 baseline: 12 credits/second at $0.01/API credit. The 1.5 multiplier covers controlled retries/QC.
+  const video = input.providers.video === "RUNWAY" ? durationSeconds * 0.12 * 1.5 : 0;
+  const voice = input.providers.voice === "ELEVENLABS" ? dialogueSeconds * 0.02 : 0;
+  const lipSync = input.providers.lip_sync === "SYNC" ? dialogueSeconds * 0.05 : 0;
+  const subtotal = script + video + voice + lipSync;
+  const contingency = subtotal * 0.2;
+  const roundMoney = (value: number) => Math.round(value * 100) / 100;
+  return {
+    basis_version: "TUHAUAI_BUDGET_2026-08-09",
+    estimated_duration_seconds: durationSeconds,
+    currency: "USD",
+    script: roundMoney(script),
+    video: roundMoney(video),
+    voice: roundMoney(voice),
+    lip_sync: roundMoney(lipSync),
+    contingency: roundMoney(contingency),
+    total: roundMoney(subtotal + contingency),
+  };
+}
 
 export function providerBudgetApproved(plan: ProviderBudgetPlan) {
   return plan.approval.decision === "APPROVE" &&

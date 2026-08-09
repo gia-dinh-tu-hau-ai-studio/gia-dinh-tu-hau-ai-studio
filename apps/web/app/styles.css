@@ -100,6 +100,11 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .internal-service-grid { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .internal-service-grid label { padding: 15px; border: 1px solid #5b4931; border-radius: 12px; background: rgba(99, 24, 42, .18); }
 .internal-service-grid small { color: #cdbfb8; line-height: 1.4; }
+.budget-line, .budget-total { display: grid; gap: 7px; padding: 15px; border: 1px solid #3b2e33; border-radius: 12px; background: #151114; }
+.budget-line span, .budget-total span, .budget-total small { color: #aa9ca2; }
+.budget-line strong { color: #f8f0e7; font-size: 18px; }
+.budget-total { border-color: var(--gold); }
+.budget-total strong { color: #ffe6aa; font-size: 28px; }
 .provider-budget-grid { margin-bottom: 20px; }
 .provider-budget-grid label { padding: 15px; border: 1px solid #3b2e33; border-radius: 12px; background: #151114; }
 .provider-budget-grid small { color: #aa9ca2; line-height: 1.4; }

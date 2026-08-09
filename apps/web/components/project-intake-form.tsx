@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import type { ProviderBudgetPlan, ShortFilmWorkflow } from "@tu-hau/contracts";
+import { calculateSuggestedProviderBudget, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -51,6 +51,19 @@ type ReferenceSource = {
   notes: string;
 };
 
+type IntakeDraft = {
+  version: 1;
+  form_values: Record<string, string[]>;
+  reference_sources: ReferenceSource[];
+  short_film_workflow: ShortFilmWorkflow;
+  characters: CharacterSelection[];
+  provider_budget: ProviderBudgetPlan;
+  duration_target: string;
+  saved_at: string;
+};
+
+const INTAKE_DRAFT_PREFIX = "tuhauai:intake-draft:v1:";
+
 const initialProviderBudget: ProviderBudgetPlan = {
   internal_services: {
     post_production: "TUHAUAI_FFMPEG_CLOUD_RUN",
@@ -63,13 +76,15 @@ const initialProviderBudget: ProviderBudgetPlan = {
     lip_sync: "SYNC",
   },
   estimate: {
+    basis_version: "TUHAUAI_BUDGET_2026-08-09",
+    estimated_duration_seconds: 300,
     currency: "USD",
-    script: 0,
-    video: 0,
-    voice: 0,
-    lip_sync: 0,
-    contingency: 0,
-    total: 0,
+    script: 1,
+    video: 54,
+    voice: 2.1,
+    lip_sync: 5.25,
+    contingency: 12.47,
+    total: 74.82,
   },
   approval: {
     decision: "PENDING",
@@ -183,23 +198,17 @@ export function ProjectIntakeForm() {
   const [generatingScript, setGeneratingScript] = useState(false);
   const [shortFilmProviderStatus, setShortFilmProviderStatus] = useState<Record<string, { configured: boolean }>>({});
   const [providerBudget, setProviderBudget] = useState<ProviderBudgetPlan>(initialProviderBudget);
+  const [durationTarget, setDurationTarget] = useState("5_MINUTES");
   const [progressProjectId, setProgressProjectId] = useState("");
   const [projectProgress, setProjectProgress] = useState<ProjectProgress | null>(null);
   const [progressMessage, setProgressMessage] = useState("");
   const [checkingProgress, setCheckingProgress] = useState(false);
+  const [draftFormValues, setDraftFormValues] = useState<Record<string, string[]> | null>(null);
+  const [draftSavedAt, setDraftSavedAt] = useState("");
 
   const budgetApproved = providerBudget.approval.decision === "APPROVE" &&
     Boolean(providerBudget.approval.reviewed_at) &&
     providerBudget.approval.approved_limit >= providerBudget.estimate.total;
-
-  function updateBudgetEstimate(key: keyof Omit<ProviderBudgetPlan["estimate"], "currency" | "total">, amount: number) {
-    setProviderBudget((current) => {
-      const estimate = { ...current.estimate, [key]: Number.isFinite(amount) ? Math.max(0, amount) : 0 };
-      estimate.total = estimate.script + estimate.video + estimate.voice + estimate.lip_sync + estimate.contingency;
-      return { ...current, estimate, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } };
-    });
-    invalidateConfirmation();
-  }
 
   function approveBudget() {
     setProviderBudget((current) => ({
@@ -213,6 +222,23 @@ export function ProjectIntakeForm() {
     }));
     invalidateConfirmation();
   }
+
+  useEffect(() => {
+    const durationSeconds = ({
+      "15_SECONDS": 15,
+      "30_SECONDS": 30,
+      "60_SECONDS": 60,
+      "3_MINUTES": 180,
+      "5_MINUTES": 300,
+      "10_MINUTES": 600,
+      "15_MINUTES": 900,
+    } as Record<string, number>)[durationTarget] ?? 300;
+    setProviderBudget((current) => {
+      const estimate = calculateSuggestedProviderBudget({ project_type: projectType, duration_seconds: durationSeconds, providers: current.providers });
+      if (estimate.total === current.estimate.total && estimate.estimated_duration_seconds === current.estimate.estimated_duration_seconds) return current;
+      return { ...current, estimate, approval: { ...current.approval, decision: "PENDING", approved_limit: estimate.total, reviewed_at: undefined } };
+    });
+  }, [durationTarget, projectType, providerBudget.providers.script, providerBudget.providers.video, providerBudget.providers.voice, providerBudget.providers.lip_sync]);
 
   async function checkProjectProgress(projectIdOverride?: string) {
     const projectId = (projectIdOverride ?? progressProjectId).trim();
@@ -243,6 +269,83 @@ export function ProjectIntakeForm() {
     setValidatedSubmission(null);
     setCreationResult("");
   }
+
+  function collectFormValues(form: HTMLFormElement) {
+    const values: Record<string, string[]> = {};
+    for (const [name, value] of new FormData(form).entries()) {
+      if (typeof value !== "string" || name === "project_type" || name === "project_subtype") continue;
+      (values[name] ??= []).push(value);
+    }
+    return values;
+  }
+
+  function saveDraft(form: HTMLFormElement) {
+    if (!projectStarted) return;
+    const draft: IntakeDraft = {
+      version: 1,
+      form_values: collectFormValues(form),
+      reference_sources: referenceSources,
+      short_film_workflow: shortFilmWorkflow,
+      characters,
+      provider_budget: providerBudget,
+      duration_target: durationTarget,
+      saved_at: new Date().toISOString(),
+    };
+    localStorage.setItem(`${INTAKE_DRAFT_PREFIX}${projectType}`, JSON.stringify(draft));
+    setDraftSavedAt(draft.saved_at);
+  }
+
+  function startProject(type: FormProjectType) {
+    setProjectType(type);
+    const fallbackDuration = type === "SHORT_MUSIC_CLIP" ? "30_SECONDS" : "5_MINUTES";
+    try {
+      const stored = localStorage.getItem(`${INTAKE_DRAFT_PREFIX}${type}`);
+      if (stored) {
+        const draft = JSON.parse(stored) as IntakeDraft;
+        if (draft.version === 1) {
+          setReferenceSources(draft.reference_sources ?? []);
+          setShortFilmWorkflow(draft.short_film_workflow ?? createInitialShortFilmWorkflow());
+          setCharacters(draft.characters ?? []);
+          setProviderBudget(draft.provider_budget ?? initialProviderBudget);
+          setDurationTarget(draft.duration_target ?? fallbackDuration);
+          setDraftFormValues(draft.form_values ?? {});
+          setDraftSavedAt(draft.saved_at ?? "");
+        }
+      } else {
+        setDurationTarget(fallbackDuration);
+        setDraftFormValues(null);
+        setDraftSavedAt("");
+      }
+    } catch {
+      setDurationTarget(fallbackDuration);
+      setDraftFormValues(null);
+      setDraftSavedAt("");
+    }
+    setProjectStarted(true);
+  }
+
+  useEffect(() => {
+    if (!projectStarted || !draftFormValues) return;
+    const form = document.querySelector<HTMLFormElement>("form[data-intake-form]");
+    if (!form) return;
+    for (const element of Array.from(form.elements)) {
+      if (!(element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) || !element.name) continue;
+      const values = draftFormValues[element.name];
+      if (!values) continue;
+      if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
+        element.checked = values.includes(element.value);
+      } else if (element.name !== "duration_target") {
+        element.value = values[0] ?? "";
+      }
+    }
+    setDraftFormValues(null);
+  }, [projectStarted, draftFormValues]);
+
+  useEffect(() => {
+    if (!projectStarted || draftFormValues) return;
+    const form = document.querySelector<HTMLFormElement>("form[data-intake-form]");
+    if (form) saveDraft(form);
+  }, [projectStarted, referenceSources, shortFilmWorkflow, characters, providerBudget, durationTarget]);
 
   useEffect(() => {
     void fetch("/api/characters/eligible")
@@ -665,12 +768,12 @@ export function ProjectIntakeForm() {
   }
 
   return (
-    <form onChange={invalidateConfirmation} onSubmit={handleSubmit}>
+    <form data-intake-form onChange={(event) => { invalidateConfirmation(); saveDraft(event.currentTarget); }} onInput={(event) => saveDraft(event.currentTarget)} onSubmit={handleSubmit}>
       {!projectStarted && <section className="project-gateway">
         <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chỉ chọn một loại. Dữ liệu nhánh ẩn không đi vào payload.</p></div></div>
         <div className="project-grid">
           {projectTypes.map((item) => (
-            <button className={`project-card ${projectType === item.value ? "selected" : ""}`} key={item.value} onClick={() => { setProjectType(item.value); setProjectStarted(true); }} type="button">
+            <button className={`project-card ${projectType === item.value ? "selected" : ""}`} key={item.value} onClick={() => startProject(item.value)} type="button">
               <strong>{item.label}</strong>
               <small>{item.description}</small>
               <span>Bắt đầu →</span>
@@ -693,7 +796,7 @@ export function ProjectIntakeForm() {
 
       {projectStarted && <>
       <input name="project_type" type="hidden" value={projectType} />
-      <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => setProjectStarted(false)}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong></div>
+      <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => setProjectStarted(false)}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong><small>{draftSavedAt ? "Đã tự động lưu nháp trên thiết bị này" : "Nội dung sẽ tự động lưu trên thiết bị này"}</small></div>
 
       <section>
         <div className="section-heading"><span>02</span><div><h2>Thông tin cơ bản</h2><p>Chọn nhanh theo gợi ý; các trường kỹ thuật đã được ẩn.</p></div></div>
@@ -708,7 +811,7 @@ export function ProjectIntakeForm() {
           <SelectField name="language" label="Ngôn ngữ" options={[["vi-VN", "Tiếng Việt"], ["vi-VN-southwest", "Tiếng Việt – giọng miền Tây"], ["en", "Tiếng Anh"]]} />
           <SelectField name="content_rating" label="Độ tuổi phù hợp" options={[["ALL", "Mọi độ tuổi"], ["13+", "Từ 13 tuổi"], ["16+", "Từ 16 tuổi"], ["18+", "Từ 18 tuổi"]]} />
           <SelectField name="target_audience" label="Khán giả chính" options={[["FAMILY", "Gia đình"], ["YOUTH", "Người trẻ"], ["GENERAL", "Đại chúng"], ["SOUTHWEST_VIETNAM", "Khán giả miền Tây"]]} />
-          <SelectField name="duration_target" label="Thời lượng" options={projectType === "SHORT_MUSIC_CLIP" ? [["15_SECONDS", "15 giây"], ["30_SECONDS", "30 giây"], ["60_SECONDS", "60 giây"]] : [["3_MINUTES", "Khoảng 3 phút"], ["5_MINUTES", "Khoảng 5 phút"], ["10_MINUTES", "Khoảng 10 phút"], ["15_MINUTES", "Khoảng 15 phút"]]} />
+          <label><span>Thời lượng *</span><select name="duration_target" required value={durationTarget} onChange={(event) => setDurationTarget(event.target.value)}>{(projectType === "SHORT_MUSIC_CLIP" ? [["15_SECONDS", "15 giây"], ["30_SECONDS", "30 giây"], ["60_SECONDS", "60 giây"]] : [["3_MINUTES", "Khoảng 3 phút"], ["5_MINUTES", "Khoảng 5 phút"], ["10_MINUTES", "Khoảng 10 phút"], ["15_MINUTES", "Khoảng 15 phút"]]).map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>
           <SelectField name="aspect_ratio" label="Khung hình" options={[["9:16", "Dọc 9:16 – TikTok/Reels/Shorts"], ["16:9", "Ngang 16:9 – YouTube/Facebook"], ["1:1", "Vuông 1:1"]]} />
         </div>
         <fieldset className="platform-field">
@@ -795,14 +898,12 @@ export function ProjectIntakeForm() {
           <label><span>Khớp khẩu hình</span><select value={providerBudget.providers.lip_sync} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, lip_sync: event.target.value as ProviderBudgetPlan["providers"]["lip_sync"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="SYNC">Sync</option><option value="NONE">Không lip-sync</option></select><small>{providerBudget.providers.lip_sync === "SYNC" ? (shortFilmProviderStatus.lip_sync?.configured ? "Đã kết nối" : "Chưa cấu hình API") : "Đã tắt"}</small></label>
         </div>
         <div className="budget-estimate-grid">
-          <label><span>Đơn vị tiền</span><select value={providerBudget.estimate.currency} onChange={(event) => setProviderBudget((current) => ({ ...current, estimate: { ...current.estimate, currency: event.target.value as "USD" | "VND" }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="USD">USD</option><option value="VND">VND</option></select></label>
-          {(["script", "video", "voice", "lip_sync", "contingency"] as const).map((key) => <label key={key}><span>{({ script: "Kịch bản", video: "Video", voice: "Giọng nói", lip_sync: "Khẩu hình", contingency: "Dự phòng" } as const)[key]}</span><input min="0" inputMode="decimal" type="number" step={providerBudget.estimate.currency === "USD" ? "0.01" : "1000"} value={providerBudget.estimate[key]} onChange={(event) => updateBudgetEstimate(key, Number(event.target.value))} /></label>)}
-          <label><span>Tổng dự toán</span><input disabled value={`${providerBudget.estimate.total.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}`} /></label>
-          <label><span>Hạn mức tối đa được duyệt</span><input min={providerBudget.estimate.total} inputMode="decimal" type="number" step={providerBudget.estimate.currency === "USD" ? "0.01" : "1000"} value={providerBudget.approval.approved_limit} onChange={(event) => setProviderBudget((current) => ({ ...current, approval: { ...current.approval, approved_limit: Math.max(0, Number(event.target.value)), decision: "PENDING", reviewed_at: undefined } }))} /></label>
+          {(["script", "video", "voice", "lip_sync", "contingency"] as const).map((key) => <div className="budget-line" key={key}><span>{({ script: "Kịch bản AI", video: "Tạo video", voice: "Giọng nói", lip_sync: "Khớp khẩu hình", contingency: "Dự phòng 20%" } as const)[key]}</span><strong>{providerBudget.estimate[key].toLocaleString("vi-VN")} USD</strong></div>)}
+          <div className="budget-total"><span>Kinh phí đề xuất</span><strong>{providerBudget.estimate.total.toLocaleString("vi-VN")} USD</strong><small>Ước tính cho {providerBudget.estimate.estimated_duration_seconds} giây · {providerBudget.estimate.basis_version}</small></div>
         </div>
         <div className={`budget-approval ${budgetApproved ? "approved" : "pending"}`}>
           <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "KINH PHÍ CHƯA DUYỆT"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Provider vẫn chờ các approval gate sản xuất.` : "Hãy kiểm tra dự toán và bấm Duyệt kinh phí. Việc bấm duyệt không gọi provider và không trừ tiền."}</p></div>
-          <button type="button" onClick={approveBudget}>Duyệt kinh phí</button>
+          <button type="button" onClick={approveBudget}>Duyệt {providerBudget.estimate.total.toLocaleString("vi-VN")} USD</button>
         </div>
       </section>
 
