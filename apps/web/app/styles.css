@@ -96,6 +96,7 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .provider-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .provider-grid span { padding: 13px; border: 1px solid #3b2e33; border-radius: 10px; background: #151114; }
 .internal-service-grid, .provider-budget-grid, .budget-estimate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.budget-panel { scroll-margin-top: 110px; }
 .internal-service-grid { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .internal-service-grid label { padding: 15px; border: 1px solid #5b4931; border-radius: 12px; background: rgba(99, 24, 42, .18); }
 .internal-service-grid small { color: #cdbfb8; line-height: 1.4; }

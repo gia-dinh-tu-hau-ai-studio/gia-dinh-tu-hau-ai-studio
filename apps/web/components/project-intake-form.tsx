@@ -751,6 +751,7 @@ export function ProjectIntakeForm() {
               value={shortFilmWorkflow}
               generatingScript={generatingScript}
               onGenerateScript={generateShortFilmScript}
+              onRequestBudgetApproval={() => document.getElementById("provider-budget")?.scrollIntoView({ behavior: "smooth", block: "start" })}
               providerBudgetApproved={budgetApproved}
               providerStatus={shortFilmProviderStatus}
               onChange={(workflow) => {
@@ -781,7 +782,7 @@ export function ProjectIntakeForm() {
         </div>
       </section>
 
-      <section className="budget-panel">
+      <section className="budget-panel" id="provider-budget">
         <div className="section-heading"><span>05</span><div><h2>Nhà cung cấp &amp; dự toán kinh phí</h2><p>Chọn dịch vụ theo chức năng. Không nhà cung cấp nào được gọi trước khi kinh phí được duyệt.</p></div></div>
         <div className="internal-service-grid">
           <label><span>Hậu kỳ nội bộ</span><select disabled value={providerBudget.internal_services.post_production}><option value="TUHAUAI_FFMPEG_CLOUD_RUN">TuhauAI · FFmpeg · Cloud Run</option></select><small>Cắt ghép, mix âm thanh và xuất bản master trong pipeline nội bộ.</small></label>
