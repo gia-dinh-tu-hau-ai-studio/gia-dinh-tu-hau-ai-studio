@@ -13,7 +13,7 @@ const MANIFEST_NAME = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
 type PilotTask = {
   sample_id: string;
   shot_id: string;
-  runway_task_id: string;
+  runway_task_id?: string;
   runway_status: string;
   runway_output_url?: string;
   dialogue_line_id?: string;
@@ -79,51 +79,18 @@ export class ShortFilmPilotExecutionService {
     if (account.providers.some((provider) => ["INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED"].includes(provider.status))) {
       throw new Error(`PROVIDER_ACCOUNT_BLOCKED:${account.providers.map((provider) => `${provider.provider}:${provider.status}`).join(",")}`);
     }
-    const library = await this.characters.listEligibleCharacters();
-    const voiceProviderId = new Map(library.map((character) => [character.character_id, character.elevenlabs_voice_id]));
     const keyframeByShot = new Map(context.workflow.production_readiness!.keyframes.map((keyframe) => [keyframe.shot_id, keyframe.approved_image_url]));
-    const secrets = this.secrets();
-    const runway = new RunwayPilotProvider(secrets.runway);
-    const eleven = new ElevenLabsPilotProvider(secrets.eleven);
     const now = new Date().toISOString();
+    const tasks = samples.flatMap((sample) => sample.shots.map((shot) => {
+      if (!keyframeByShot.has(shot.shot_id)) throw new Error(`APPROVED_KEYFRAME_MISSING:${shot.shot_id}`);
+      return { sample_id: sample.sample_id, shot_id: shot.shot_id, runway_status: "PENDING_SUBMIT", dialogue_line_id: dialogueByShot.get(shot.shot_id)?.line_id };
+    }));
     const manifest: PilotExecutionManifest = {
       schema_version: "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1", execution_id: randomUUID(), project_id: projectId,
-      status: "SUBMITTING", samples, tasks: [], caps, provider_calls_made: false, heartbeat_at: now, started_at: now,
+      status: "PROCESSING_RUNWAY", samples, tasks, caps, provider_calls_made: false, heartbeat_at: now, started_at: now,
     };
     await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
-    try {
-      for (const sample of samples) for (const shot of sample.shots) {
-        if (manifest.tasks.some((task) => task.sample_id === sample.sample_id && task.shot_id === shot.shot_id)) continue;
-        const imageUrl = keyframeByShot.get(shot.shot_id);
-        if (!imageUrl) throw new Error(`APPROVED_KEYFRAME_MISSING:${shot.shot_id}`);
-        const line = dialogueByShot.get(shot.shot_id);
-        let audioDriveFileId: string | undefined;
-        let elevenlabsRequestId: string | undefined;
-        if (line) {
-          const voice = context.workflow.production_readiness!.voice_masters.find((item) => item.voice_master_id === line.voice_master_id);
-          const providerVoiceId = voice ? voiceProviderId.get(voice.source_actor_id) : undefined;
-          if (!providerVoiceId) throw new Error(`ELEVENLABS_VOICE_ID_MISSING:${line.voice_master_id}`);
-          const audio = await eleven.synthesize({ voiceId: providerVoiceId, text: line.dialogue_text });
-          const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, `${sample.sample_id}_${shot.shot_id}.mp3`, "audio/mpeg", audio.audio);
-          audioDriveFileId = uploaded.id as string;
-          elevenlabsRequestId = audio.requestId;
-        }
-        const submitted = await runway.submit({ imageUrl, prompt: shot.runway_prompt, durationSeconds: shot.duration_seconds, ratio: "1280:720" });
-        manifest.tasks.push({ sample_id: sample.sample_id, shot_id: shot.shot_id, runway_task_id: submitted.taskId, runway_status: "PENDING", dialogue_line_id: line?.line_id, audio_drive_file_id: audioDriveFileId, elevenlabs_request_id: elevenlabsRequestId });
-        manifest.provider_calls_made = true;
-        manifest.heartbeat_at = new Date().toISOString();
-        await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
-      }
-      manifest.status = "PROCESSING_RUNWAY";
-      await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
-      return { ...manifest, idempotent_replay: false };
-    } catch (error) {
-      manifest.status = "FAILED";
-      manifest.error = { stage: "PROVIDER_SUBMISSION", message: error instanceof Error ? error.message : String(error) };
-      manifest.heartbeat_at = new Date().toISOString();
-      await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
-      throw error;
-    }
+    return { ...manifest, idempotent_replay: false };
   }
 
   async status(projectId: string) {
@@ -134,28 +101,58 @@ export class ShortFilmPilotExecutionService {
     if (["AWAITING_PILOT_QC", "FAILED"].includes(manifest.status)) return manifest;
     const secrets = this.secrets();
     const runway = new RunwayPilotProvider(secrets.runway);
+    const eleven = new ElevenLabsPilotProvider(secrets.eleven);
     const sync = new SyncPilotProvider(secrets.sync);
-    for (const task of manifest.tasks) {
-      if (!["SUCCEEDED", "FAILED", "CANCELLED"].includes(task.runway_status)) {
-        const state = await runway.status(task.runway_task_id);
-        task.runway_status = state.status;
-        task.runway_output_url = state.outputUrl;
-        if (["FAILED", "CANCELLED"].includes(state.status)) throw new Error(`RUNWAY_TASK_FAILED:${task.shot_id}:${state.errorCode ?? state.error ?? state.status}`);
+    try {
+    const dialogueByShot = new Map(context.workflow.production_readiness!.dialogue_line_approvals.map((line) => [line.shot_id, line]));
+    const keyframeByShot = new Map(context.workflow.production_readiness!.keyframes.map((keyframe) => [keyframe.shot_id, keyframe.approved_image_url]));
+    const shotsById = new Map(manifest.samples.flatMap((sample) => sample.shots.map((shot) => [shot.shot_id, shot])));
+    const activeRunway = manifest.tasks.find((task) => !["PENDING_SUBMIT", "SUCCEEDED", "FAILED", "CANCELLED"].includes(task.runway_status));
+    const pendingRunway = manifest.tasks.find((task) => task.runway_status === "PENDING_SUBMIT");
+    if (!activeRunway && pendingRunway) {
+      const shot = shotsById.get(pendingRunway.shot_id);
+      const imageUrl = keyframeByShot.get(pendingRunway.shot_id);
+      if (!shot || !imageUrl) throw new Error(`APPROVED_KEYFRAME_MISSING:${pendingRunway.shot_id}`);
+      const line = dialogueByShot.get(pendingRunway.shot_id);
+      if (line && !pendingRunway.audio_drive_file_id) {
+        const library = await this.characters.listEligibleCharacters();
+        const voice = context.workflow.production_readiness!.voice_masters.find((item) => item.voice_master_id === line.voice_master_id);
+        const providerVoiceId = voice ? library.find((item) => item.character_id === voice.source_actor_id)?.elevenlabs_voice_id : undefined;
+        if (!providerVoiceId) throw new Error(`ELEVENLABS_VOICE_ID_MISSING:${line.voice_master_id}`);
+        const audio = await eleven.synthesize({ voiceId: providerVoiceId, text: line.dialogue_text });
+        const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, `${pendingRunway.sample_id}_${pendingRunway.shot_id}.mp3`, "audio/mpeg", audio.audio);
+        pendingRunway.audio_drive_file_id = uploaded.id as string;
+        pendingRunway.elevenlabs_request_id = audio.requestId;
+        await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
       }
+      const submitted = await runway.submit({ imageUrl, prompt: shot.runway_prompt, durationSeconds: shot.duration_seconds, ratio: "1280:720" });
+      pendingRunway.runway_task_id = submitted.taskId;
+      pendingRunway.runway_status = "PENDING";
+      manifest.provider_calls_made = true;
+      manifest.heartbeat_at = new Date().toISOString();
+      await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
+      return manifest;
+    }
+    if (activeRunway) {
+      const state = await runway.status(activeRunway.runway_task_id as string);
+      activeRunway.runway_status = state.status;
+      activeRunway.runway_output_url = state.outputUrl;
+      if (["FAILED", "CANCELLED"].includes(state.status)) throw new Error(`RUNWAY_TASK_FAILED:${activeRunway.shot_id}:${state.errorCode ?? state.error ?? state.status}`);
     }
     if (manifest.tasks.every((task) => task.runway_status === "SUCCEEDED")) {
-      for (const task of manifest.tasks.filter((item) => item.audio_drive_file_id)) {
-        if (!task.sync_generation_id) {
-          const audio = await this.drive.downloadBuffer(task.audio_drive_file_id as string);
-          const generation = await sync.submit({ videoUrl: task.runway_output_url as string, audio, fileName: `${task.shot_id}.mp3` });
-          task.sync_generation_id = generation.generationId;
-          task.sync_status = "PENDING";
+      const syncTask = manifest.tasks.find((task) => task.audio_drive_file_id && (!task.sync_generation_id || !["COMPLETED", "FAILED", "REJECTED"].includes(task.sync_status ?? "")));
+      if (syncTask) {
+        if (!syncTask.sync_generation_id) {
+          const audio = await this.drive.downloadBuffer(syncTask.audio_drive_file_id as string);
+          const generation = await sync.submit({ videoUrl: syncTask.runway_output_url as string, audio, fileName: `${syncTask.shot_id}.mp3` });
+          syncTask.sync_generation_id = generation.generationId;
+          syncTask.sync_status = "PENDING";
           await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
-        } else if (!["COMPLETED", "FAILED", "REJECTED"].includes(task.sync_status ?? "")) {
-          const state = await sync.status(task.sync_generation_id);
-          task.sync_status = state.status;
-          task.sync_output_url = state.outputUrl;
-          if (["FAILED", "REJECTED"].includes(state.status ?? "")) throw new Error(`SYNC_TASK_FAILED:${task.shot_id}:${state.errorCode ?? state.error ?? state.status}`);
+        } else {
+          const state = await sync.status(syncTask.sync_generation_id);
+          syncTask.sync_status = state.status;
+          syncTask.sync_output_url = state.outputUrl;
+          if (["FAILED", "REJECTED"].includes(state.status ?? "")) throw new Error(`SYNC_TASK_FAILED:${syncTask.shot_id}:${state.errorCode ?? state.error ?? state.status}`);
         }
       }
       manifest.status = manifest.tasks.filter((task) => task.audio_drive_file_id).every((task) => task.sync_status === "COMPLETED") ? "READY_FOR_ASSEMBLY" : "PROCESSING_SYNC";
@@ -187,6 +184,13 @@ export class ShortFilmPilotExecutionService {
     manifest.heartbeat_at = new Date().toISOString();
     await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
     return manifest;
+    } catch (error) {
+      manifest.status = "FAILED";
+      manifest.error = { stage: "PROVIDER_PROCESSING", message: error instanceof Error ? error.message : String(error) };
+      manifest.heartbeat_at = new Date().toISOString();
+      await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
+      return manifest;
+    }
   }
 
   async output(projectId: string, fileId: string) {

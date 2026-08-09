@@ -265,9 +265,11 @@ export function ProjectIntakeForm() {
   const [pilotExecutionApproved, setPilotExecutionApproved] = useState(false);
   const [pilotExecutionResult, setPilotExecutionResult] = useState("");
   const [runningPilotExecution, setRunningPilotExecution] = useState(false);
+  const [monitoringPilotExecution, setMonitoringPilotExecution] = useState(false);
   const [fullFilmExecutionApproved, setFullFilmExecutionApproved] = useState(false);
   const [fullFilmExecutionResult, setFullFilmExecutionResult] = useState("");
   const [runningFullFilmExecution, setRunningFullFilmExecution] = useState(false);
+  const [monitoringFullFilmExecution, setMonitoringFullFilmExecution] = useState(false);
 
   const budgetApproved = providerBudget.approval.decision === "APPROVE" &&
     Boolean(providerBudget.approval.reviewed_at) &&
@@ -499,6 +501,18 @@ export function ProjectIntakeForm() {
       .catch(() => setShortFilmProviderStatus({}));
   }, []);
 
+  useEffect(() => {
+    if (!monitoringPilotExecution || !createdProject) return;
+    const timer = window.setInterval(() => void refreshShortFilmPilotStatus(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [monitoringPilotExecution, createdProject?.project_id]);
+
+  useEffect(() => {
+    if (!monitoringFullFilmExecution || !createdProject) return;
+    const timer = window.setInterval(() => void refreshShortFilmFullFilmStatus(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [monitoringFullFilmExecution, createdProject?.project_id]);
+
   function addCharacter() {
     if (!characterToAdd || characters.some((item) => item.character_id === characterToAdd)) {
       return;
@@ -723,7 +737,9 @@ export function ProjectIntakeForm() {
           sync_usd: Number((totalSeconds * 0.05 * 1.2).toFixed(2)),
         } }),
       });
-      setPilotExecutionResult(JSON.stringify(await response.json(), null, 2));
+      const body = await response.json();
+      setPilotExecutionResult(JSON.stringify(body, null, 2));
+      if (response.ok && !["AWAITING_PILOT_QC", "FAILED"].includes(body.status)) setMonitoringPilotExecution(true);
     } catch { setPilotExecutionResult("Không submit được pilot batch; hệ thống không tự gửi lại để tránh tính phí trùng."); }
     finally { setRunningPilotExecution(false); }
   }
@@ -733,6 +749,7 @@ export function ProjectIntakeForm() {
     const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/status`);
     const body = await response.json();
     setPilotExecutionResult(JSON.stringify(body, null, 2));
+    if (["AWAITING_PILOT_QC", "FAILED"].includes(body.status)) setMonitoringPilotExecution(false);
     if (body.status === "AWAITING_PILOT_QC" && Array.isArray(body.outputs) && Array.isArray(body.samples)) {
       setShortFilmWorkflow((current) => ({ ...current, pilot_batch: {
         samples: body.outputs.map((output: { sample_id: string; video_url: string; drive_file_id: string }) => {
@@ -770,7 +787,9 @@ export function ProjectIntakeForm() {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ execution_approved: true, caps: proposedFullFilmCaps() }),
       });
-      setFullFilmExecutionResult(JSON.stringify(await response.json(), null, 2));
+      const body = await response.json();
+      setFullFilmExecutionResult(JSON.stringify(body, null, 2));
+      if (response.ok && !["AWAITING_FINAL_QC", "FAILED"].includes(body.status)) setMonitoringFullFilmExecution(true);
     } catch { setFullFilmExecutionResult("Không thể bắt đầu sản xuất toàn phim; hệ thống không tự gửi lại để tránh tính phí trùng."); }
     finally { setRunningFullFilmExecution(false); }
   }
@@ -780,6 +799,7 @@ export function ProjectIntakeForm() {
     const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/full-film/status`, { method: "POST" });
     const body = await response.json();
     setFullFilmExecutionResult(JSON.stringify(body, null, 2));
+    if (["AWAITING_FINAL_QC", "FAILED"].includes(body.status)) setMonitoringFullFilmExecution(false);
     if (body.status === "AWAITING_FINAL_QC" && body.output?.drive_file_id) {
       setShortFilmWorkflow((current) => ({ ...current, full_film: {
         video_url: `/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/full-film/outputs/${encodeURIComponent(body.output.drive_file_id)}`,
