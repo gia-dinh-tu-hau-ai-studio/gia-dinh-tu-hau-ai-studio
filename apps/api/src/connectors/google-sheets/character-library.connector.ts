@@ -34,6 +34,8 @@ export type EligibleCharacter = {
   character_type: string;
   default_costume_id: string;
   voice_available: boolean;
+  face_reference_url: string;
+  body_reference_url: string;
   master_identity_id?: string;
   master_identity_version?: string;
   voice_master_id?: string;
@@ -115,6 +117,8 @@ export class CharacterLibraryConnector {
           character_type: row.character_type,
           default_costume_id: row.default_costume_id,
           voice_available: voiceLocked,
+          face_reference_url: row.face_reference_url,
+          body_reference_url: row.body_reference_url,
           master_identity_id: identityLocked ? String(identity.master_identity_id ?? "").trim() || undefined : undefined,
           master_identity_version: identityLocked ? String(identity.reference_set_version ?? row.version).trim() || undefined : undefined,
           voice_master_id: voiceLocked ? String(voice.voice_master_id ?? "").trim() || undefined : undefined,
