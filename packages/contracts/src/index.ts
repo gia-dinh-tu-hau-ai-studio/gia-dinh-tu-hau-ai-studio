@@ -75,6 +75,14 @@ export const CharacterAssignmentSchema = z
         path: ["voice_approval_status"],
       });
     }
+
+    if (character.lip_sync_required && !character.voice_required) {
+      context.addIssue({
+        code: "custom",
+        message: "Khớp khẩu hình chỉ được bật khi nhân vật có Voice APPROVED",
+        path: ["lip_sync_required"],
+      });
+    }
   });
 
 export type CharacterAssignment = z.infer<typeof CharacterAssignmentSchema>;
@@ -490,6 +498,15 @@ export const CommonProjectInputSchema = z.object({
   target_audience: z.string().trim().min(1),
   duration_target: z.string().trim().min(1),
   aspect_ratio: z.string().trim().min(1),
+  reference_sources: z.array(z.object({
+    platform: z.enum(["YOUTUBE", "TIKTOK", "FACEBOOK"]),
+    url: z.url(),
+    usage_mode: z.enum(["INSPIRATION_ONLY", "STRUCTURE_REFERENCE", "AUTHORIZED_ADAPTATION"]),
+    rights_confirmed: z.literal(true, {
+      error: "Phải xác nhận quyền sử dụng cho từng link tham khảo",
+    }),
+    notes: z.string().trim().max(2_000).default(""),
+  })).max(5, "Chỉ được thêm tối đa 5 link tham khảo").default([]),
   characters: z.array(CharacterAssignmentSchema).min(1, "Phải chọn ít nhất một nhân vật"),
 });
 

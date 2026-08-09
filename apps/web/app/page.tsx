@@ -4,9 +4,9 @@ export default function HomePage() {
   return (
     <main>
       <header className="hero">
-        <p className="eyebrow">GIA ĐÌNH TƯ HẬU STUDIO</p>
-        <h1>Dự Án Gia Đình Tư Hậu</h1>
-        <p>Khởi tạo phim ngắn · Character Master · Approval Gates</p>
+        <p className="eyebrow">TƯ HẬU AI STUDIO</p>
+        <h1>TuhauAI</h1>
+        <p>Khởi tạo dự án sáng tạo ngay trên điện thoại</p>
       </header>
       <ProjectIntakeForm />
     </main>
