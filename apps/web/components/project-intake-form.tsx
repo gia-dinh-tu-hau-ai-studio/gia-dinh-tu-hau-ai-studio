@@ -182,6 +182,39 @@ function accountAction(status: string) {
   return "Báo quản trị hệ thống kèm mã HTTP hiển thị ở trên.";
 }
 
+const providerAccountLinks = {
+  OPENAI: {
+    billing: "https://platform.openai.com/settings/organization/billing/overview",
+    apiKeys: "https://platform.openai.com/api-keys",
+  },
+  RUNWAY: {
+    billing: "https://dev.runwayml.com/organization/de9a6a51-b476-4666-b8f5-17773177dabf/billing",
+    apiKeys: "https://dev.runwayml.com/organization/de9a6a51-b476-4666-b8f5-17773177dabf/api-keys",
+  },
+  ELEVENLABS: {
+    billing: "https://elevenlabs.io/app/subscription",
+    apiKeys: "https://elevenlabs.io/app/developers/api-keys",
+  },
+  SYNC: {
+    billing: "https://sync.so/billing/subscription",
+    apiKeys: "https://sync.so/settings/api-keys",
+  },
+} as const;
+
+function ProviderAccountLinks({ provider, status }: { provider: string; status: string }) {
+  const links = providerAccountLinks[provider as keyof typeof providerAccountLinks];
+  if (!links) return null;
+  const showBilling = status === "INSUFFICIENT" || status === "UNVERIFIED";
+  const showApiKeys = status === "AUTH_ERROR" || status === "NOT_CONFIGURED";
+  if (!showBilling && !showApiKeys) return null;
+  return (
+    <small className="provider-account-links">
+      {showBilling && <a href={links.billing} target="_blank" rel="noreferrer">Mở Billing</a>}
+      {showApiKeys && <a href={links.apiKeys} target="_blank" rel="noreferrer">Mở API Keys</a>}
+    </small>
+  );
+}
+
 export function ProjectIntakeForm() {
   const [projectType, setProjectType] = useState<FormProjectType>("SHORT_FILM");
   const [projectStarted, setProjectStarted] = useState(false);
@@ -989,7 +1022,7 @@ export function ProjectIntakeForm() {
         <div className={`account-preflight ${accountExecutionReady ? "approved" : "pending"}`}>
           <div><strong>KIỂM TRA TÀI KHOẢN TRƯỚC KHI CHẠY</strong><p>Chỉ đọc số dư/hạn mức. Không tạo ảnh, video, giọng hoặc trừ credit.</p></div>
           <button disabled={!budgetApproved || checkingAccounts} type="button" onClick={() => void checkAccounts()}>{checkingAccounts ? "Đang kiểm tra…" : "Kiểm tra tài khoản"}</button>
-          {accountPreflight && <div className="account-check-results">{accountPreflight.providers.map((item) => <article key={item.provider}><strong>{item.provider} · {item.status}</strong><span>{item.message}</span>{item.required_units !== undefined && <small>Cần {item.required_units.toLocaleString("vi-VN")} {item.unit}{item.available_units !== undefined ? ` · Còn ${item.available_units.toLocaleString("vi-VN")} ${item.unit}` : ""}</small>}<small><b>Hành động:</b> {accountAction(item.status)}</small></article>)}</div>}
+          {accountPreflight && <div className="account-check-results">{accountPreflight.providers.map((item) => <article key={item.provider}><strong>{item.provider} · {item.status}</strong><span>{item.message}</span>{item.required_units !== undefined && <small>Cần {item.required_units.toLocaleString("vi-VN")} {item.unit}{item.available_units !== undefined ? ` · Còn ${item.available_units.toLocaleString("vi-VN")} ${item.unit}` : ""}</small>}<small><b>Hành động:</b> {accountAction(item.status)}</small><ProviderAccountLinks provider={item.provider} status={item.status} /></article>)}</div>}
           {accountPreflight?.execution_gate === "MANUAL_CONFIRMATION_REQUIRED" && <label className="consent"><input checked={manualBalanceConfirmed} type="checkbox" onChange={(event) => setManualBalanceConfirmed(event.target.checked)} /> Tôi đã kiểm tra Billing của các nhà cung cấp không có API số dư và xác nhận đủ hạn mức.</label>}
           {accountPreflight?.execution_gate === "BLOCKED" && <p className="operation-error">ĐÃ KHÓA CHẠY: xem đúng trạng thái và “Hành động” của từng nhà cung cấp ở trên; không mặc định rằng mọi lỗi đều do thiếu tiền.</p>}
           {accountExecutionReady && <p className="operation-success">TÀI KHOẢN ĐÃ SẴN SÀNG CHO DỰ TOÁN HIỆN TẠI.</p>}
