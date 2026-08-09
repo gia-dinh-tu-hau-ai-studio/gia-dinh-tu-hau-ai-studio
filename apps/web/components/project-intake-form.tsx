@@ -264,6 +264,7 @@ export function ProjectIntakeForm() {
       "60_SECONDS": 60,
       "3_MINUTES": 180,
       "5_MINUTES": 300,
+      "7_MINUTES": 420,
       "10_MINUTES": 600,
       "15_MINUTES": 900,
     } as Record<string, number>)[durationTarget] ?? 300;
@@ -881,7 +882,7 @@ export function ProjectIntakeForm() {
           <SelectField name="language" label="Ngôn ngữ" options={[["vi-VN", "Tiếng Việt"], ["vi-VN-southwest", "Tiếng Việt – giọng miền Tây"], ["en", "Tiếng Anh"]]} />
           <SelectField name="content_rating" label="Độ tuổi phù hợp" options={[["ALL", "Mọi độ tuổi"], ["13+", "Từ 13 tuổi"], ["16+", "Từ 16 tuổi"], ["18+", "Từ 18 tuổi"]]} />
           <SelectField name="target_audience" label="Khán giả chính" options={[["FAMILY", "Gia đình"], ["YOUTH", "Người trẻ"], ["GENERAL", "Đại chúng"], ["SOUTHWEST_VIETNAM", "Khán giả miền Tây"]]} />
-          <label><span>Thời lượng *</span><select name="duration_target" required value={durationTarget} onChange={(event) => setDurationTarget(event.target.value)}>{(projectType === "SHORT_MUSIC_CLIP" ? [["15_SECONDS", "15 giây"], ["30_SECONDS", "30 giây"], ["60_SECONDS", "60 giây"]] : [["3_MINUTES", "Khoảng 3 phút"], ["5_MINUTES", "Khoảng 5 phút"], ["10_MINUTES", "Khoảng 10 phút"], ["15_MINUTES", "Khoảng 15 phút"]]).map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>
+          <fieldset className="duration-picker"><legend>Thời lượng *</legend><div>{(projectType === "SHORT_MUSIC_CLIP" ? [["15_SECONDS", "15 giây"], ["30_SECONDS", "30 giây"], ["60_SECONDS", "60 giây"]] : [["3_MINUTES", "3 phút"], ["5_MINUTES", "5 phút"], ["7_MINUTES", "7 phút"], ["10_MINUTES", "10 phút"], ["15_MINUTES", "15 phút"]]).map(([value, text]) => <label className={durationTarget === value ? "selected" : ""} key={value}><input checked={durationTarget === value} name="duration_target" onChange={() => setDurationTarget(value)} required type="radio" value={value} /><span>{text}</span></label>)}</div><small>Chạm trực tiếp vào thời lượng mong muốn; dự toán sẽ tự tính lại.</small></fieldset>
           <SelectField name="aspect_ratio" label="Khung hình" options={[["9:16", "Dọc 9:16 – TikTok/Reels/Shorts"], ["16:9", "Ngang 16:9 – YouTube/Facebook"], ["1:1", "Vuông 1:1"]]} />
         </div>
         <fieldset className="platform-field">
