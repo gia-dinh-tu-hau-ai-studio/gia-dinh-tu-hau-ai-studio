@@ -531,6 +531,85 @@ export const ShortFilmWorkflowSchema = z
 
 export type ShortFilmWorkflow = z.infer<typeof ShortFilmWorkflowSchema>;
 
+export const ShortFilmPilotAccountCheckSchema = z.object({
+  provider: z.enum(["RUNWAY", "ELEVENLABS", "SYNC"]),
+  status: z.enum(["SUFFICIENT", "INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED", "UNVERIFIED"]),
+  checked_at: z.string().datetime(),
+  manual_balance_confirmed: z.boolean().default(false),
+});
+
+export const ShortFilmPilotPreparationRequestSchema = z.object({
+  project_id: z.string().trim().min(1),
+  workflow: ShortFilmWorkflowSchema,
+  provider_budget: ProviderBudgetPlanSchema,
+  pilot_duration_seconds: z.number().int().min(10).max(20),
+  account_checks: z.array(ShortFilmPilotAccountCheckSchema),
+  prepared_at: z.string().datetime(),
+}).superRefine((request, context) => {
+  if (!providerBudgetApproved(request.provider_budget)) {
+    context.addIssue({ code: "custom", message: "BUDGET_APPROVED là bắt buộc trước khi chuẩn bị pilot", path: ["provider_budget", "approval"] });
+  }
+  if (request.workflow.script_review.decision !== "APPROVE") {
+    context.addIssue({ code: "custom", message: "SCRIPT_APPROVED là bắt buộc trước khi chuẩn bị pilot", path: ["workflow", "script_review"] });
+  }
+  if (!request.workflow.shot_plan) {
+    context.addIssue({ code: "custom", message: "Shot Plan là bắt buộc trước khi chuẩn bị pilot", path: ["workflow", "shot_plan"] });
+  }
+  const mediaDecision = shortFilmMediaExecutionDecision(request.workflow);
+  for (const blocker of mediaDecision.blockers) {
+    context.addIssue({ code: "custom", message: blocker, path: ["workflow", "production_readiness"] });
+  }
+  const checks = new Map(request.account_checks.map((check) => [check.provider, check]));
+  for (const provider of ["RUNWAY", "ELEVENLABS"] as const) {
+    if (checks.get(provider)?.status !== "SUFFICIENT") {
+      context.addIssue({ code: "custom", message: `${provider}_ACCOUNT_NOT_SUFFICIENT`, path: ["account_checks"] });
+    }
+  }
+  const sync = checks.get("SYNC");
+  if (sync?.status !== "SUFFICIENT" && !(sync?.status === "UNVERIFIED" && sync.manual_balance_confirmed)) {
+    context.addIssue({ code: "custom", message: "SYNC_ACCOUNT_NOT_CONFIRMED", path: ["account_checks"] });
+  }
+  const newestAllowed = Date.parse(request.prepared_at) - 15 * 60_000;
+  request.account_checks.forEach((check, index) => {
+    if (Date.parse(check.checked_at) < newestAllowed) {
+      context.addIssue({ code: "custom", message: `${check.provider}_ACCOUNT_CHECK_STALE`, path: ["account_checks", index, "checked_at"] });
+    }
+  });
+});
+
+export type ShortFilmPilotPreparationRequest = z.infer<typeof ShortFilmPilotPreparationRequestSchema>;
+
+export function prepareShortFilmPilotPlan(input: ShortFilmPilotPreparationRequest) {
+  const request = ShortFilmPilotPreparationRequestSchema.parse(input);
+  const readiness = request.workflow.production_readiness!;
+  const pilotShotIds = request.workflow.shot_plan!.shots
+    .slice(0, Math.max(1, Math.min(request.workflow.shot_plan!.shots.length, 3)))
+    .map((_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`);
+  const dialogueShots = new Set(readiness.speaker_locks.map((lock) => lock.shot_id));
+  const stages = [
+    { stage: "SYNTHESIZE_APPROVED_DIALOGUE", provider: "ELEVENLABS", required: pilotShotIds.some((id) => dialogueShots.has(id)) },
+    { stage: "GENERATE_LOCKED_SHOT_VIDEO", provider: "RUNWAY", required: true },
+    { stage: "SYNC_LOCKED_SPEAKER", provider: "SYNC", required: pilotShotIds.some((id) => dialogueShots.has(id)) },
+    { stage: "ASSEMBLE_PILOT", provider: "TUHAUAI_FFMPEG", required: true },
+    { stage: "AWAIT_PILOT_QC", provider: "PROJECT_OWNER", required: true },
+  ] as const;
+  return {
+    schema_version: "SHORT_FILM_PILOT_EXECUTION_V1" as const,
+    project_id: request.project_id,
+    pilot_duration_seconds: request.pilot_duration_seconds,
+    pilot_shot_ids: pilotShotIds,
+    locked_identity_master_ids: readiness.identity_masters.map((item) => item.master_identity_id),
+    locked_voice_master_ids: readiness.voice_masters.map((item) => item.voice_master_id),
+    stages,
+    submission_gate: "AWAITING_PROJECT_OWNER_APPROVAL" as const,
+    provider_calls_made: false as const,
+    retry_policy: { max_attempts_per_stage: 2, require_fresh_account_check_before_retry: true },
+    heartbeat_policy: { interval_seconds: 30, stale_after_seconds: 180, hard_timeout_seconds: 900 },
+    budget_cap_usd: request.provider_budget.approval.approved_limit,
+    prepared_at: request.prepared_at,
+  };
+}
+
 export const ShortFilmWorkflowUpdateRequestSchema = z.object({
   workflow: ShortFilmWorkflowSchema,
 });

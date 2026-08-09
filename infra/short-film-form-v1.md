@@ -55,6 +55,20 @@ not accepted in request bodies and are never persisted in project JSON or logs.
 | Script draft | OpenAI Responses | `OPENAI_API_KEY` | Generate returns `SHORT_FILM_SCRIPT_PROVIDER_NOT_CONFIGURED` |
 | Image-to-video | Runway | `RUNWAYML_API_SECRET` | Status is `NOT_CONFIGURED`; no media submission is enabled |
 | Lip-sync | Sync | `SYNC_API_KEY` | Status is `NOT_CONFIGURED`; no lip-sync submission is enabled |
+
+### Pilot execution preparation
+
+`POST /v1/projects/:projectId/short-film/pilot/prepare` creates a
+`SHORT_FILM_PILOT_EXECUTION_V1` plan only. It performs a fresh server-side
+provider-account check for the 10–20 second pilot, requires approved budget,
+SCRIPT_APPROVED, locked production readiness, current account checks and manual
+Sync Billing confirmation when Sync cannot expose a balance API.
+
+The plan locks identity/voice master IDs, speaker/shot scope, a two-attempt retry
+ceiling, 30-second heartbeat, 180-second stale threshold and 900-second hard
+timeout. Its submission gate is `AWAITING_PROJECT_OWNER_APPROVAL` and
+`provider_calls_made` is always `false`; provider execution remains a separate,
+explicitly approved operation.
 | Character voice | Approved Voice Master | none in this form | Requires an approved library asset |
 
 `GET /v1/short-film/providers/status` returns only provider identifiers and

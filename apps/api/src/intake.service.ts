@@ -8,12 +8,14 @@ import {
 } from "@nestjs/common";
 import {
   normalizeProjectIntake,
+  prepareShortFilmPilotPlan,
+  ProviderBudgetPlanSchema,
   ProjectSubmitRequestSchema,
   ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowUpdateRequestSchema,
 } from "@tu-hau/contracts";
 import { randomUUID } from "node:crypto";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import {
   CharacterLibraryConnector,
   CharacterLibraryNotConfiguredError,
@@ -232,6 +234,48 @@ export class IntakeService {
         });
       }
       throw error;
+    }
+  }
+
+  async prepareShortFilmPilot(projectIdInput: string, body: unknown) {
+    const projectId = projectIdInput.trim();
+    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
+    const requestSchema = z.object({
+      provider_budget: ProviderBudgetPlanSchema,
+      pilot_duration_seconds: z.number().int().min(10).max(20),
+      manual_sync_balance_confirmed: z.boolean().default(false),
+    });
+    try {
+      const request = requestSchema.parse(body);
+      const stored = await this.projectRegistry.getShortFilmWorkflow(projectId);
+      const checked = await checkProviderAccounts({
+        project_type: "SHORT_FILM",
+        duration_seconds: request.pilot_duration_seconds,
+        providers: request.provider_budget.providers,
+      }, process.env);
+      const preparedAt = new Date().toISOString();
+      const relevant = new Set(["RUNWAY", "ELEVENLABS", "SYNC"]);
+      const accountChecks = checked.providers
+        .filter((item) => relevant.has(item.provider))
+        .map((item) => ({
+          provider: item.provider as "RUNWAY" | "ELEVENLABS" | "SYNC",
+          status: item.status,
+          checked_at: preparedAt,
+          manual_balance_confirmed: item.provider === "SYNC" && request.manual_sync_balance_confirmed,
+        }));
+      return prepareShortFilmPilotPlan({
+        project_id: projectId,
+        workflow: stored.workflow,
+        provider_budget: request.provider_budget,
+        pilot_duration_seconds: request.pilot_duration_seconds,
+        account_checks: accountChecks,
+        prepared_at: preparedAt,
+      });
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new ConflictException({ code: "SHORT_FILM_PILOT_PREPARATION_BLOCKED", errors: error.issues });
+      }
+      this.handleShortFilmWorkflowError(error);
     }
   }
 

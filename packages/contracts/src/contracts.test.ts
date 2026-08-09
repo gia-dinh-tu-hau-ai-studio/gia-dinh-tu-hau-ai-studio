@@ -5,6 +5,7 @@ import {
   calculateProjectProgress,
   normalizeProjectIntake,
   providerBudgetApproved,
+  prepareShortFilmPilotPlan,
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   shortFilmProductionReadinessBlockers,
@@ -166,6 +167,57 @@ test("tự tính dự toán có dự phòng theo thời lượng và provider", 
   assert.equal(estimate.video, 54);
   assert.equal(estimate.total, 74.82);
   assert.equal(estimate.contingency, 12.47);
+});
+
+test("pilot plan khóa provider và tài sản nhưng chưa gọi provider", () => {
+  const preparedAt = "2026-08-09T10:00:00.000Z";
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER", reviewed_at: preparedAt },
+    shot_plan: { summary: "Pilot", shots: ["Cận cảnh Vy nói thoại"] },
+    production_readiness: productionReadiness,
+  });
+  const plan = prepareShortFilmPilotPlan({
+    project_id: "GDTH-FILM-PILOT-001",
+    workflow,
+    provider_budget: approvedProviderBudget,
+    pilot_duration_seconds: 15,
+    prepared_at: preparedAt,
+    account_checks: [
+      { provider: "RUNWAY", status: "SUFFICIENT", checked_at: preparedAt, manual_balance_confirmed: false },
+      { provider: "ELEVENLABS", status: "SUFFICIENT", checked_at: preparedAt, manual_balance_confirmed: false },
+      { provider: "SYNC", status: "UNVERIFIED", checked_at: preparedAt, manual_balance_confirmed: true },
+    ],
+  });
+  assert.equal(plan.submission_gate, "AWAITING_PROJECT_OWNER_APPROVAL");
+  assert.equal(plan.provider_calls_made, false);
+  assert.equal(plan.pilot_shot_ids[0], "SHOT-001");
+  assert.deepEqual(plan.locked_identity_master_ids, ["TUONG_VY_MASTER_IDENTITY_V1"]);
+  assert.deepEqual(plan.locked_voice_master_ids, ["TUONG_VY_VOICE_MASTER_AI_V1"]);
+  assert.equal(plan.stages.find((stage) => stage.provider === "SYNC")?.required, true);
+  assert.ok(plan.heartbeat_policy.hard_timeout_seconds > plan.heartbeat_policy.stale_after_seconds);
+});
+
+test("pilot plan từ chối số dư thiếu, xác nhận Sync thiếu và account check cũ", () => {
+  const preparedAt = "2026-08-09T10:20:00.000Z";
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER", reviewed_at: preparedAt },
+    shot_plan: { summary: "Pilot", shots: ["Cận cảnh Vy nói thoại"] },
+    production_readiness: productionReadiness,
+  });
+  assert.throws(() => prepareShortFilmPilotPlan({
+    project_id: "GDTH-FILM-PILOT-001",
+    workflow,
+    provider_budget: approvedProviderBudget,
+    pilot_duration_seconds: 15,
+    prepared_at: preparedAt,
+    account_checks: [
+      { provider: "RUNWAY", status: "INSUFFICIENT", checked_at: "2026-08-09T10:00:00.000Z", manual_balance_confirmed: false },
+      { provider: "ELEVENLABS", status: "SUFFICIENT", checked_at: preparedAt, manual_balance_confirmed: false },
+      { provider: "SYNC", status: "UNVERIFIED", checked_at: preparedAt, manual_balance_confirmed: false },
+    ],
+  }), /RUNWAY_ACCOUNT_NOT_SUFFICIENT|SYNC_ACCOUNT_NOT_CONFIRMED|RUNWAY_ACCOUNT_CHECK_STALE/);
 });
 
 test("mở yêu cầu kịch bản AI khi dự toán và kinh phí đã duyệt", () => {
