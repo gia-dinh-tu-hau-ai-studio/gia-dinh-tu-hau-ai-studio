@@ -175,7 +175,7 @@ const intakeFrames = [
   { number: 3, title: "Video tham khảo", help: "Thêm link có quyền sử dụng hoặc bỏ qua." },
   { number: 4, title: "Kinh phí & tài khoản", help: "Duyệt hạn mức và kiểm tra tài khoản; chưa phát sinh chi phí." },
   { number: 5, title: "Nội dung & kịch bản", help: "Hoàn thiện nội dung rồi bấm duyệt bằng nút trực tiếp." },
-  { number: 6, title: "Nhân vật & tạo dự án", help: "Chọn nhân vật, kiểm tra dữ liệu và xác nhận tạo dự án." },
+  { number: 6, title: "Kiểm tra & tạo dự án", help: "Xem lại dữ liệu đã nhập, kiểm tra và xác nhận tạo dự án." },
 ] as const;
 
 function FrameNavigator({ currentFrame, maxFrameReached, onSelect }: { currentFrame: number; maxFrameReached: number; onSelect: (frame: number) => void }) {
@@ -521,6 +521,26 @@ export function ProjectIntakeForm() {
     const form = document.querySelector<HTMLFormElement>("form[data-intake-form]");
     if (form) saveDraft(form);
   }, [projectStarted, referenceSources, shortFilmWorkflow, characters, providerBudget, durationTarget]);
+
+  useEffect(() => {
+    if (projectType !== "SHORT_FILM") return;
+    const syncedCharacters: CharacterSelection[] = shortFilmWorkflow.film_characters.map((character) => ({
+      character_id: character.source_actor_id,
+      project_role: character.film_role === "PROTAGONIST"
+        ? "MAIN"
+        : character.film_role === "CAMEO"
+          ? "CAMEO"
+          : character.film_role === "EXTRA"
+            ? "BACKGROUND"
+            : "SUPPORTING",
+      performance_role: character.film_role === "EXTRA" ? "EXTRA" : "ACTOR",
+      voice_required: false,
+      lip_sync_required: false,
+      identity_mode: "LIBRARY_MASTER",
+      original_video_file_id: "",
+    }));
+    setCharacters((current) => JSON.stringify(current) === JSON.stringify(syncedCharacters) ? current : syncedCharacters);
+  }, [projectType, shortFilmWorkflow.film_characters]);
 
   useEffect(() => {
     try {
@@ -1235,18 +1255,19 @@ export function ProjectIntakeForm() {
 
       <section className={currentFrame === 6 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 6} id="intake-frame-6">
         <FrameGuide number={6} />
-        <div className="section-heading"><span>06</span><div><h2>Nhân vật &amp; vai trò</h2><p>Chọn người xuất hiện và vai trò trong dự án. Các thiết lập đã chốt được áp dụng tự động.</p></div></div>
+        <div className="section-heading"><span>06</span><div><h2>Kiểm tra &amp; tạo dự án</h2><p>Xem lại dữ liệu đã nhập. Nếu cần sửa, quay về đúng khung trước; không phải chọn lại nhân vật.</p></div></div>
         <div className="next-step-guide" aria-live="polite">
           <strong>Bước tiếp theo cần làm</strong>
           <ol>
-            <li className={characters.length > 0 ? "done" : "current"}>Chọn một nhân vật rồi bấm <b>“Thêm nhân vật vào dự án”</b>.</li>
-            <li className={characters.length > 0 ? "current" : ""}>Kiểm tra vai trò của từng nhân vật đã thêm.</li>
+            <li className="current">Kiểm tra tóm tắt nhân vật và vai trò đã chọn ở phần trước.</li>
+            <li>Nếu có sai sót, bấm <b>“Quay lại chỉnh sửa nội dung”</b>.</li>
             <li>Bấm <b>“Kiểm tra dữ liệu”</b>. Khi dữ liệu đạt, nút <b>“Xác nhận tạo dự án”</b> sẽ xuất hiện.</li>
           </ol>
           <p>Thao tác tại khung này chưa gọi nhà cung cấp và chưa phát sinh chi phí.</p>
         </div>
-        <p className="library-status">{libraryMessage}</p>
-        <div className="character-picker">
+        {projectType !== "SHORT_FILM" && <>
+          <p className="library-status">{libraryMessage}</p>
+          <div className="character-picker">
           <label>
             <span>1. Chọn nhân vật</span>
             <select value={characterToAdd} onChange={(event) => setCharacterToAdd(event.target.value)}>
@@ -1258,9 +1279,20 @@ export function ProjectIntakeForm() {
             </select>
           </label>
           <button className="secondary-button" disabled={!characterToAdd} onClick={addCharacter} type="button">2. Thêm nhân vật vào dự án</button>
-        </div>
+          </div>
+        </>}
 
-        <div className="character-list">
+        {projectType === "SHORT_FILM" && <div className="selected-character-summary">
+          <strong>Nhân vật đã chọn ở phần trước</strong>
+          <span>{shortFilmWorkflow.film_characters.length} nhân vật sẽ được đưa vào hợp đồng.</span>
+          {shortFilmWorkflow.film_characters.map((character) => {
+            const actor = eligibleCharacters.find((item) => item.character_id === character.source_actor_id);
+            const roleLabel = ({ PROTAGONIST: "Nhân vật chính", ANTAGONIST: "Đối trọng", SUPPORTING: "Hỗ trợ", CAMEO: "Khách mời", EXTRA: "Quần chúng" } as const)[character.film_role];
+            return <article key={character.source_actor_id}><div><b>{character.film_character_name}</b><small>{actor?.character_name ?? character.source_actor_id}</small></div><span>{roleLabel}</span></article>;
+          })}
+        </div>}
+
+        {projectType !== "SHORT_FILM" && <div className="character-list">
           {characters.map((character, index) => {
             const libraryCharacter = eligibleCharacters.find(
               (item) => item.character_id === character.character_id,
@@ -1283,13 +1315,13 @@ export function ProjectIntakeForm() {
               </article>
             );
           })}
-        </div>
+        </div>}
         <div className="final-action-panel">
-          <strong>{characters.length === 0 ? "Chưa có nhân vật trong dự án" : `Đã thêm ${characters.length} nhân vật`}</strong>
-          <span>{characters.length === 0 ? "Hãy hoàn tất bước 1 và 2 ở trên." : "Kiểm tra vai trò, sau đó tiếp tục kiểm tra toàn bộ dữ liệu."}</span>
-          <button className="final-check-button" disabled={submitting || characters.length === 0 || !providerRunReady} type="submit">{submitting ? "Đang kiểm tra…" : characters.length === 0 ? "3. Kiểm tra dữ liệu — cần thêm nhân vật" : !budgetApproved ? "Quay lại duyệt kinh phí" : !accountExecutionReady ? "Quay lại kiểm tra tài khoản" : "3. Kiểm tra dữ liệu và tiếp tục"}</button>
+          <strong>{characters.length === 0 ? "Chưa có nhân vật trong dự án" : `Sẵn sàng kiểm tra ${characters.length} nhân vật`}</strong>
+          <span>{characters.length === 0 ? "Quay lại phần nội dung để chọn nhân vật." : "Nhân vật đã được đồng bộ tự động; không cần chọn lại."}</span>
+          <button className="final-check-button" disabled={submitting || characters.length === 0 || !providerRunReady} type="submit">{submitting ? "Đang kiểm tra…" : characters.length === 0 ? "Kiểm tra dữ liệu — chưa có nhân vật" : !budgetApproved ? "Quay lại duyệt kinh phí" : !accountExecutionReady ? "Quay lại kiểm tra tài khoản" : "Kiểm tra dữ liệu và tiếp tục"}</button>
         </div>
-        <div className="frame-actions"><button className="secondary-button" onClick={() => moveToFrame(5)} type="button">← Khung trước</button><span>Chọn ít nhất một nhân vật rồi bấm “Kiểm tra dữ liệu”.</span></div>
+        <div className="frame-actions"><button className="secondary-button" onClick={() => moveToFrame(5)} type="button">← Quay lại chỉnh sửa nội dung</button><span>Sau khi kiểm tra đạt, hệ thống mới cho phép xác nhận tạo dự án.</span></div>
       </section>
       </>}
       {result && <ResultDetails value={result} />}
