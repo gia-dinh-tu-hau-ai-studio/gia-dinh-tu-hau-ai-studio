@@ -43,6 +43,14 @@ type ValidatedSubmission = {
   payload: Record<string, unknown>;
 };
 
+type ReferenceSource = {
+  platform: "YOUTUBE" | "TIKTOK" | "FACEBOOK";
+  url: string;
+  usage_mode: "INSPIRATION_ONLY" | "STRUCTURE_REFERENCE" | "AUTHORIZED_ADAPTATION";
+  rights_confirmed: boolean;
+  notes: string;
+};
+
 type CreatedProject = {
   project_id: string;
   current_stage: "CONTRACT" | "PRE_PRODUCTION";
@@ -65,10 +73,10 @@ type CreatedProject = {
     | "SCRIPT_REJECTED";
 };
 
-const projectTypes: Array<{ value: FormProjectType; label: string; description: string; disabled?: boolean }> = [
-  { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Hướng sản xuất hiện tại: phim ngắn có thoại." },
-  { value: "MUSIC_VIDEO", label: "MV ca nhạc", description: "Tạm khóa trong giai đoạn chuyển sang phim ngắn.", disabled: true },
-  { value: "SHORT_MUSIC_CLIP", label: "Clip ca nhạc ngắn", description: "Tạm khóa cùng pipeline MV ca nhạc.", disabled: true },
+const projectTypes: Array<{ value: FormProjectType; label: string; description: string }> = [
+  { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Kịch bản, nhân vật, thoại, pilot và phim hoàn chỉnh." },
+  { value: "MUSIC_VIDEO", label: "MV âm nhạc", description: "Bài hát, giọng hát, hình ảnh và kế hoạch sản xuất MV." },
+  { value: "SHORT_MUSIC_CLIP", label: "Clip âm nhạc ngắn", description: "Video dọc ngắn cho TikTok, Reels hoặc Shorts." },
 ];
 
 const projectRoles = ["MAIN", "SUPPORTING", "GUEST", "CAMEO", "BACKGROUND"];
@@ -84,17 +92,28 @@ const performanceRoles = [
 ];
 const platformOptions = ["YOUTUBE", "TIKTOK", "FACEBOOK"];
 
-function TextField({ name, label, required = true, type = "text" }: { name: string; label: string; required?: boolean; type?: string }) {
+function TextField({ name, label, required = true, type = "text", placeholder, help }: { name: string; label: string; required?: boolean; type?: string; placeholder?: string; help?: string }) {
   return (
     <label>
       <span>{label}{required ? " *" : ""}</span>
-      <input name={name} type={type} required={required} />
+      <input name={name} type={type} required={required} placeholder={placeholder} />
+      {help && <small className="field-help">Ví dụ: {help}</small>}
     </label>
   );
 }
 
+function SelectField({ name, label, options }: { name: string; label: string; options: Array<[string, string]> }) {
+  return <label><span>{label} *</span><select name={name} required defaultValue=""><option value="" disabled>Chọn một phương án</option>{options.map(([value, text]) => <option value={value} key={value}>{text}</option>)}</select></label>;
+}
+
+function ResultDetails({ value }: { value: string }) {
+  return <details className="result-details"><summary>Xem chi tiết kỹ thuật</summary><pre>{value}</pre></details>;
+}
+
 export function ProjectIntakeForm() {
   const [projectType, setProjectType] = useState<FormProjectType>("SHORT_FILM");
+  const [projectStarted, setProjectStarted] = useState(false);
+  const [referenceSources, setReferenceSources] = useState<ReferenceSource[]>([]);
   const [shortFilmWorkflow, setShortFilmWorkflow] = useState<ShortFilmWorkflow>(createInitialShortFilmWorkflow);
   const [eligibleCharacters, setEligibleCharacters] = useState<EligibleCharacter[]>([]);
   const [characters, setCharacters] = useState<CharacterSelection[]>([]);
@@ -136,12 +155,15 @@ export function ProjectIntakeForm() {
         if (!response.ok) {
           throw new Error(body.message ?? body.code ?? "Không đọc được thư viện nhân vật");
         }
-        setEligibleCharacters(body as EligibleCharacter[]);
-        setCharacterToAdd(body[0]?.character_id ?? "");
+        const approvedCharacters = (body as EligibleCharacter[]).filter(
+          (character) => character.readiness.master_identity === "APPROVED_LOCKED",
+        );
+        setEligibleCharacters(approvedCharacters);
+        setCharacterToAdd(approvedCharacters[0]?.character_id ?? "");
         setLibraryMessage(
-          body.length > 0
-            ? `${body.length} nhân vật đạt ACTIVE + IMAGE_READY + LEGAL_CLEARED.`
-            : "Chưa có nhân vật đủ điều kiện.",
+          approvedCharacters.length > 0
+            ? `${approvedCharacters.length} nhân vật có Character Master APPROVED + LOCKED.`
+            : "Chưa có Character Master APPROVED + LOCKED.",
         );
       })
       .catch((error: unknown) => {
@@ -171,7 +193,7 @@ export function ProjectIntakeForm() {
         performance_role: "ACTOR",
         voice_required: false,
         lip_sync_required: false,
-        identity_mode: "ORIGINAL_FACE_COMPOSITE",
+        identity_mode: "LIBRARY_MASTER",
         original_video_file_id: "",
       },
     ]);
@@ -193,12 +215,22 @@ export function ProjectIntakeForm() {
     setValidatedSubmission(null);
     setCreationResult("");
 
+    const incompleteReference = referenceSources.find(
+      (source) => !source.url.trim() || !source.rights_confirmed,
+    );
+    if (incompleteReference) {
+      setResult("Vui lòng nhập URL và xác nhận quyền sử dụng cho từng link tham khảo.");
+      setSubmitting(false);
+      return;
+    }
+
     const form = new FormData(event.currentTarget);
     const payload = {
       ...Object.fromEntries(
         [...form.entries()].filter(([, value]) => String(value).trim() !== ""),
       ),
       platforms: form.getAll("platforms").map(String),
+      reference_sources: referenceSources.filter((source) => source.url.trim()),
       short_film_workflow: projectType === "SHORT_FILM" ? shortFilmWorkflow : undefined,
       characters: characters.map((character) => {
         const libraryCharacter = eligibleCharacters.find(
@@ -273,7 +305,7 @@ export function ProjectIntakeForm() {
         setCreatedProject(body.project as CreatedProject);
       }
     } catch {
-      setCreationResult("Không kết nối được kho dự án Gia Đình Tư Hậu. Không tự động gửi lại để tránh tạo trùng dự án.");
+      setCreationResult("Không kết nối được kho dự án TuhauAI. Không tự động gửi lại để tránh tạo trùng dự án.");
     } finally {
       setCreating(false);
     }
@@ -332,6 +364,13 @@ export function ProjectIntakeForm() {
   }
 
   async function generateShortFilmScript() {
+    const incompleteReference = referenceSources.find(
+      (source) => !source.url.trim() || !source.rights_confirmed,
+    );
+    if (incompleteReference) {
+      setShortFilmSaveResult("Vui lòng nhập URL và xác nhận quyền sử dụng cho từng link trước khi gọi AI tạo kịch bản.");
+      return;
+    }
     setGeneratingScript(true);
     setShortFilmSaveResult("");
     try {
@@ -343,6 +382,7 @@ export function ProjectIntakeForm() {
           target_duration_minutes: shortFilmWorkflow.target_duration_minutes,
           language: shortFilmWorkflow.dialogue.language,
           characters: shortFilmWorkflow.film_characters,
+          reference_sources: referenceSources,
         }),
       });
       const body = await response.json();
@@ -526,41 +566,38 @@ export function ProjectIntakeForm() {
 
   return (
     <form onChange={invalidateConfirmation} onSubmit={handleSubmit}>
-      <section>
+      {!projectStarted && <section className="project-gateway">
         <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chỉ chọn một loại. Dữ liệu nhánh ẩn không đi vào payload.</p></div></div>
         <div className="project-grid">
           {projectTypes.map((item) => (
-            <label className={`project-card ${projectType === item.value ? "selected" : ""} ${item.disabled ? "locked" : ""}`} key={item.value}>
-              <input
-                checked={projectType === item.value}
-                disabled={item.disabled}
-                name="project_type"
-                onChange={() => setProjectType(item.value)}
-                type="radio"
-                value={item.value}
-              />
+            <button className={`project-card ${projectType === item.value ? "selected" : ""}`} key={item.value} onClick={() => { setProjectType(item.value); setProjectStarted(true); }} type="button">
               <strong>{item.label}</strong>
               <small>{item.description}</small>
-            </label>
+              <span>Bắt đầu →</span>
+            </button>
           ))}
         </div>
-      </section>
+      </section>}
+
+      {projectStarted && <>
+      <input name="project_type" type="hidden" value={projectType} />
+      <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => setProjectStarted(false)}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong></div>
 
       <section>
-        <div className="section-heading"><span>02</span><div><h2>Thông tin chung</h2><p>Ba trường hợp đồng bắt buộc: tên dự án, loại dự án và khách hàng.</p></div></div>
+        <div className="section-heading"><span>02</span><div><h2>Thông tin cơ bản</h2><p>Chọn nhanh theo gợi ý; các trường kỹ thuật đã được ẩn.</p></div></div>
         <div className="field-grid">
-          <TextField name="project_name" label="Tên dự án" />
-          <TextField name="client_name" label="Khách hàng / đơn vị" />
-          <TextField name="phone" label="Số điện thoại" />
-          <TextField name="email" label="Email" type="email" />
-          <TextField name="project_subtype" label="Phân loại phụ" required={false} />
-          <TextField name="priority" label="Mức ưu tiên" required={false} />
-          <TextField name="execution_mode" label="Chế độ thực thi" required={false} />
-          <TextField name="language" label="Ngôn ngữ" />
-          <TextField name="content_rating" label="Độ tuổi nội dung" />
-          <TextField name="target_audience" label="Khán giả mục tiêu" />
-          <TextField name="duration_target" label="Thời lượng mục tiêu" />
-          <TextField name="aspect_ratio" label="Tỷ lệ khung hình" />
+          <TextField name="project_name" label="Tên dự án" placeholder="Tập 01 – Bữa cơm gia đình" help="Tập 01 – Bữa cơm gia đình" />
+          <TextField name="client_name" label="Người phụ trách" placeholder="Nguyễn Văn A" help="Tên người tạo dự án" />
+          <TextField name="phone" label="Số điện thoại" type="tel" placeholder="0901 234 567" />
+          <TextField name="email" label="Email" type="email" placeholder="tuhau@example.com" />
+          <input name="project_subtype" type="hidden" value={projectType} />
+          <input name="priority" type="hidden" value="NORMAL" />
+          <input name="execution_mode" type="hidden" value="APPROVAL_GATED" />
+          <SelectField name="language" label="Ngôn ngữ" options={[["vi-VN", "Tiếng Việt"], ["vi-VN-southwest", "Tiếng Việt – giọng miền Tây"], ["en", "Tiếng Anh"]]} />
+          <SelectField name="content_rating" label="Độ tuổi phù hợp" options={[["ALL", "Mọi độ tuổi"], ["13+", "Từ 13 tuổi"], ["16+", "Từ 16 tuổi"], ["18+", "Từ 18 tuổi"]]} />
+          <SelectField name="target_audience" label="Khán giả chính" options={[["FAMILY", "Gia đình"], ["YOUTH", "Người trẻ"], ["GENERAL", "Đại chúng"], ["SOUTHWEST_VIETNAM", "Khán giả miền Tây"]]} />
+          <SelectField name="duration_target" label="Thời lượng" options={projectType === "SHORT_MUSIC_CLIP" ? [["15_SECONDS", "15 giây"], ["30_SECONDS", "30 giây"], ["60_SECONDS", "60 giây"]] : [["3_MINUTES", "Khoảng 3 phút"], ["5_MINUTES", "Khoảng 5 phút"], ["10_MINUTES", "Khoảng 10 phút"], ["15_MINUTES", "Khoảng 15 phút"]]} />
+          <SelectField name="aspect_ratio" label="Khung hình" options={[["9:16", "Dọc 9:16 – TikTok/Reels/Shorts"], ["16:9", "Ngang 16:9 – YouTube/Facebook"], ["1:1", "Vuông 1:1"]]} />
         </div>
         <fieldset className="platform-field">
           <legend>Nền tảng xuất bản *</legend>
@@ -575,15 +612,28 @@ export function ProjectIntakeForm() {
       </section>
 
       <section>
-        <div className="section-heading"><span>03</span><div><h2>Nội dung theo loại</h2><p>Khối này thay đổi theo project_type đã chọn.</p></div></div>
+        <div className="section-heading"><span>03</span><div><h2>Video tham khảo</h2><p>Dán tối đa 5 link công khai. Hệ thống chỉ học cấu trúc/phong cách, không sao chép nguyên bản nếu chưa có quyền.</p></div></div>
+        {referenceSources.map((source, index) => <article className="reference-row" key={index}>
+          <label><span>Nền tảng *</span><select value={source.platform} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, platform: event.target.value as ReferenceSource["platform"]} : item))}><option value="YOUTUBE">YouTube</option><option value="TIKTOK">TikTok</option><option value="FACEBOOK">Facebook</option></select></label>
+          <label><span>Link video *</span><input type="url" placeholder="https://..." value={source.url} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, url: event.target.value} : item))} /></label>
+          <label><span>Cách sử dụng *</span><select value={source.usage_mode} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, usage_mode: event.target.value as ReferenceSource["usage_mode"]} : item))}><option value="INSPIRATION_ONLY">Chỉ lấy cảm hứng</option><option value="STRUCTURE_REFERENCE">Tham khảo cấu trúc</option><option value="AUTHORIZED_ADAPTATION">Chuyển thể – đã có quyền</option></select></label>
+          <label className="wide-field"><span>Điểm muốn học theo</span><input placeholder="Ví dụ: nhịp dựng nhanh, mở đầu gây tò mò, tông hài gia đình" value={source.notes} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, notes: event.target.value} : item))} /></label>
+          <label className="consent"><input required type="checkbox" checked={source.rights_confirmed} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, rights_confirmed: event.target.checked} : item))} /> Tôi xác nhận link công khai và có quyền sử dụng theo lựa chọn trên.</label>
+          <button type="button" className="remove-button" onClick={() => setReferenceSources((items) => items.filter((_, i) => i !== index))}>Xóa link</button>
+        </article>)}
+        <button type="button" className="secondary-button" disabled={referenceSources.length >= 5} onClick={() => setReferenceSources((items) => [...items, {platform: "YOUTUBE", url: "", usage_mode: "INSPIRATION_ONLY", rights_confirmed: false, notes: ""}])}>+ Thêm link tham khảo</button>
+      </section>
+
+      <section>
+        <div className="section-heading"><span>04</span><div><h2>Nội dung dự án</h2><p>Chỉ hiển thị thông tin cần cho loại dự án đã chọn.</p></div></div>
         <div className="field-grid">
           {projectType === "SHORT_FILM" && <>
-            <TextField name="story_idea" label="Ý tưởng tập / phim" />
-            <TextField name="social_theme" label="Chủ đề xã hội" />
-            <TextField name="story_genre" label="Thể loại / tông" />
-            <TextField name="primary_setting" label="Bối cảnh chính" />
-            <TextField name="ending_direction" label="Hướng kết thúc" />
-            <TextField name="dialogue_source" label="Nguồn hội thoại" />
+            <TextField name="story_idea" label="Ý tưởng tập / phim" placeholder="Hai chị em hiểu lầm nhau vì chuyện chăm sóc mẹ" help="Một câu kể chuyện chính" />
+            <SelectField name="social_theme" label="Chủ đề" options={[["FAMILY", "Gia đình"], ["LOVE", "Tình cảm"], ["FRIENDSHIP", "Bạn bè"], ["COMMUNITY", "Đời sống xã hội"], ["EDUCATION", "Giáo dục"]]} />
+            <SelectField name="story_genre" label="Thể loại" options={[["FAMILY_DRAMA", "Tâm lý gia đình"], ["COMEDY", "Hài"], ["ROMANCE", "Tình cảm"], ["INSPIRATIONAL", "Truyền cảm hứng"], ["MYSTERY", "Bí ẩn"]]} />
+            <SelectField name="primary_setting" label="Bối cảnh chính" options={[["HOME", "Trong nhà"], ["RURAL", "Miền quê"], ["CITY", "Thành phố"], ["MARKET", "Chợ/quán ăn"], ["SCHOOL", "Trường học"]]} />
+            <SelectField name="ending_direction" label="Kiểu kết thúc" options={[["HAPPY", "Có hậu"], ["EMOTIONAL", "Cảm động"], ["OPEN", "Kết thúc mở"], ["TWIST", "Bất ngờ"], ["LESSON", "Có bài học"]]} />
+            <SelectField name="dialogue_source" label="Nguồn lời thoại" options={[["AI_DRAFT_OWNER_APPROVES", "AI soạn, chủ dự án duyệt"], ["OWNER_PROVIDED", "Chủ dự án cung cấp"], ["MIXED", "Kết hợp cả hai"]]} />
             <ShortFilmWorkflowForm
               eligibleCharacters={eligibleCharacters}
               value={shortFilmWorkflow}
@@ -598,28 +648,28 @@ export function ProjectIntakeForm() {
           </>}
 
           {projectType === "MUSIC_VIDEO" && <>
-            <TextField name="song_title" label="Tên bài hát" />
-            <TextField name="song_topic" label="Chủ đề bài hát" />
-            <TextField name="music_genre" label="Thể loại nhạc" />
-            <TextField name="lyrics_source_mode" label="Nguồn lời" />
-            <TextField name="lyrics" label="Lời / nguồn file lời" required={false} />
-            <TextField name="music_source_mode" label="Nguồn nhạc" />
-            <TextField name="vocal_source_mode" label="Nguồn giọng hát" />
-            <TextField name="visual_direction" label="Định hướng hình ảnh" />
+            <TextField name="song_title" label="Tên bài hát" placeholder="Nhà là nơi để về" />
+            <SelectField name="song_topic" label="Chủ đề bài hát" options={[["FAMILY", "Gia đình"], ["LOVE", "Tình yêu"], ["HOMELAND", "Quê hương"], ["LIFE", "Cuộc sống"], ["CELEBRATION", "Lễ hội/sự kiện"]]} />
+            <SelectField name="music_genre" label="Thể loại nhạc" options={[["BOLERO", "Bolero"], ["POP", "Pop"], ["BALLAD", "Ballad"], ["FOLK", "Dân ca"], ["DANCE", "Dance"]]} />
+            <SelectField name="lyrics_source_mode" label="Nguồn lời" options={[["AI_GENERATED", "AI hỗ trợ sáng tác"], ["USER_PROVIDED_LOCKED", "Lời có sẵn và đã chốt"]]} />
+            <TextField name="lyrics" label="Lời bài hát hoặc link file lời" required={false} placeholder="Dán lời đã có quyền hoặc link Google Drive" />
+            <SelectField name="music_source_mode" label="Nguồn nhạc" options={[["AI_COMPOSITION", "AI hỗ trợ sáng tác"], ["EXISTING_INSTRUMENTAL", "Beat/instrumental có sẵn"], ["EXISTING_SONG", "Bài hát có sẵn"], ["NEW_STUDIO_PRODUCTION", "Thu mới tại studio"]]} />
+            <SelectField name="vocal_source_mode" label="Nguồn giọng hát" options={[["REAL_RECORDED_VOCAL", "Giọng thu thật"], ["AUTHORIZED_VOICE_MODEL", "Voice model đã được cấp quyền"], ["EXISTING_MASTER_AUDIO", "Bản vocal master có sẵn"]]} />
+            <TextField name="visual_direction" label="Định hướng hình ảnh" placeholder="Ví dụ: điện ảnh miền Tây, ấm áp, nhiều cảnh đời thường" />
           </>}
 
           {projectType === "SHORT_MUSIC_CLIP" && <>
-            <TextField name="music_source_mode" label="Nguồn bài / nhạc" />
-            <TextField name="clip_start_time" label="Thời điểm bắt đầu" />
-            <TextField name="clip_end_time" label="Thời điểm kết thúc" />
-            <TextField name="vocal_source_mode" label="Nguồn giọng" required={false} />
-            <TextField name="visual_direction" label="Phong cách biểu diễn" />
+            <SelectField name="music_source_mode" label="Nguồn bài / nhạc" options={[["AI_COMPOSITION", "AI hỗ trợ sáng tác"], ["EXISTING_INSTRUMENTAL", "Beat có sẵn"], ["EXISTING_SONG", "Bài hát có sẵn"], ["NEW_STUDIO_PRODUCTION", "Thu mới"]]} />
+            <TextField name="clip_start_time" label="Thời điểm bắt đầu" placeholder="Ví dụ: 00:45" />
+            <TextField name="clip_end_time" label="Thời điểm kết thúc" placeholder="Ví dụ: 01:15" />
+            <SelectField name="vocal_source_mode" label="Nguồn giọng" options={[["REAL_RECORDED_VOCAL", "Giọng thu thật"], ["AUTHORIZED_VOICE_MODEL", "Voice model đã cấp quyền"], ["EXISTING_MASTER_AUDIO", "Vocal master có sẵn"]]} />
+            <TextField name="visual_direction" label="Phong cách biểu diễn" placeholder="Ví dụ: năng động, cận mặt, chuyển động máy mượt" />
           </>}
         </div>
       </section>
 
       <section>
-        <div className="section-heading"><span>04</span><div><h2>Nhân vật & vai trò</h2><p>Chỉ chọn người thật đã duyệt từ CHARACTER_LIBRARY; dùng ORIGINAL_FACE_COMPOSITE khi cần giữ gương mặt.</p></div></div>
+        <div className="section-heading"><span>05</span><div><h2>Nhân vật & vai trò</h2><p>Chỉ chọn nhân vật đã duyệt; hệ thống khóa đúng gương mặt, giọng và người nói.</p></div></div>
         <p className="library-status">{libraryMessage}</p>
         <div className="character-picker">
           <label>
@@ -656,12 +706,11 @@ export function ProjectIntakeForm() {
                   <label><span>Vai trò dự án *</span><select value={character.project_role} onChange={(event) => updateCharacter(index, { project_role: event.target.value })}>{projectRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
                   <label><span>Vai trò biểu diễn *</span><select value={character.performance_role} onChange={(event) => updateCharacter(index, { performance_role: event.target.value })}>{performanceRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
                   <label><span>Trang phục APPROVED</span><input disabled value={libraryCharacter?.default_costume_id || "Chưa chọn costume"} /></label>
-                  <label><span>Chế độ danh tính *</span><select value={character.identity_mode} onChange={(event) => updateCharacter(index, { identity_mode: event.target.value as IdentityMode })}><option value="LIBRARY_MASTER">LIBRARY_MASTER</option><option value="ORIGINAL_FACE_COMPOSITE">ORIGINAL_FACE_COMPOSITE</option></select></label>
-                  {character.identity_mode === "ORIGINAL_FACE_COMPOSITE" && <label><span>file_id video gốc *</span><input required value={character.original_video_file_id} onChange={(event) => updateCharacter(index, { original_video_file_id: event.target.value })} /></label>}
+                  <label><span>Danh tính nhân vật</span><input disabled value="Character Master đã duyệt và khóa" /></label>
                 </div>
                 <div className="check-row">
-                  <label><input checked={character.voice_required} disabled={!libraryCharacter?.voice_available} onChange={(event) => updateCharacter(index, { voice_required: event.target.checked })} type="checkbox" /> Dùng voice APPROVED</label>
-                  <label><input checked={character.lip_sync_required} onChange={(event) => updateCharacter(index, { lip_sync_required: event.target.checked })} type="checkbox" /> Cần lip-sync</label>
+                  <label><input checked={character.voice_required} disabled={!libraryCharacter?.voice_available} onChange={(event) => updateCharacter(index, { voice_required: event.target.checked, ...(!event.target.checked ? { lip_sync_required: false } : {}) })} type="checkbox" /> Dùng voice APPROVED</label>
+                  <label><input checked={character.lip_sync_required} disabled={!character.voice_required || !libraryCharacter?.voice_available} onChange={(event) => updateCharacter(index, { lip_sync_required: event.target.checked })} type="checkbox" /> Khớp khẩu hình với thoại</label>
                 </div>
               </article>
             );
@@ -670,22 +719,23 @@ export function ProjectIntakeForm() {
       </section>
 
       <button disabled={submitting || characters.length === 0} type="submit">{submitting ? "Đang kiểm tra…" : "Kiểm tra dữ liệu"}</button>
-      {result && <pre>{result}</pre>}
+      </>}
+      {result && <ResultDetails value={result} />}
       {validatedSubmission && (
         <section className="confirmation-panel">
           <div>
             <h2>Xác nhận tạo dự án chính thức</h2>
             <p>
-              Hệ thống Gia Đình Tư Hậu sẽ tạo một project_id, cấu trúc Drive và
+              Hệ thống TuhauAI sẽ tạo mã dự án, cấu trúc Drive và
               hợp đồng đầu vào trong bảng PROJECTS. Không đóng trang trong lúc xử lý.
             </p>
           </div>
           <button disabled={creating} onClick={confirmCreation} type="button">
-            {creating ? "Đang tạo dự án…" : "Xác nhận tạo dự án Gia Đình Tư Hậu"}
+            {creating ? "Đang tạo dự án…" : "Xác nhận tạo dự án TuhauAI"}
           </button>
         </section>
       )}
-      {creationResult && <pre className="creation-result">{creationResult}</pre>}
+      {creationResult && <ResultDetails value={creationResult} />}
       {createdProject?.next_action === "APPROVE_CONTRACT" && (
         <section className="confirmation-panel">
           <div>
@@ -705,7 +755,7 @@ export function ProjectIntakeForm() {
           </button>
         </section>
       )}
-      {approvalResult && <pre className="creation-result">{approvalResult}</pre>}
+      {approvalResult && <ResultDetails value={approvalResult} />}
       {createdProject && projectType === "SHORT_FILM" && createdProject.next_action !== "APPROVE_CONTRACT" && (
         <section className="operations-panel">
           <div>
@@ -718,7 +768,7 @@ export function ProjectIntakeForm() {
           <button disabled={savingShortFilm} onClick={saveShortFilmWorkflow} type="button">
             {savingShortFilm ? "Đang lưu workflow…" : "Lưu SHORT_FILM workflow và approval gates"}
           </button>
-          {shortFilmSaveResult && <pre className="creation-result">{shortFilmSaveResult}</pre>}
+          {shortFilmSaveResult && <ResultDetails value={shortFilmSaveResult} />}
         </section>
       )}
       {createdProject?.next_action === "PREPARE_MV_PRODUCTION" && (
@@ -736,7 +786,7 @@ export function ProjectIntakeForm() {
           </button>
         </section>
       )}
-      {preparationResult && <pre className="creation-result">{preparationResult}</pre>}
+      {preparationResult && <ResultDetails value={preparationResult} />}
       {createdProject?.next_action === "APPROVE_MV_PRODUCTION_PLAN" && (
         <section className="confirmation-panel">
           <div>
@@ -751,7 +801,7 @@ export function ProjectIntakeForm() {
           </button>
         </section>
       )}
-      {planApprovalResult && <pre className="creation-result">{planApprovalResult}</pre>}
+      {planApprovalResult && <ResultDetails value={planApprovalResult} />}
       {createdProject?.next_action === "PREPARE_MV_ASSETS" && (
         <section className="confirmation-panel">
           <div>
@@ -780,7 +830,7 @@ export function ProjectIntakeForm() {
           </button>
         </section>
       )}
-      {assetPreparationResult && <pre className="creation-result">{assetPreparationResult}</pre>}
+      {assetPreparationResult && <ResultDetails value={assetPreparationResult} />}
       {createdProject?.next_action === "APPROVE_MV_ASSETS" && (
         <section className="confirmation-panel">
           <div>
@@ -797,7 +847,7 @@ export function ProjectIntakeForm() {
           </button>
         </section>
       )}
-      {assetApprovalResult && <pre className="creation-result">{assetApprovalResult}</pre>}
+      {assetApprovalResult && <ResultDetails value={assetApprovalResult} />}
       {createdProject?.next_action === "PREPARE_MV_SHOT_PLAN" && (
         <section className="confirmation-panel">
           <div>
@@ -812,9 +862,7 @@ export function ProjectIntakeForm() {
           </button>
         </section>
       )}
-      {shotPlanPreparationResult && (
-        <pre className="creation-result">{shotPlanPreparationResult}</pre>
-      )}
+      {shotPlanPreparationResult && <ResultDetails value={shotPlanPreparationResult} />}
       {createdProject?.next_action === "APPROVE_MV_SHOT_PLAN" && (
         <section className="confirmation-panel">
           <div>

@@ -19,6 +19,13 @@ const request = {
     personality: "điềm tĩnh",
     appearance: "theo Character Master",
   }],
+  reference_sources: [{
+    platform: "YOUTUBE" as const,
+    url: "https://www.youtube.com/watch?v=public-reference",
+    usage_mode: "INSPIRATION_ONLY" as const,
+    rights_confirmed: true as const,
+    notes: "Học nhịp kể, không sao chép",
+  }],
 };
 
 test("prompt kịch bản giữ nhân vật và loại microphone/background khỏi identity", () => {
@@ -27,6 +34,8 @@ test("prompt kịch bản giữ nhân vật và loại microphone/background kh�
   assert.match(prompt, /8 phút/);
   assert.match(prompt, /microphone/);
   assert.match(prompt, /không.*thuộc tính cố định/i);
+  assert.match(prompt, /youtube\.com\/watch/);
+  assert.match(prompt, /Nguồn tham khảo đã xác nhận quyền/);
 });
 
 test("đọc structured output kịch bản đúng schema", () => {
@@ -71,6 +80,7 @@ test("gọi đúng OpenAI Responses contract nhưng không đưa secret vào k�
     assert.equal(capturedAuthorization, "Bearer test-only-openai-secret");
     assert.equal(capturedBody.model, "test-model");
     assert.equal(capturedBody.store, false);
+    assert.deepEqual(capturedBody.tools, [{ type: "web_search" }]);
     assert.equal((capturedBody.text as { format: { type: string } }).format.type, "json_schema");
     assert.equal(result.provider_request_id, "resp_mock");
     assert.doesNotMatch(JSON.stringify(result), /test-only-openai-secret/);

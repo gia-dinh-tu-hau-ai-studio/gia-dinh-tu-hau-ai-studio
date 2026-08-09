@@ -5,6 +5,7 @@ import {
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   shortFilmProductionReadinessBlockers,
+  ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowSchema,
 } from "./index";
 
@@ -192,6 +193,112 @@ test("chấp nhận nhân vật thư viện với costume và voice APPROVED", (
 
   assert.equal(result.characters[0]?.character_id, "CHAR_TUONG_VY");
   assert.equal(result.characters[0]?.voice_approval_status, "APPROVED");
+});
+
+test("từ chối lip-sync khi voice chưa được bật và duyệt", () => {
+  assert.throws(() => normalizeProjectIntake({
+    ...common,
+    characters: [{
+      ...common.characters[0],
+      voice_required: false,
+      voice_approval_status: undefined,
+      lip_sync_required: true,
+    }],
+    project_type: "SHORT_FILM",
+    story_idea: "Một câu chuyện hậu trường",
+    social_theme: "Tình thân",
+    story_genre: "Hài tình cảm",
+    primary_setting: "Đoàn Lô Tô",
+    ending_direction: "Kết thúc trọn vẹn",
+    dialogue_source: "AI_GENERATED",
+    short_film_workflow: shortFilmWorkflow,
+  }), /Khớp khẩu hình chỉ được bật/);
+});
+
+test("chấp nhận tối đa 5 link công khai khi từng link đã xác nhận quyền", () => {
+  const result = normalizeProjectIntake({
+    ...common,
+    reference_sources: Array.from({ length: 5 }, (_, index) => ({
+      platform: "YOUTUBE",
+      url: `https://www.youtube.com/watch?v=public-${index}`,
+      usage_mode: "INSPIRATION_ONLY",
+      rights_confirmed: true,
+      notes: "Chỉ học nhịp kể",
+    })),
+    project_type: "SHORT_FILM",
+    story_idea: "Một câu chuyện hậu trường",
+    social_theme: "Tình thân",
+    story_genre: "Hài tình cảm",
+    primary_setting: "Đoàn Lô Tô",
+    ending_direction: "Kết thúc trọn vẹn",
+    dialogue_source: "AI_GENERATED",
+    short_film_workflow: shortFilmWorkflow,
+  });
+
+  assert.equal(result.reference_sources.length, 5);
+});
+
+test("từ chối link tham khảo chưa xác nhận quyền hoặc vượt quá 5 link", () => {
+  const project = {
+    ...common,
+    project_type: "MUSIC_VIDEO",
+    song_title: "Lời Người Đi Trước",
+    song_topic: "Tình chị em",
+    music_genre: "Dân ca Nam Bộ",
+    lyrics_source_mode: "USER_PROVIDED_LOCKED",
+    lyrics: "Lời bài hát đã khóa",
+    music_source_mode: "EXISTING_INSTRUMENTAL",
+    vocal_source_mode: "REAL_RECORDED_VOCAL",
+    visual_direction: "Miền Tây cinematic",
+  };
+  const reference = {
+    platform: "FACEBOOK",
+    url: "https://www.facebook.com/watch/public",
+    usage_mode: "STRUCTURE_REFERENCE",
+    rights_confirmed: true,
+    notes: "Chỉ học cấu trúc",
+  };
+
+  assert.throws(() => normalizeProjectIntake({
+    ...project,
+    reference_sources: [{ ...reference, rights_confirmed: false }],
+  }), /Phải xác nhận quyền sử dụng/);
+  assert.throws(() => normalizeProjectIntake({
+    ...project,
+    reference_sources: Array.from({ length: 6 }, () => reference),
+  }), /tối đa 5 link/);
+});
+
+test("từ chối URL không khớp nền tảng tham khảo", () => {
+  assert.throws(() => ShortFilmScriptGenerationRequestSchema.parse({
+    idea: "Hai chị em cùng giải quyết một biến cố gia đình quan trọng.",
+    target_duration_minutes: 6,
+    language: "vi",
+    characters: shortFilmWorkflow.film_characters,
+    reference_sources: [{
+      platform: "YOUTUBE",
+      url: "https://example.com/not-youtube",
+      usage_mode: "INSPIRATION_ONLY",
+      rights_confirmed: true,
+      notes: "Học nhịp kể",
+    }],
+  }), /Tên miền URL không khớp/);
+});
+
+test("API tạo kịch bản từ chối nguồn chưa xác nhận quyền", () => {
+  assert.throws(() => ShortFilmScriptGenerationRequestSchema.parse({
+    idea: "Hai chị em cùng giải quyết một biến cố gia đình quan trọng.",
+    target_duration_minutes: 6,
+    language: "vi",
+    characters: shortFilmWorkflow.film_characters,
+    reference_sources: [{
+      platform: "TIKTOK",
+      url: "https://www.tiktok.com/@tuhau/video/123",
+      usage_mode: "STRUCTURE_REFERENCE",
+      rights_confirmed: false,
+      notes: "Học cấu trúc",
+    }],
+  }), /Phải xác nhận quyền sử dụng/);
 });
 
 test("từ chối ORIGINAL_FACE_COMPOSITE khi thiếu file_id video gốc", () => {

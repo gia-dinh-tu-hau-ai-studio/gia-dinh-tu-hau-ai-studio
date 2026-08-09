@@ -709,7 +709,7 @@ test("tạo mã dự án MV Gia Đình Tư Hậu", () => {
     target_audience: "Đại chúng", duration_target: "4 phút", aspect_ratio: "16:9",
     characters: [{
       character_id: "GDTH-CHAR-001", project_role: "MAIN", performance_role: "SINGER",
-      selected_costume_ids: [], voice_required: false, lip_sync_required: true,
+      selected_costume_ids: [], voice_required: false, lip_sync_required: false,
       identity_mode: "ORIGINAL_FACE_COMPOSITE", original_video_file_id: "drive-video-id",
     }],
     song_title: "Gia Đình Tư Hậu", song_topic: "Tình thân", music_genre: "Dân ca Nam Bộ",
