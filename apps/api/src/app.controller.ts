@@ -62,6 +62,11 @@ export class AppController {
     return this.intakeService.shortFilmProviderStatus();
   }
 
+  @Post("short-film/providers/account-check")
+  checkProviderAccounts(@Body() body: unknown) {
+    return this.intakeService.checkProviderAccounts(body);
+  }
+
   @Post("projects/:projectId/prepare-mv-production")
   prepareMvProduction(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvProduction(projectId);
