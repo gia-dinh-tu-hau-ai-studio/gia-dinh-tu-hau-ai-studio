@@ -67,6 +67,11 @@ export class AppController {
     return this.intakeService.checkProviderAccounts(body);
   }
 
+  @Post("projects/:projectId/short-film/pilot/prepare")
+  prepareShortFilmPilot(@Param("projectId") projectId: string, @Body() body: unknown) {
+    return this.intakeService.prepareShortFilmPilot(projectId, body);
+  }
+
   @Post("projects/:projectId/prepare-mv-production")
   prepareMvProduction(@Param("projectId") projectId: string) {
     return this.intakeService.prepareMvProduction(projectId);

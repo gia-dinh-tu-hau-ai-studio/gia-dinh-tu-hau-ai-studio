@@ -259,6 +259,9 @@ export function ProjectIntakeForm() {
   const [accountPreflight, setAccountPreflight] = useState<AccountPreflight | null>(null);
   const [checkingAccounts, setCheckingAccounts] = useState(false);
   const [manualBalanceConfirmed, setManualBalanceConfirmed] = useState(false);
+  const [preparingShortFilmPilot, setPreparingShortFilmPilot] = useState(false);
+  const [pilotSyncBalanceConfirmed, setPilotSyncBalanceConfirmed] = useState(false);
+  const [shortFilmPilotPlanResult, setShortFilmPilotPlanResult] = useState("");
 
   const budgetApproved = providerBudget.approval.decision === "APPROVE" &&
     Boolean(providerBudget.approval.reviewed_at) &&
@@ -675,6 +678,29 @@ export function ProjectIntakeForm() {
       setShortFilmSaveResult("Không lưu được SHORT_FILM workflow. Không tự gửi lại để tránh ghi lặp approval.");
     } finally {
       setSavingShortFilm(false);
+    }
+  }
+
+  async function prepareShortFilmPilot() {
+    if (!createdProject) return;
+    setPreparingShortFilmPilot(true);
+    setShortFilmPilotPlanResult("");
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/prepare`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider_budget: providerBudget,
+          pilot_duration_seconds: 15,
+          manual_sync_balance_confirmed: pilotSyncBalanceConfirmed,
+        }),
+      });
+      const body = await response.json();
+      setShortFilmPilotPlanResult(JSON.stringify(body, null, 2));
+    } catch {
+      setShortFilmPilotPlanResult("Không chuẩn bị được pilot plan. Chưa gọi provider và không tự gửi lại.");
+    } finally {
+      setPreparingShortFilmPilot(false);
     }
   }
 
@@ -1130,6 +1156,19 @@ export function ProjectIntakeForm() {
             {savingShortFilm ? "Đang lưu workflow…" : "Lưu SHORT_FILM workflow và approval gates"}
           </button>
           {shortFilmSaveResult && <ResultDetails value={shortFilmSaveResult} />}
+        </section>
+      )}
+      {createdProject?.next_action === "PREPARE_SHORT_FILM_PILOT" && (
+        <section className="confirmation-panel">
+          <div>
+            <h2>Chuẩn bị Pilot Execution Plan</h2>
+            <p>Kiểm tra lại tài khoản theo đúng pilot 15 giây, khóa Character/Voice Master, người nói, keyframe, retry, heartbeat và hạn mức. Bước này chỉ tạo kế hoạch chờ duyệt; chưa gọi Runway, ElevenLabs hoặc Sync.</p>
+            <label className="consent"><input checked={pilotSyncBalanceConfirmed} type="checkbox" onChange={(event) => setPilotSyncBalanceConfirmed(event.target.checked)} /> Tôi đã mở Sync Billing và xác nhận đủ hạn mức cho pilot 15 giây.</label>
+          </div>
+          <button disabled={!budgetApproved || !pilotSyncBalanceConfirmed || preparingShortFilmPilot} onClick={() => void prepareShortFilmPilot()} type="button">
+            {preparingShortFilmPilot ? "Đang chuẩn bị…" : "Chuẩn bị pilot plan — chưa gọi provider"}
+          </button>
+          {shortFilmPilotPlanResult && <ResultDetails value={shortFilmPilotPlanResult} />}
         </section>
       )}
       {createdProject?.next_action === "PREPARE_MV_PRODUCTION" && (
