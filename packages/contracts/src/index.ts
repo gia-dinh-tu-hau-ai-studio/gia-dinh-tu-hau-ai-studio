@@ -137,6 +137,44 @@ export const ShortFilmQcSchema = z.object({
   continuity: z.boolean(),
 });
 
+export const ShortFilmPilotPurposeSchema = z.enum([
+  "IDENTITY_DIALOGUE",
+  "MOTION_PERFORMANCE",
+  "MULTI_CHARACTER_CONTINUITY",
+  "LIGHTING_BACKGROUND",
+  "HIGH_RISK_SHOT",
+]);
+
+export const ShortFilmPilotSamplingSchema = z.object({
+  sample_count: z.number().int().min(2).max(5).default(3),
+  clip_duration_seconds: z.number().int().min(10).max(20).default(15),
+  selection_mode: z.literal("RISK_BASED_REPRESENTATIVE_SHOTS").default("RISK_BASED_REPRESENTATIVE_SHOTS"),
+  required_purposes: z.array(ShortFilmPilotPurposeSchema).min(2).max(5),
+});
+
+export const ShortFilmPilotSampleSchema = z.object({
+  sample_id: z.string().trim().min(1),
+  purpose: ShortFilmPilotPurposeSchema,
+  shot_ids: z.array(z.string().trim().min(1)).min(1),
+  duration_seconds: z.number().min(10).max(20),
+  video_url: z.url(),
+  qc: ShortFilmQcSchema,
+  review: ShortFilmReviewSchema,
+});
+
+export const ShortFilmPilotBatchSchema = z.object({
+  samples: z.array(ShortFilmPilotSampleSchema).min(2).max(5),
+  batch_review: ShortFilmReviewSchema,
+}).superRefine((batch, context) => {
+  if (batch.batch_review.decision === "APPROVE") {
+    batch.samples.forEach((sample, index) => {
+      if (sample.review.decision !== "APPROVE" || !shortFilmQcPassed(sample.qc)) {
+        context.addIssue({ code: "custom", message: `PILOT_SAMPLE_NOT_APPROVED:${sample.sample_id}`, path: ["samples", index] });
+      }
+    });
+  }
+});
+
 export const ShortFilmLockedIdentitySchema = z.object({
   source_actor_id: z.string().trim().min(1),
   master_identity_id: z.string().trim().min(1),
@@ -444,10 +482,23 @@ export const ShortFilmWorkflowSchema = z
       singing_scene: z.boolean(),
       singing_scene_notes: z.string().trim().default(""),
     }),
+    pilot_sampling: ShortFilmPilotSamplingSchema.default({
+      sample_count: 3,
+      clip_duration_seconds: 15,
+      selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
+      required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
+    }),
     shot_plan: z
       .object({
         summary: z.string().trim().min(1),
         shots: z.array(z.string().trim().min(1)).min(1),
+        execution_shots: z.array(z.object({
+          shot_id: z.string().trim().min(1),
+          summary: z.string().trim().min(1),
+          runway_prompt: z.string().trim().min(10).max(1_000),
+          duration_seconds: z.number().int().min(2).max(10),
+          risk_tags: z.array(ShortFilmPilotPurposeSchema).default([]),
+        })).default([]),
       })
       .optional(),
     production_readiness: ShortFilmProductionReadinessSchema.optional(),
@@ -459,6 +510,7 @@ export const ShortFilmWorkflowSchema = z
         review: ShortFilmReviewSchema,
       })
       .optional(),
+    pilot_batch: ShortFilmPilotBatchSchema.optional(),
     full_film: z
       .object({
         video_url: z.url(),
@@ -513,7 +565,12 @@ export const ShortFilmWorkflowSchema = z
         path: ["pilot", "review"],
       });
     }
-    if (workflow.full_film && workflow.pilot?.review.decision !== "APPROVE") {
+    if (workflow.pilot_batch && workflow.pilot_batch.samples.length !== workflow.pilot_sampling.sample_count) {
+      context.addIssue({ code: "custom", message: "Số clip pilot phải khớp cấu hình sampling", path: ["pilot_batch", "samples"] });
+    }
+    const legacyPilotApproved = workflow.pilot?.review.decision === "APPROVE" && shortFilmQcPassed(workflow.pilot.qc);
+    const batchPilotApproved = workflow.pilot_batch?.batch_review.decision === "APPROVE";
+    if (workflow.full_film && !legacyPilotApproved && !batchPilotApproved) {
       context.addIssue({
         code: "custom",
         message: "PILOT_APPROVED là bắt buộc trước sản xuất toàn phim",
@@ -531,6 +588,37 @@ export const ShortFilmWorkflowSchema = z
 
 export type ShortFilmWorkflow = z.infer<typeof ShortFilmWorkflowSchema>;
 
+export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
+  const workflow = ShortFilmWorkflowSchema.parse(workflowInput);
+  const shots = workflow.shot_plan?.execution_shots ?? [];
+  if (shots.length === 0) throw new Error("STRUCTURED_EXECUTION_SHOTS_REQUIRED");
+  const used = new Set<string>();
+  return Array.from({ length: workflow.pilot_sampling.sample_count }, (_, sampleIndex) => {
+    const purpose = workflow.pilot_sampling.required_purposes[sampleIndex] ?? "HIGH_RISK_SHOT";
+    const ordered = [...shots].sort((left, right) => {
+      const leftScore = left.risk_tags.includes(purpose) ? 1 : 0;
+      const rightScore = right.risk_tags.includes(purpose) ? 1 : 0;
+      return rightScore - leftScore;
+    });
+    const selected: typeof shots = [];
+    let duration = 0;
+    for (const shot of ordered) {
+      if (used.has(shot.shot_id) && shots.length >= workflow.pilot_sampling.sample_count) continue;
+      selected.push(shot);
+      used.add(shot.shot_id);
+      duration += shot.duration_seconds;
+      if (duration >= workflow.pilot_sampling.clip_duration_seconds) break;
+    }
+    if (duration < 10) throw new Error(`PILOT_SAMPLE_TOO_SHORT:${sampleIndex + 1}`);
+    return {
+      sample_id: `PILOT-SAMPLE-${String(sampleIndex + 1).padStart(2, "0")}`,
+      purpose,
+      shots: selected,
+      expected_duration_seconds: Math.min(duration, 20),
+    };
+  });
+}
+
 export const ShortFilmPilotAccountCheckSchema = z.object({
   provider: z.enum(["RUNWAY", "ELEVENLABS", "SYNC"]),
   status: z.enum(["SUFFICIENT", "INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED", "UNVERIFIED"]),
@@ -546,6 +634,9 @@ export const ShortFilmPilotPreparationRequestSchema = z.object({
   account_checks: z.array(ShortFilmPilotAccountCheckSchema),
   prepared_at: z.string().datetime(),
 }).superRefine((request, context) => {
+  if (request.pilot_duration_seconds !== request.workflow.pilot_sampling.clip_duration_seconds) {
+    context.addIssue({ code: "custom", message: "PILOT_DURATION_MUST_MATCH_APPROVED_SAMPLING", path: ["pilot_duration_seconds"] });
+  }
   if (!providerBudgetApproved(request.provider_budget)) {
     context.addIssue({ code: "custom", message: "BUDGET_APPROVED là bắt buộc trước khi chuẩn bị pilot", path: ["provider_budget", "approval"] });
   }
@@ -583,8 +674,18 @@ export function prepareShortFilmPilotPlan(input: ShortFilmPilotPreparationReques
   const request = ShortFilmPilotPreparationRequestSchema.parse(input);
   const readiness = request.workflow.production_readiness!;
   const pilotShotIds = request.workflow.shot_plan!.shots
-    .slice(0, Math.max(1, Math.min(request.workflow.shot_plan!.shots.length, 3)))
+    .slice(0, Math.max(1, Math.min(request.workflow.shot_plan!.shots.length, request.workflow.pilot_sampling.sample_count)))
     .map((_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`);
+  while (pilotShotIds.length < request.workflow.pilot_sampling.sample_count) {
+    pilotShotIds.push(pilotShotIds[pilotShotIds.length % Math.max(1, pilotShotIds.length)] ?? "SHOT-001");
+  }
+  const pilotSamples = Array.from({ length: request.workflow.pilot_sampling.sample_count }, (_, index) => ({
+    sample_id: `PILOT-SAMPLE-${String(index + 1).padStart(2, "0")}`,
+    purpose: request.workflow.pilot_sampling.required_purposes[index] ?? "HIGH_RISK_SHOT",
+    shot_id: pilotShotIds[index],
+    duration_seconds: request.workflow.pilot_sampling.clip_duration_seconds,
+    approval_status: "PENDING" as const,
+  }));
   const dialogueShots = new Set(readiness.speaker_locks.map((lock) => lock.shot_id));
   const stages = [
     { stage: "SYNTHESIZE_APPROVED_DIALOGUE", provider: "ELEVENLABS", required: pilotShotIds.some((id) => dialogueShots.has(id)) },
@@ -597,6 +698,8 @@ export function prepareShortFilmPilotPlan(input: ShortFilmPilotPreparationReques
     schema_version: "SHORT_FILM_PILOT_EXECUTION_V1" as const,
     project_id: request.project_id,
     pilot_duration_seconds: request.pilot_duration_seconds,
+    total_sample_duration_seconds: request.pilot_duration_seconds * pilotSamples.length,
+    pilot_samples: pilotSamples,
     pilot_shot_ids: pilotShotIds,
     locked_identity_master_ids: readiness.identity_masters.map((item) => item.master_identity_id),
     locked_voice_master_ids: readiness.voice_masters.map((item) => item.voice_master_id),
@@ -713,8 +816,10 @@ export function shortFilmNextAction(workflow: ShortFilmWorkflow) {
   if (shortFilmProductionReadinessBlockers(workflow).length > 0) {
     return "LOCK_SHORT_FILM_PRODUCTION_READINESS" as const;
   }
-  if (!workflow.pilot) return "PREPARE_SHORT_FILM_PILOT" as const;
-  if (workflow.pilot.review.decision !== "APPROVE" || !shortFilmQcPassed(workflow.pilot.qc)) {
+  if (!workflow.pilot && !workflow.pilot_batch) return "PREPARE_SHORT_FILM_PILOT" as const;
+  const legacyPilotApproved = Boolean(workflow.pilot && workflow.pilot.review.decision === "APPROVE" && shortFilmQcPassed(workflow.pilot.qc));
+  const batchPilotApproved = workflow.pilot_batch?.batch_review.decision === "APPROVE";
+  if (!legacyPilotApproved && !batchPilotApproved) {
     return "REVIEW_SHORT_FILM_PILOT" as const;
   }
   if (!workflow.full_film) return "PRODUCE_SHORT_FILM" as const;

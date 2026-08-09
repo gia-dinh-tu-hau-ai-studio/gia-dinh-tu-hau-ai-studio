@@ -1,9 +1,16 @@
-import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, StreamableFile } from "@nestjs/common";
 import { IntakeService } from "./intake.service";
+import { ShortFilmPilotExecutionService } from "./providers/short-film-pilot-execution.service";
+import { ShortFilmFullExecutionService } from "./providers/short-film-full-execution.service";
+import { z } from "zod";
 
 @Controller()
 export class AppController {
-  constructor(private readonly intakeService: IntakeService) {}
+  constructor(
+    private readonly intakeService: IntakeService,
+    private readonly pilotExecution: ShortFilmPilotExecutionService,
+    private readonly fullExecution: ShortFilmFullExecutionService,
+  ) {}
 
   @Get("health")
   health() {
@@ -70,6 +77,44 @@ export class AppController {
   @Post("projects/:projectId/short-film/pilot/prepare")
   prepareShortFilmPilot(@Param("projectId") projectId: string, @Body() body: unknown) {
     return this.intakeService.prepareShortFilmPilot(projectId, body);
+  }
+
+  @Post("projects/:projectId/short-film/pilot/execute")
+  executeShortFilmPilot(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const request = z.object({
+      execution_approved: z.literal(true),
+      caps: z.object({ runway_credits: z.number().int().positive(), elevenlabs_characters: z.number().int().nonnegative(), sync_usd: z.number().nonnegative() }),
+    }).parse(body);
+    return this.pilotExecution.submit(projectId, request.caps);
+  }
+
+  @Get("projects/:projectId/short-film/pilot/status")
+  shortFilmPilotStatus(@Param("projectId") projectId: string) {
+    return this.pilotExecution.status(projectId);
+  }
+
+  @Get("projects/:projectId/short-film/pilot/outputs/:fileId")
+  async shortFilmPilotOutput(@Param("projectId") projectId: string, @Param("fileId") fileId: string) {
+    return new StreamableFile(await this.pilotExecution.output(projectId, fileId), { type: "video/mp4", disposition: "inline" });
+  }
+
+  @Post("projects/:projectId/short-film/full-film/execute")
+  executeShortFilmFullFilm(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const request = z.object({
+      execution_approved: z.literal(true),
+      caps: z.object({ runway_credits: z.number().int().positive(), elevenlabs_characters: z.number().int().nonnegative(), sync_usd: z.number().nonnegative() }),
+    }).parse(body);
+    return this.fullExecution.start(projectId, request.caps);
+  }
+
+  @Post("projects/:projectId/short-film/full-film/status")
+  shortFilmFullFilmStatus(@Param("projectId") projectId: string) {
+    return this.fullExecution.tick(projectId);
+  }
+
+  @Get("projects/:projectId/short-film/full-film/outputs/:fileId")
+  async shortFilmFullFilmOutput(@Param("projectId") projectId: string, @Param("fileId") fileId: string) {
+    return new StreamableFile(await this.fullExecution.output(projectId, fileId), { type: "video/mp4", disposition: "inline" });
   }
 
   @Post("projects/:projectId/prepare-mv-production")

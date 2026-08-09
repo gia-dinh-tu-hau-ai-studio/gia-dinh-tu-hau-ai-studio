@@ -69,6 +69,18 @@ ceiling, 30-second heartbeat, 180-second stale threshold and 900-second hard
 timeout. Its submission gate is `AWAITING_PROJECT_OWNER_APPROVAL` and
 `provider_calls_made` is always `false`; provider execution remains a separate,
 explicitly approved operation.
+
+For long-form projects, `pilot_sampling` requires 2–5 representative clips of
+10–20 seconds. The default is three 15-second samples covering identity/dialogue,
+motion/performance, and multi-character continuity. Every sample has its own QC
+and review gate. Full-production fan-out and final assembly remain locked until
+all samples pass QC and the owner approves the aggregate `pilot_batch` gate.
+
+Full-film execution then processes one shot at a time, reuses approved pilot
+shot artifacts, persists a heartbeat after every provider transition, and
+assembles a 1920x1080 deliverable only after all shots complete. Its budget cap
+requires a separate owner approval; approving pilot samples never approves the
+full-film spend.
 | Character voice | Approved Voice Master | none in this form | Requires an approved library asset |
 
 `GET /v1/short-film/providers/status` returns only provider identifiers and
