@@ -140,7 +140,27 @@ export const ShortFilmLockedVoiceSchema = z.object({
   source_actor_id: z.string().trim().min(1),
   voice_master_id: z.string().trim().min(1),
   casting_profile: z.string().trim().min(1),
+  perceived_age_band: z.enum(["YOUNG_ADULT", "ADULT", "MIDDLE_AGED", "OLDER_ADULT"]).optional(),
+  locale: z.literal("vi-VN-southwest").optional(),
+  performance_style: z.literal("SOUTHERN_TV_DRAMA_DUBBING").optional(),
+  pronunciation_lexicon_id: z.string().trim().min(1).optional(),
+  audition_audio_url: z.url().optional(),
+  audition_review: ShortFilmReviewSchema.optional(),
   status: z.literal("APPROVED_LOCKED"),
+});
+
+export const ShortFilmDialogueLineApprovalSchema = z.object({
+  line_id: z.string().trim().min(1),
+  shot_id: z.string().trim().min(1),
+  speaker_source_actor_id: z.string().trim().min(1),
+  voice_master_id: z.string().trim().min(1),
+  dialogue_text: z.string().trim().min(1),
+  target_duration_ms: z.number().int().min(250).max(60_000),
+  pronunciation_decision: ReviewDecisionSchema,
+  age_casting_decision: ReviewDecisionSchema,
+  timing_decision: ReviewDecisionSchema,
+  reviewer: z.literal("PROJECT_OWNER").default("PROJECT_OWNER"),
+  reviewed_at: z.string().datetime(),
 });
 
 export const ShortFilmKeyframeApprovalSchema = z.object({
@@ -184,6 +204,7 @@ export const ShortFilmProductionReadinessSchema = z.object({
   keyframes: z.array(ShortFilmKeyframeApprovalSchema).min(1),
   dialogue_shot_ids: z.array(z.string().trim().min(1)).default([]),
   speaker_locks: z.array(ShortFilmSpeakerLockSchema).default([]),
+  dialogue_line_approvals: z.array(ShortFilmDialogueLineApprovalSchema).default([]),
   review: ShortFilmReviewSchema,
 });
 
@@ -371,6 +392,16 @@ export function shortFilmProductionReadinessBlockers(
     if (workflow.dialogue.voice_master_mode === "APPROVED_VOICE_MASTER_ONLY" && !voiceByActor.has(actorId)) {
       blockers.push(`VOICE_MASTER_NOT_LOCKED:${actorId}`);
     }
+    const voice = voiceByActor.get(actorId);
+    if (workflow.dialogue.voice_master_mode === "APPROVED_VOICE_MASTER_ONLY" && voice) {
+      if (!voice.perceived_age_band) blockers.push(`VOICE_AGE_NOT_LOCKED:${actorId}`);
+      if (voice.locale !== "vi-VN-southwest") blockers.push(`VOICE_LOCALE_NOT_LOCKED:${actorId}`);
+      if (voice.performance_style !== "SOUTHERN_TV_DRAMA_DUBBING") blockers.push(`VOICE_PERFORMANCE_STYLE_NOT_LOCKED:${actorId}`);
+      if (!voice.pronunciation_lexicon_id) blockers.push(`VOICE_PRONUNCIATION_LEXICON_MISSING:${actorId}`);
+      if (!voice.audition_audio_url || voice.audition_review?.decision !== "APPROVE") {
+        blockers.push(`VOICE_AUDITION_NOT_APPROVED:${actorId}`);
+      }
+    }
   }
 
   const expectedKeyframes = workflow.shot_plan?.shots.length ?? 0;
@@ -386,6 +417,7 @@ export function shortFilmProductionReadinessBlockers(
       ? new Set<string>()
       : new Set(readiness.dialogue_shot_ids);
   const speakerShotIds = new Set(readiness.speaker_locks.map((lock) => lock.shot_id));
+  const lineApprovalsByShot = new Map(readiness.dialogue_line_approvals.map((line) => [line.shot_id, line]));
   for (const lock of readiness.speaker_locks) {
     if (!usedActorIds.has(lock.speaker_source_actor_id)) {
       blockers.push(`SPEAKER_NOT_IN_CAST:${lock.shot_id}`);
@@ -393,6 +425,16 @@ export function shortFilmProductionReadinessBlockers(
     const voice = voiceByActor.get(lock.speaker_source_actor_id);
     if (!voice || voice.voice_master_id !== lock.voice_master_id) {
       blockers.push(`SPEAKER_VOICE_MISMATCH:${lock.shot_id}`);
+    }
+    const line = lineApprovalsByShot.get(lock.shot_id);
+    if (!line) {
+      blockers.push(`DIALOGUE_LINE_NOT_APPROVED:${lock.shot_id}`);
+    } else if (line.speaker_source_actor_id !== lock.speaker_source_actor_id || line.voice_master_id !== lock.voice_master_id) {
+      blockers.push(`DIALOGUE_LINE_VOICE_MISMATCH:${lock.shot_id}`);
+    } else {
+      if (line.pronunciation_decision !== "APPROVE") blockers.push(`PRONUNCIATION_NOT_APPROVED:${lock.shot_id}`);
+      if (line.age_casting_decision !== "APPROVE") blockers.push(`AGE_CASTING_NOT_APPROVED:${lock.shot_id}`);
+      if (line.timing_decision !== "APPROVE") blockers.push(`DIALOGUE_TIMING_NOT_APPROVED:${lock.shot_id}`);
     }
   }
 

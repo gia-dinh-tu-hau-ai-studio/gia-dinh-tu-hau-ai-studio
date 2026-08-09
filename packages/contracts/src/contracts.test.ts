@@ -59,6 +59,12 @@ const productionReadiness = {
     source_actor_id: "CHAR_TUONG_VY",
     voice_master_id: "TUONG_VY_VOICE_MASTER_AI_V1",
     casting_profile: "Vietnamese female Mekong Delta adult",
+    perceived_age_band: "ADULT",
+    locale: "vi-VN-southwest",
+    performance_style: "SOUTHERN_TV_DRAMA_DUBBING",
+    pronunciation_lexicon_id: "GDTH-SOUTHWEST-VI-V1",
+    audition_audio_url: "https://drive.google.com/file/d/audition/view",
+    audition_review: { decision: "APPROVE", notes: "Age, accent and delivery approved", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-09T00:00:00.000Z" },
     status: "APPROVED_LOCKED",
   }],
   keyframes: [{
@@ -75,6 +81,19 @@ const productionReadiness = {
     voice_master_id: "TUONG_VY_VOICE_MASTER_AI_V1",
     visible_face_count: 1,
     selection_mode: "SINGLE_VISIBLE_FACE",
+  }],
+  dialogue_line_approvals: [{
+    line_id: "LINE-001",
+    shot_id: "SHOT-001",
+    speaker_source_actor_id: "CHAR_TUONG_VY",
+    voice_master_id: "TUONG_VY_VOICE_MASTER_AI_V1",
+    dialogue_text: "Má về rồi, con đừng lo.",
+    target_duration_ms: 2400,
+    pronunciation_decision: "APPROVE",
+    age_casting_decision: "APPROVE",
+    timing_decision: "APPROVE",
+    reviewer: "PROJECT_OWNER",
+    reviewed_at: "2026-08-09T00:00:00.000Z",
   }],
   review: {
     decision: "APPROVE",
@@ -373,4 +392,62 @@ test("media providers unlock only after all production readiness gates pass", ()
     blockers: [],
   });
   assert.equal(shortFilmNextAction(parsed), "PREPARE_SHORT_FILM_PILOT");
+});
+
+test("legacy voice records remain parseable but media stays locked until voice audition gates pass", () => {
+  const legacy = {
+    ...productionReadiness,
+    voice_masters: [{
+      source_actor_id: "CHAR_TUONG_VY",
+      voice_master_id: "TUONG_VY_VOICE_MASTER_AI_V1",
+      casting_profile: "Vietnamese female",
+      status: "APPROVED_LOCKED",
+    }],
+  };
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"] },
+    production_readiness: legacy,
+  });
+  const blockers = shortFilmProductionReadinessBlockers(parsed).join(",");
+  assert.match(blockers, /VOICE_AGE_NOT_LOCKED/);
+  assert.match(blockers, /VOICE_AUDITION_NOT_APPROVED/);
+  assert.equal(shortFilmMediaExecutionDecision(parsed).provider_execution_allowed, false);
+});
+
+test("dialogue line approval must match the locked speaker and voice", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"] },
+    production_readiness: {
+      ...productionReadiness,
+      dialogue_line_approvals: [{
+        ...productionReadiness.dialogue_line_approvals[0],
+        voice_master_id: "WRONG_VOICE",
+      }],
+    },
+  });
+  assert.match(shortFilmProductionReadinessBlockers(parsed).join(","), /DIALOGUE_LINE_VOICE_MISMATCH/);
+  assert.equal(shortFilmMediaExecutionDecision(parsed).provider_execution_allowed, false);
+});
+
+test("dialogue pronunciation and lip-sync timing require explicit owner approval", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"] },
+    production_readiness: {
+      ...productionReadiness,
+      dialogue_line_approvals: [{
+        ...productionReadiness.dialogue_line_approvals[0],
+        pronunciation_decision: "PENDING",
+        timing_decision: "PENDING",
+      }],
+    },
+  });
+  const blockers = shortFilmProductionReadinessBlockers(parsed).join(",");
+  assert.match(blockers, /PRONUNCIATION_NOT_APPROVED/);
+  assert.match(blockers, /DIALOGUE_TIMING_NOT_APPROVED/);
 });

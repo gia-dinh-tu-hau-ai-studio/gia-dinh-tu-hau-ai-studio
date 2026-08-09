@@ -182,6 +182,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
           visible_face_count: 1,
           selection_mode: "SINGLE_VISIBLE_FACE" as const,
         })) : [],
+        dialogue_line_approvals: [],
         review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
       },
     });
@@ -277,6 +278,35 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             <span>Identity Masters — {value.production_readiness.identity_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</span>
             <span>Voice Masters — {value.production_readiness.voice_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</span>
           </div>
+          {value.production_readiness.voice_masters.map((voice) => <article className="workflow-card" key={voice.source_actor_id}>
+            <h4>Voice &amp; Lip-sync Readiness — {availableActors.find((actor) => actor.source_actor_id === voice.source_actor_id)?.source_actor_name ?? voice.source_actor_id}</h4>
+            <label><span>Độ tuổi cảm nhận</span><select value={voice.perceived_age_band ?? ""} onChange={(event) => {
+              const voice_masters = value.production_readiness!.voice_masters.map((item) => item.source_actor_id === voice.source_actor_id ? { ...item, perceived_age_band: event.target.value as "YOUNG_ADULT" | "ADULT" | "MIDDLE_AGED" | "OLDER_ADULT" } : item);
+              patch({ production_readiness: { ...value.production_readiness!, voice_masters, review: { ...value.production_readiness!.review, decision: "PENDING" } } });
+            }}><option value="">Chưa khóa</option><option value="YOUNG_ADULT">Nữ trẻ</option><option value="ADULT">Nữ trưởng thành</option><option value="MIDDLE_AGED">Trung niên</option><option value="OLDER_ADULT">Người lớn tuổi</option></select></label>
+            <label><span>Giọng vùng</span><select value={voice.locale ?? ""} onChange={(event) => {
+              const voice_masters = value.production_readiness!.voice_masters.map((item) => item.source_actor_id === voice.source_actor_id ? { ...item, locale: event.target.value ? "vi-VN-southwest" as const : undefined } : item);
+              patch({ production_readiness: { ...value.production_readiness!, voice_masters, review: { ...value.production_readiness!.review, decision: "PENDING" } } });
+            }}><option value="">Chưa khóa</option><option value="vi-VN-southwest">Nữ miền Tây Nam Bộ</option></select></label>
+            <label><span>Diễn giọng</span><select value={voice.performance_style ?? ""} onChange={(event) => {
+              const voice_masters = value.production_readiness!.voice_masters.map((item) => item.source_actor_id === voice.source_actor_id ? { ...item, performance_style: event.target.value ? "SOUTHERN_TV_DRAMA_DUBBING" as const : undefined } : item);
+              patch({ production_readiness: { ...value.production_readiness!, voice_masters, review: { ...value.production_readiness!.review, decision: "PENDING" } } });
+            }}><option value="">Chưa khóa</option><option value="SOUTHERN_TV_DRAMA_DUBBING">Lồng tiếng phim truyền hình miền Nam</option></select></label>
+            <label><span>Pronunciation lexicon ID</span><input value={voice.pronunciation_lexicon_id ?? ""} onChange={(event) => {
+              const voice_masters = value.production_readiness!.voice_masters.map((item) => item.source_actor_id === voice.source_actor_id ? { ...item, pronunciation_lexicon_id: event.target.value || undefined } : item);
+              patch({ production_readiness: { ...value.production_readiness!, voice_masters, review: { ...value.production_readiness!.review, decision: "PENDING" } } });
+            }} /></label>
+            <label><span>Audition audio URL</span><input type="url" value={voice.audition_audio_url ?? ""} onChange={(event) => {
+              const voice_masters = value.production_readiness!.voice_masters.map((item) => item.source_actor_id === voice.source_actor_id ? { ...item, audition_audio_url: event.target.value || undefined, audition_review: { decision: "PENDING" as const, notes: "", reviewer: "PROJECT_OWNER" as const } } : item);
+              patch({ production_readiness: { ...value.production_readiness!, voice_masters, review: { ...value.production_readiness!.review, decision: "PENDING" } } });
+            }} /></label>
+            {voice.audition_audio_url && <audio controls src={voice.audition_audio_url} />}
+            <label><span>Duyệt audition</span><select value={voice.audition_review?.decision ?? "PENDING"} onChange={(event) => {
+              const decision = event.target.value as "PENDING" | "REQUEST_CHANGES" | "APPROVE" | "REJECT";
+              const voice_masters = value.production_readiness!.voice_masters.map((item) => item.source_actor_id === voice.source_actor_id ? { ...item, audition_review: { decision, notes: item.audition_review?.notes ?? "", reviewer: "PROJECT_OWNER" as const, reviewed_at: new Date().toISOString() } } : item);
+              patch({ production_readiness: { ...value.production_readiness!, voice_masters, review: { ...value.production_readiness!.review, decision: "PENDING" } } });
+            }}><option value="PENDING">Chờ nghe</option><option value="REQUEST_CHANGES">REQUEST_CHANGES</option><option value="APPROVE">APPROVE</option><option value="REJECT">REJECT</option></select></label>
+          </article>)}
           {(value.shot_plan?.shots ?? []).map((shot, index) => {
             const shotId = `SHOT-${String(index + 1).padStart(3, "0")}`;
             const keyframe = value.production_readiness?.keyframes.find((item) => item.shot_id === shotId);
@@ -326,6 +356,29 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
                   const speaker_locks = value.production_readiness.speaker_locks.map((item) => item.shot_id === shotId ? { ...item, face_track_id: event.target.value || undefined } : item);
                   patch({ production_readiness: { ...value.production_readiness, speaker_locks, review: { ...value.production_readiness.review, decision: "PENDING" } } });
                 }} /></label>}
+                {(() => {
+                  const line = value.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === shotId);
+                  return <>
+                    <label><span>Câu thoại đã kiểm tra phát âm</span><textarea value={line?.dialogue_text ?? ""} onChange={(event) => {
+                      if (!value.production_readiness) return;
+                      const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.filter((item) => item.shot_id !== shotId);
+                      if (event.target.value) dialogue_line_approvals.push({ line_id: `LINE-${String(index + 1).padStart(3, "0")}`, shot_id: shotId, speaker_source_actor_id: speaker.speaker_source_actor_id, voice_master_id: speaker.voice_master_id, dialogue_text: event.target.value, target_duration_ms: line?.target_duration_ms ?? 2000, pronunciation_decision: "PENDING", age_casting_decision: "PENDING", timing_decision: "PENDING", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() });
+                      patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                    }} /></label>
+                    <label><span>Timing khẩu hình mục tiêu (ms)</span><input min={250} max={60000} type="number" value={line?.target_duration_ms ?? 2000} onChange={(event) => {
+                      if (!value.production_readiness || !line) return;
+                      const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.map((item) => item.shot_id === shotId ? { ...item, target_duration_ms: Number(event.target.value), reviewed_at: new Date().toISOString() } : item);
+                      patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                    }} /></label>
+                    {line && <label><span>Duyệt câu thoại</span><select value={line.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "APPROVE" : "PENDING"} onChange={(event) => {
+                      if (!value.production_readiness) return;
+                      const decision = event.target.value as "PENDING" | "APPROVE";
+                      const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.map((item) => item.shot_id === shotId ? { ...item, pronunciation_decision: decision, age_casting_decision: decision, timing_decision: decision, reviewed_at: new Date().toISOString() } : item);
+                      patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                    }}><option value="PENDING">Chờ nghe và kiểm tra</option><option value="APPROVE">APPROVE độ tuổi · phát âm · timing</option></select></label>}
+                    <p className="gate-note">{line?.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "PROJECT_OWNER APPROVED: độ tuổi · phát âm miền Tây · timing khẩu hình" : "Chưa duyệt câu thoại — provider bị khóa"}</p>
+                  </>;
+                })()}
               </>}
             </article>;
           })}
