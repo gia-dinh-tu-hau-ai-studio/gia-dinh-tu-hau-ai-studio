@@ -169,6 +169,34 @@ function SelectField({ name, label, options }: { name: string; label: string; op
   return <label><span>{label} *</span><select name={name} required defaultValue=""><option value="" disabled>Chọn một phương án</option>{options.map(([value, text]) => <option value={value} key={value}>{text}</option>)}</select></label>;
 }
 
+const intakeFrames = [
+  { number: 1, title: "Loại dự án", help: "Chọn đúng sản phẩm cần thực hiện." },
+  { number: 2, title: "Thông tin cơ bản", help: "Nhập người phụ trách, thời lượng và nơi xuất bản." },
+  { number: 3, title: "Video tham khảo", help: "Thêm link có quyền sử dụng hoặc bỏ qua." },
+  { number: 4, title: "Kinh phí & tài khoản", help: "Duyệt hạn mức và kiểm tra tài khoản; chưa phát sinh chi phí." },
+  { number: 5, title: "Nội dung & kịch bản", help: "Hoàn thiện nội dung rồi bấm duyệt bằng nút trực tiếp." },
+  { number: 6, title: "Nhân vật & tạo dự án", help: "Chọn nhân vật, kiểm tra dữ liệu và xác nhận tạo dự án." },
+] as const;
+
+function FrameNavigator({ currentFrame, maxFrameReached, onSelect }: { currentFrame: number; maxFrameReached: number; onSelect: (frame: number) => void }) {
+  return <nav className="frame-navigator" aria-label="Tiến độ nhập dự án">
+    <header><strong>Đang thực hiện Khung {currentFrame}/6</strong><span>{intakeFrames[currentFrame - 1]?.title}</span></header>
+    <div className="frame-progress"><span style={{ width: `${(currentFrame / intakeFrames.length) * 100}%` }} /></div>
+    <ol>{intakeFrames.map((frame) => <li className={frame.number < maxFrameReached && frame.number !== currentFrame ? "completed" : frame.number === currentFrame ? "current" : "pending"} key={frame.number}>
+      <button disabled={frame.number > maxFrameReached} onClick={() => onSelect(frame.number)} type="button"><b>{frame.number < maxFrameReached && frame.number !== currentFrame ? "✓" : frame.number}</b><span>{frame.title}</span></button>
+    </li>)}</ol>
+  </nav>;
+}
+
+function FrameGuide({ number }: { number: number }) {
+  const frame = intakeFrames[number - 1];
+  return <div className="frame-guide"><b>KHUNG {number}/6</b><div><strong>{frame?.title}</strong><p>{frame?.help}</p></div></div>;
+}
+
+function FrameActions({ currentFrame, onBack, onNext, nextLabel = "Hoàn tất khung này →" }: { currentFrame: number; onBack: () => void; onNext: () => void; nextLabel?: string }) {
+  return <div className="frame-actions"><button className="secondary-button" disabled={currentFrame <= 2} onClick={onBack} type="button">← Khung trước</button><button onClick={onNext} type="button">{nextLabel}</button></div>;
+}
+
 function ResultDetails({ value }: { value: string }) {
   return <details className="result-details"><summary>Xem chi tiết kỹ thuật</summary><pre>{value}</pre></details>;
 }
@@ -218,6 +246,9 @@ function ProviderAccountLinks({ provider, status }: { provider: string; status: 
 export function ProjectIntakeForm() {
   const [projectType, setProjectType] = useState<FormProjectType>("SHORT_FILM");
   const [projectStarted, setProjectStarted] = useState(false);
+  const [currentFrame, setCurrentFrame] = useState(1);
+  const [maxFrameReached, setMaxFrameReached] = useState(1);
+  const [frameMessage, setFrameMessage] = useState("");
   const [referenceSources, setReferenceSources] = useState<ReferenceSource[]>([]);
   const [shortFilmWorkflow, setShortFilmWorkflow] = useState<ShortFilmWorkflow>(createInitialShortFilmWorkflow);
   const [eligibleCharacters, setEligibleCharacters] = useState<EligibleCharacter[]>([]);
@@ -428,6 +459,44 @@ export function ProjectIntakeForm() {
       setDraftSavedAt("");
     }
     setProjectStarted(true);
+    setCurrentFrame(2);
+    setMaxFrameReached(2);
+    setFrameMessage("");
+  }
+
+  function moveToFrame(targetFrame: number) {
+    if (targetFrame < currentFrame) {
+      setCurrentFrame(Math.max(2, targetFrame));
+      setFrameMessage("");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    const currentSection = document.getElementById(`intake-frame-${currentFrame}`);
+    const invalidField = currentSection?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(":invalid");
+    if (invalidField) {
+      setFrameMessage("Khung này còn mục bắt buộc chưa hoàn thành. Hệ thống đã đưa con trỏ tới đúng mục cần nhập.");
+      invalidField.reportValidity();
+      invalidField.focus();
+      return;
+    }
+    if (currentFrame === 4 && !budgetApproved) {
+      setFrameMessage("Hãy bấm Duyệt kinh phí trước khi sang Khung 5. Bước duyệt này chưa gọi nhà cung cấp và chưa trừ tiền.");
+      return;
+    }
+    if (currentFrame === 4 && !accountExecutionReady) {
+      setFrameMessage("Hãy bấm Kiểm tra tài khoản và xử lý trạng thái hiển thị trước khi sang Khung 5.");
+      return;
+    }
+    if (currentFrame === 5 && projectType === "SHORT_FILM" && shortFilmWorkflow.script_review.decision !== "APPROVE") {
+      setFrameMessage("Hãy bấm “Duyệt và mở bước tiếp theo” tại phần kịch bản trước khi sang Khung 6.");
+      return;
+    }
+    const nextFrame = Math.min(6, targetFrame);
+    setCurrentFrame(nextFrame);
+    setMaxFrameReached((current) => Math.max(current, nextFrame));
+    setFrameMessage("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   useEffect(() => {
@@ -1042,9 +1111,12 @@ export function ProjectIntakeForm() {
 
       {projectStarted && <>
       <input name="project_type" type="hidden" value={projectType} />
-      <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => setProjectStarted(false)}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong><small>{draftSavedAt ? "Đã tự động lưu nháp trên thiết bị này" : "Nội dung sẽ tự động lưu trên thiết bị này"}</small></div>
+      <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => { setProjectStarted(false); setCurrentFrame(1); setMaxFrameReached(1); }}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong><small>{draftSavedAt ? "Đã tự động lưu nháp trên thiết bị này" : "Nội dung sẽ tự động lưu trên thiết bị này"}</small></div>
+      <FrameNavigator currentFrame={currentFrame} maxFrameReached={maxFrameReached} onSelect={(frame) => moveToFrame(frame)} />
+      {frameMessage && <p className="frame-message" role="alert">{frameMessage}</p>}
 
-      <section>
+      <section className={currentFrame === 2 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 2} id="intake-frame-2">
+        <FrameGuide number={2} />
         <div className="section-heading"><span>02</span><div><h2>Thông tin cơ bản</h2><p>Chọn nhanh theo gợi ý; các trường kỹ thuật đã được ẩn.</p></div></div>
         <div className="field-grid">
           <TextField name="project_name" label="Tên dự án" placeholder="Tập 01 – Bữa cơm gia đình" help="Tập 01 – Bữa cơm gia đình" />
@@ -1070,9 +1142,11 @@ export function ProjectIntakeForm() {
             ))}
           </div>
         </fieldset>
+        <FrameActions currentFrame={currentFrame} onBack={() => moveToFrame(1)} onNext={() => moveToFrame(3)} />
       </section>
 
-      <section>
+      <section className={currentFrame === 3 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 3} id="intake-frame-3">
+        <FrameGuide number={3} />
         <div className="section-heading"><span>03</span><div><h2>Video tham khảo</h2><p>Dán tối đa 5 link công khai. Hệ thống chỉ học cấu trúc/phong cách, không sao chép nguyên bản nếu chưa có quyền.</p></div></div>
         {referenceSources.map((source, index) => <article className="reference-row" key={index}>
           <label><span>Nền tảng *</span><select value={source.platform} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, platform: event.target.value as ReferenceSource["platform"]} : item))}><option value="YOUTUBE">YouTube</option><option value="TIKTOK">TikTok</option><option value="FACEBOOK">Facebook</option></select></label>
@@ -1083,9 +1157,11 @@ export function ProjectIntakeForm() {
           <button type="button" className="remove-button" onClick={() => setReferenceSources((items) => items.filter((_, i) => i !== index))}>Xóa link</button>
         </article>)}
         <button type="button" className="secondary-button" disabled={referenceSources.length >= 5} onClick={() => setReferenceSources((items) => [...items, {platform: "YOUTUBE", url: "", usage_mode: "INSPIRATION_ONLY", rights_confirmed: false, notes: ""}])}>+ Thêm link tham khảo</button>
+        <FrameActions currentFrame={currentFrame} onBack={() => moveToFrame(2)} onNext={() => moveToFrame(4)} nextLabel={referenceSources.length === 0 ? "Bỏ qua — tới Khung 4 →" : "Hoàn tất video tham khảo →"} />
       </section>
 
-      <section>
+      <section className={currentFrame === 5 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 5} id="intake-frame-5">
+        <FrameGuide number={5} />
         <div className="section-heading"><span>04</span><div><h2>Nội dung dự án</h2><p>Chỉ hiển thị thông tin cần cho loại dự án đã chọn.</p></div></div>
         <div className="field-grid">
           {projectType === "SHORT_FILM" && <>
@@ -1100,7 +1176,7 @@ export function ProjectIntakeForm() {
               value={shortFilmWorkflow}
               generatingScript={generatingScript}
               onGenerateScript={generateShortFilmScript}
-              onRequestBudgetApproval={() => document.getElementById("provider-budget")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              onRequestBudgetApproval={() => { setCurrentFrame(4); setFrameMessage("Duyệt kinh phí và kiểm tra tài khoản tại Khung 4, sau đó quay lại Khung 5 để tạo kịch bản."); window.scrollTo({ top: 0, behavior: "smooth" }); }}
               providerBudgetApproved={providerRunReady}
               providerStatus={shortFilmProviderStatus}
               onChange={(workflow) => {
@@ -1129,9 +1205,11 @@ export function ProjectIntakeForm() {
             <TextField name="visual_direction" label="Phong cách biểu diễn" placeholder="Ví dụ: năng động, cận mặt, chuyển động máy mượt" />
           </>}
         </div>
+        <FrameActions currentFrame={currentFrame} onBack={() => moveToFrame(4)} onNext={() => moveToFrame(6)} />
       </section>
 
-      <section className="budget-panel" id="provider-budget">
+      <section className={`budget-panel intake-frame ${currentFrame === 4 ? "active" : ""}`} hidden={currentFrame !== 4} id="intake-frame-4">
+        <FrameGuide number={4} />
         <div className="section-heading"><span>05</span><div><h2>Nhà cung cấp &amp; dự toán kinh phí</h2><p>Chọn dịch vụ theo chức năng. Không nhà cung cấp nào được gọi trước khi kinh phí được duyệt.</p></div></div>
         <div className="internal-service-grid">
           <label><span>Hậu kỳ nội bộ</span><select disabled value={providerBudget.internal_services.post_production}><option value="TUHAUAI_FFMPEG_CLOUD_RUN">TuhauAI · FFmpeg · Cloud Run</option></select><small>Cắt ghép, mix âm thanh và xuất bản master trong pipeline nội bộ.</small></label>
@@ -1159,9 +1237,11 @@ export function ProjectIntakeForm() {
           {accountPreflight?.execution_gate === "BLOCKED" && <p className="operation-error">ĐÃ KHÓA CHẠY: xem đúng trạng thái và “Hành động” của từng nhà cung cấp ở trên; không mặc định rằng mọi lỗi đều do thiếu tiền.</p>}
           {accountExecutionReady && <p className="operation-success">TÀI KHOẢN ĐÃ SẴN SÀNG CHO DỰ TOÁN HIỆN TẠI.</p>}
         </div>
+        <FrameActions currentFrame={currentFrame} onBack={() => moveToFrame(3)} onNext={() => moveToFrame(5)} />
       </section>
 
-      <section>
+      <section className={currentFrame === 6 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 6} id="intake-frame-6">
+        <FrameGuide number={6} />
         <div className="section-heading"><span>06</span><div><h2>Nhân vật & vai trò</h2><p>Chỉ chọn nhân vật đã duyệt; hệ thống khóa đúng gương mặt, giọng và người nói.</p></div></div>
         <p className="library-status">{libraryMessage}</p>
         <div className="character-picker">
@@ -1209,9 +1289,10 @@ export function ProjectIntakeForm() {
             );
           })}
         </div>
+        <div className="frame-actions"><button className="secondary-button" onClick={() => moveToFrame(5)} type="button">← Khung trước</button><span>Chọn ít nhất một nhân vật rồi bấm “Kiểm tra dữ liệu”.</span></div>
       </section>
 
-      <button disabled={submitting || characters.length === 0 || !providerRunReady} type="submit">{submitting ? "Đang kiểm tra…" : !budgetApproved ? "Duyệt kinh phí trước khi tiếp tục" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tiếp tục" : "Kiểm tra dữ liệu"}</button>
+      {currentFrame === 6 && <button className="final-check-button" disabled={submitting || characters.length === 0 || !providerRunReady} type="submit">{submitting ? "Đang kiểm tra…" : characters.length === 0 ? "Chọn nhân vật trước khi tiếp tục" : !budgetApproved ? "Duyệt kinh phí trước khi tiếp tục" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tiếp tục" : "Kiểm tra dữ liệu và sang bước tạo dự án"}</button>}
       </>}
       {result && <ResultDetails value={result} />}
       {validatedSubmission && (
