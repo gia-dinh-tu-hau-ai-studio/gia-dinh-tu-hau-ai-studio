@@ -707,6 +707,12 @@ test("tạo mã dự án MV Gia Đình Tư Hậu", () => {
     client_name: "Gia Đình Tư Hậu", phone: "0900000000", email: "studio@example.com",
     platforms: ["YOUTUBE"], language: "vi", content_rating: "T13",
     target_audience: "Đại chúng", duration_target: "4 phút", aspect_ratio: "16:9",
+    provider_budget: {
+      internal_services: { post_production: "TUHAUAI_FFMPEG_CLOUD_RUN", music_source: "PROJECT_OWNER_LICENSED" },
+      providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "NONE", lip_sync: "NONE" },
+      estimate: { currency: "USD", script: 0, video: 50, voice: 0, lip_sync: 0, contingency: 5, total: 55 },
+      approval: { decision: "APPROVE", approved_limit: 55, reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-04T00:00:00.000Z" },
+    },
     characters: [{
       character_id: "GDTH-CHAR-001", project_role: "MAIN", performance_role: "SINGER",
       selected_costume_ids: [], voice_required: false, lip_sync_required: false,

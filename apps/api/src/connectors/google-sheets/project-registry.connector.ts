@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import {
+  calculateProjectProgress,
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   ShortFilmWorkflowSchema,
@@ -2685,6 +2686,33 @@ export class ProjectRegistryConnector {
     } catch (error) {
       if (error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
       throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không đọc được SHORT_FILM workflow");
+    }
+  }
+
+  async getProjectProgress(projectId: string) {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    try {
+      const response = await sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" });
+      const row = (response.data.values ?? []).find(
+        (candidate, index) => index > 0 && String(candidate[1] ?? "").trim() === projectId,
+      );
+      if (!row) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      const projectType = String(row[3] ?? "").trim();
+      const currentStage = String(row[18] ?? "").trim();
+      const nextAction = String(row[19] ?? "").trim();
+      return {
+        project_id: projectId,
+        project_name: String(row[2] ?? "").trim(),
+        project_type: projectType,
+        current_stage: currentStage,
+        next_action: nextAction,
+        updated_at: String(row[23] ?? row[22] ?? ""),
+        ...calculateProjectProgress(projectType, nextAction),
+      };
+    } catch (error) {
+      if (error instanceof ProjectRegistryProjectNotFoundError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không đọc được tiến độ dự án");
     }
   }
 

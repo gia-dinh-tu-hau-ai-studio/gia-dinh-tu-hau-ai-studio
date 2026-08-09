@@ -1,13 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  calculateProjectProgress,
   normalizeProjectIntake,
+  providerBudgetApproved,
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   shortFilmProductionReadinessBlockers,
   ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowSchema,
 } from "./index";
+
+const approvedProviderBudget = {
+  internal_services: { post_production: "TUHAUAI_FFMPEG_CLOUD_RUN", music_source: "PROJECT_OWNER_LICENSED" },
+  providers: { script: "OPENAI_RESPONSES", video: "RUNWAY", voice: "ELEVENLABS", lip_sync: "SYNC" },
+  estimate: { currency: "USD", script: 1, video: 50, voice: 5, lip_sync: 4, contingency: 10, total: 70 },
+  approval: { decision: "APPROVE", approved_limit: 70, reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-09T00:00:00.000Z" },
+} as const;
 
 const shortFilmWorkflow = {
   schema_version: "SHORT_FILM_FORM_V1",
@@ -115,6 +124,7 @@ const common = {
   target_audience: "Đại chúng",
   duration_target: "10 phút",
   aspect_ratio: "16:9",
+  provider_budget: approvedProviderBudget,
   characters: [
     {
       character_id: "CHAR_TUONG_VY",
@@ -129,6 +139,48 @@ const common = {
     },
   ],
 };
+
+test("khóa nhà cung cấp khi kinh phí chưa duyệt hoặc hạn mức không đủ", () => {
+  assert.equal(providerBudgetApproved({
+    ...approvedProviderBudget,
+    approval: { ...approvedProviderBudget.approval, decision: "PENDING", reviewed_at: undefined },
+  }), false);
+  assert.throws(() => ShortFilmScriptGenerationRequestSchema.parse({
+    idea: "Hai chị em cùng giải quyết một biến cố gia đình quan trọng.",
+    target_duration_minutes: 6,
+    language: "vi",
+    characters: shortFilmWorkflow.film_characters,
+    reference_sources: [],
+    provider_budget: { ...approvedProviderBudget, approval: { ...approvedProviderBudget.approval, approved_limit: 60 } },
+  }), /Hạn mức duyệt/);
+});
+
+test("mở yêu cầu kịch bản AI khi dự toán và kinh phí đã duyệt", () => {
+  const result = ShortFilmScriptGenerationRequestSchema.parse({
+    idea: "Hai chị em cùng giải quyết một biến cố gia đình quan trọng.",
+    target_duration_minutes: 6,
+    language: "vi",
+    characters: shortFilmWorkflow.film_characters,
+    reference_sources: [],
+    provider_budget: approvedProviderBudget,
+  });
+  assert.equal(providerBudgetApproved(result.provider_budget), true);
+});
+
+test("tính tiến độ phim ngắn theo approval gate thực tế", () => {
+  const progress = calculateProjectProgress("SHORT_FILM", "PREPARE_SHORT_FILM_PILOT");
+  assert.equal(progress.completed_steps, 4);
+  assert.equal(progress.total_steps, 9);
+  assert.equal(progress.percent_complete, 44);
+  assert.equal(progress.milestones[4]?.status, "CURRENT");
+  assert.equal(progress.milestones[5]?.status, "PENDING");
+});
+
+test("chỉ báo 100% khi dự án READY_TO_PUBLISH", () => {
+  const progress = calculateProjectProgress("SHORT_FILM", "READY_TO_PUBLISH");
+  assert.equal(progress.percent_complete, 100);
+  assert.ok(progress.milestones.every((milestone) => milestone.status === "COMPLETED"));
+});
 
 test("chuẩn hóa payload SHORT_FILM", () => {
   const result = normalizeProjectIntake({
@@ -282,6 +334,7 @@ test("từ chối URL không khớp nền tảng tham khảo", () => {
       rights_confirmed: true,
       notes: "Học nhịp kể",
     }],
+    provider_budget: approvedProviderBudget,
   }), /Tên miền URL không khớp/);
 });
 
@@ -298,6 +351,7 @@ test("API tạo kịch bản từ chối nguồn chưa xác nhận quyền", () 
       rights_confirmed: false,
       notes: "Học cấu trúc",
     }],
+    provider_budget: approvedProviderBudget,
   }), /Phải xác nhận quyền sử dụng/);
 });
 

@@ -42,6 +42,11 @@ export class AppController {
     return this.intakeService.getShortFilmWorkflow(projectId);
   }
 
+  @Get("projects/:projectId/progress")
+  getProjectProgress(@Param("projectId") projectId: string) {
+    return this.intakeService.getProjectProgress(projectId);
+  }
+
   @Put("projects/:projectId/short-film/workflow")
   saveShortFilmWorkflow(@Param("projectId") projectId: string, @Body() body: unknown) {
     return this.intakeService.saveShortFilmWorkflow(projectId, body);

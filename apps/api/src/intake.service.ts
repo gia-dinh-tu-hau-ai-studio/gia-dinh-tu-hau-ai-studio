@@ -167,6 +167,22 @@ export class IntakeService {
     }
   }
 
+  async getProjectProgress(projectIdInput: string) {
+    const projectId = projectIdInput.trim();
+    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
+    try {
+      return await this.projectRegistry.getProjectProgress(projectId);
+    } catch (error) {
+      if (error instanceof ProjectRegistryProjectNotFoundError) {
+        throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
+      }
+      if (error instanceof ProjectRegistryNotConfiguredError) {
+        throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
+      }
+      throw new BadGatewayException({ code: "PROJECT_PROGRESS_UNAVAILABLE", message: error instanceof Error ? error.message : "Không đọc được tiến độ dự án" });
+    }
+  }
+
   async saveShortFilmWorkflow(projectIdInput: string, body: unknown) {
     const projectId = projectIdInput.trim();
     if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
