@@ -1236,10 +1236,19 @@ export function ProjectIntakeForm() {
       <section className={currentFrame === 6 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 6} id="intake-frame-6">
         <FrameGuide number={6} />
         <div className="section-heading"><span>06</span><div><h2>Nhân vật &amp; vai trò</h2><p>Chọn người xuất hiện và vai trò trong dự án. Các thiết lập đã chốt được áp dụng tự động.</p></div></div>
+        <div className="next-step-guide" aria-live="polite">
+          <strong>Bước tiếp theo cần làm</strong>
+          <ol>
+            <li className={characters.length > 0 ? "done" : "current"}>Chọn một nhân vật rồi bấm <b>“Thêm nhân vật vào dự án”</b>.</li>
+            <li className={characters.length > 0 ? "current" : ""}>Kiểm tra vai trò của từng nhân vật đã thêm.</li>
+            <li>Bấm <b>“Kiểm tra dữ liệu”</b>. Khi dữ liệu đạt, nút <b>“Xác nhận tạo dự án”</b> sẽ xuất hiện.</li>
+          </ol>
+          <p>Thao tác tại khung này chưa gọi nhà cung cấp và chưa phát sinh chi phí.</p>
+        </div>
         <p className="library-status">{libraryMessage}</p>
         <div className="character-picker">
           <label>
-            <span>Nhân vật đủ điều kiện</span>
+            <span>1. Chọn nhân vật</span>
             <select value={characterToAdd} onChange={(event) => setCharacterToAdd(event.target.value)}>
               {eligibleCharacters.map((character) => (
                 <option key={character.character_id} value={character.character_id}>
@@ -1248,7 +1257,7 @@ export function ProjectIntakeForm() {
               ))}
             </select>
           </label>
-          <button className="secondary-button" disabled={!characterToAdd} onClick={addCharacter} type="button">Thêm nhân vật</button>
+          <button className="secondary-button" disabled={!characterToAdd} onClick={addCharacter} type="button">2. Thêm nhân vật vào dự án</button>
         </div>
 
         <div className="character-list">
@@ -1275,10 +1284,13 @@ export function ProjectIntakeForm() {
             );
           })}
         </div>
+        <div className="final-action-panel">
+          <strong>{characters.length === 0 ? "Chưa có nhân vật trong dự án" : `Đã thêm ${characters.length} nhân vật`}</strong>
+          <span>{characters.length === 0 ? "Hãy hoàn tất bước 1 và 2 ở trên." : "Kiểm tra vai trò, sau đó tiếp tục kiểm tra toàn bộ dữ liệu."}</span>
+          <button className="final-check-button" disabled={submitting || characters.length === 0 || !providerRunReady} type="submit">{submitting ? "Đang kiểm tra…" : characters.length === 0 ? "3. Kiểm tra dữ liệu — cần thêm nhân vật" : !budgetApproved ? "Quay lại duyệt kinh phí" : !accountExecutionReady ? "Quay lại kiểm tra tài khoản" : "3. Kiểm tra dữ liệu và tiếp tục"}</button>
+        </div>
         <div className="frame-actions"><button className="secondary-button" onClick={() => moveToFrame(5)} type="button">← Khung trước</button><span>Chọn ít nhất một nhân vật rồi bấm “Kiểm tra dữ liệu”.</span></div>
       </section>
-
-      {currentFrame === 6 && <button className="final-check-button" disabled={submitting || characters.length === 0 || !providerRunReady} type="submit">{submitting ? "Đang kiểm tra…" : characters.length === 0 ? "Chọn nhân vật trước khi tiếp tục" : !budgetApproved ? "Duyệt kinh phí trước khi tiếp tục" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tiếp tục" : "Kiểm tra dữ liệu và sang bước tạo dự án"}</button>}
       </>}
       {result && <ResultDetails value={result} />}
       {validatedSubmission && (

@@ -48,6 +48,16 @@ label { display: grid; gap: 8px; color: #e4d7d1; font-size: 14px; }
 .frame-actions span { color: #cdbfb8; }
 .frame-message { position: sticky; top: 250px; z-index: 3; margin: 0; padding: 14px 16px; color: #ffe6aa; border: 1px solid #b5792f; border-radius: 12px; background: #2a1b0d; }
 .final-check-button { width: 100%; justify-self: stretch; font-size: 17px; }
+.next-step-guide { grid-column: 1 / -1; padding: 18px; border: 1px solid #d9a846; border-radius: 16px; background: linear-gradient(135deg, rgba(217,168,70,.16), rgba(115,188,127,.09)); }
+.next-step-guide > strong { display: block; color: #ffe2a3; font-size: 19px; margin-bottom: 10px; }
+.next-step-guide ol { display: grid; gap: 8px; margin: 0; padding-left: 24px; }
+.next-step-guide li { color: #d8cbc5; }
+.next-step-guide li.current { color: #fff; font-weight: 700; }
+.next-step-guide li.done { color: #85d394; text-decoration: line-through; }
+.next-step-guide p { margin: 12px 0 0; color: #cdbfb8; font-size: 14px; }
+.final-action-panel { grid-column: 1 / -1; display: grid; gap: 8px; margin-top: 18px; padding: 16px; border: 1px solid rgba(115,188,127,.55); border-radius: 16px; background: rgba(18,38,25,.92); }
+.final-action-panel > strong { color: #b8efc2; }
+.final-action-panel > span { color: #d8cbc5; }
 .reference-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; padding: 16px; border: 1px solid #3b2e33; border-radius: 14px; background: #151114; }
 .reference-row .consent { grid-column: 1 / -1; display: flex; align-items: center; }
 .reference-row .consent input { width: auto; }
