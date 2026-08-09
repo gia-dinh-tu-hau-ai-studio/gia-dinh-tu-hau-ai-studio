@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, type FocusEvent } from "react";
 import { calculateSuggestedProviderBudget, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
@@ -63,6 +63,8 @@ type IntakeDraft = {
 };
 
 const INTAKE_DRAFT_PREFIX = "tuhauai:intake-draft:v1:";
+const INPUT_HISTORY_KEY = "tuhauai:input-history:v1";
+const INPUT_HISTORY_LIMIT = 12;
 
 const initialProviderBudget: ProviderBudgetPlan = {
   internal_services: {
@@ -205,6 +207,7 @@ export function ProjectIntakeForm() {
   const [checkingProgress, setCheckingProgress] = useState(false);
   const [draftFormValues, setDraftFormValues] = useState<Record<string, string[]> | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState("");
+  const [inputHistory, setInputHistory] = useState<Record<string, string[]>>({});
 
   const budgetApproved = providerBudget.approval.decision === "APPROVE" &&
     Boolean(providerBudget.approval.reviewed_at) &&
@@ -279,6 +282,20 @@ export function ProjectIntakeForm() {
     return values;
   }
 
+  function rememberInput(event: FocusEvent<HTMLFormElement>) {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || !input.name || !["text", "email", "tel", "url"].includes(input.type)) return;
+    const value = input.value.trim();
+    if (value.length < 2 || value.length > 240) return;
+    setInputHistory((current) => {
+      const previous = current[input.name] ?? [];
+      const nextValues = [value, ...previous.filter((item) => item.localeCompare(value, "vi", { sensitivity: "base" }) !== 0)].slice(0, INPUT_HISTORY_LIMIT);
+      const next = { ...current, [input.name]: nextValues };
+      localStorage.setItem(INPUT_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
   function saveDraft(form: HTMLFormElement) {
     if (!projectStarted) return;
     const draft: IntakeDraft = {
@@ -346,6 +363,25 @@ export function ProjectIntakeForm() {
     const form = document.querySelector<HTMLFormElement>("form[data-intake-form]");
     if (form) saveDraft(form);
   }, [projectStarted, referenceSources, shortFilmWorkflow, characters, providerBudget, durationTarget]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(INPUT_HISTORY_KEY);
+      if (stored) setInputHistory(JSON.parse(stored) as Record<string, string[]>);
+    } catch {
+      setInputHistory({});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!projectStarted) return;
+    const form = document.querySelector<HTMLFormElement>("form[data-intake-form]");
+    if (!form) return;
+    for (const input of Array.from(form.querySelectorAll<HTMLInputElement>('input[name][type="text"], input[name][type="email"], input[name][type="tel"], input[name][type="url"]'))) {
+      input.setAttribute("list", `history-${input.name.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
+      input.setAttribute("autocomplete", "off");
+    }
+  }, [projectStarted, projectType, inputHistory]);
 
   useEffect(() => {
     void fetch("/api/characters/eligible")
@@ -768,7 +804,8 @@ export function ProjectIntakeForm() {
   }
 
   return (
-    <form data-intake-form onChange={(event) => { invalidateConfirmation(); saveDraft(event.currentTarget); }} onInput={(event) => saveDraft(event.currentTarget)} onSubmit={handleSubmit}>
+    <form data-intake-form onBlur={rememberInput} onChange={(event) => { invalidateConfirmation(); saveDraft(event.currentTarget); }} onInput={(event) => saveDraft(event.currentTarget)} onSubmit={handleSubmit}>
+      {Object.entries(inputHistory).map(([name, values]) => <datalist id={`history-${name.replace(/[^a-zA-Z0-9_-]/g, "-")}`} key={name}>{values.map((value) => <option key={value} value={value} />)}</datalist>)}
       {!projectStarted && <section className="project-gateway">
         <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chỉ chọn một loại. Dữ liệu nhánh ẩn không đi vào payload.</p></div></div>
         <div className="project-grid">
