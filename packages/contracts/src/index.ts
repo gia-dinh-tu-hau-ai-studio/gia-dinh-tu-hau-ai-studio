@@ -242,11 +242,38 @@ export const ShortFilmScriptGenerationRecordSchema = z.object({
   }).nullable(),
 });
 
+const referenceHostMatchesPlatform = (platform: "YOUTUBE" | "TIKTOK" | "FACEBOOK", url: string) => {
+  const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  const isHost = (domain: string) => hostname === domain || hostname.endsWith(`.${domain}`);
+  if (platform === "YOUTUBE") return isHost("youtube.com") || hostname === "youtu.be";
+  if (platform === "TIKTOK") return isHost("tiktok.com");
+  return isHost("facebook.com") || hostname === "fb.watch";
+};
+
+export const ReferenceSourceSchema = z.object({
+  platform: z.enum(["YOUTUBE", "TIKTOK", "FACEBOOK"]),
+  url: z.url(),
+  usage_mode: z.enum(["INSPIRATION_ONLY", "STRUCTURE_REFERENCE", "AUTHORIZED_ADAPTATION"]),
+  rights_confirmed: z.literal(true, {
+    error: "Phải xác nhận quyền sử dụng cho từng link tham khảo",
+  }),
+  notes: z.string().trim().max(2_000).default(""),
+}).superRefine((source, context) => {
+  if (!referenceHostMatchesPlatform(source.platform, source.url)) {
+    context.addIssue({
+      code: "custom",
+      message: "Tên miền URL không khớp nền tảng đã chọn",
+      path: ["url"],
+    });
+  }
+});
+
 export const ShortFilmScriptGenerationRequestSchema = z.object({
   idea: z.string().trim().min(20).max(12_000),
   target_duration_minutes: z.number().int().min(1).max(60),
   language: z.string().trim().min(2).max(20).default("vi"),
   characters: z.array(ShortFilmCharacterSchema).min(1).max(20),
+  reference_sources: z.array(ReferenceSourceSchema).max(5, "Chỉ được thêm tối đa 5 link tham khảo").default([]),
 });
 
 export type ShortFilmScriptGenerationRequest = z.infer<typeof ShortFilmScriptGenerationRequestSchema>;
@@ -498,15 +525,7 @@ export const CommonProjectInputSchema = z.object({
   target_audience: z.string().trim().min(1),
   duration_target: z.string().trim().min(1),
   aspect_ratio: z.string().trim().min(1),
-  reference_sources: z.array(z.object({
-    platform: z.enum(["YOUTUBE", "TIKTOK", "FACEBOOK"]),
-    url: z.url(),
-    usage_mode: z.enum(["INSPIRATION_ONLY", "STRUCTURE_REFERENCE", "AUTHORIZED_ADAPTATION"]),
-    rights_confirmed: z.literal(true, {
-      error: "Phải xác nhận quyền sử dụng cho từng link tham khảo",
-    }),
-    notes: z.string().trim().max(2_000).default(""),
-  })).max(5, "Chỉ được thêm tối đa 5 link tham khảo").default([]),
+  reference_sources: z.array(ReferenceSourceSchema).max(5, "Chỉ được thêm tối đa 5 link tham khảo").default([]),
   characters: z.array(CharacterAssignmentSchema).min(1, "Phải chọn ít nhất một nhân vật"),
 });
 

@@ -28,6 +28,17 @@ const CHARACTER_LIBRARY_COLUMNS = [
 type CharacterLibraryColumn = (typeof CHARACTER_LIBRARY_COLUMNS)[number];
 type CharacterLibraryRow = Record<CharacterLibraryColumn, string>;
 
+export function isMasterIdentityApprovedLocked(visualIdentityJson: string) {
+  try {
+    const identity = JSON.parse(visualIdentityJson || "{}") as Record<string, unknown>;
+    const status = String(identity.master_identity_status ?? identity.approval_status ?? "").toUpperCase();
+    const lock = String(identity.lock_status ?? identity.master_identity_lock ?? "").toUpperCase();
+    return status === "APPROVED" && lock === "LOCKED";
+  } catch {
+    return false;
+  }
+}
+
 export type EligibleCharacter = {
   character_id: string;
   character_name: string;
@@ -105,7 +116,7 @@ export class CharacterLibraryConnector {
     return values
       .slice(1)
       .map((row) => this.mapRow(row, indexByColumn))
-      .filter((row) => this.isEligible(row))
+      .filter((row) => this.isEligible(row) && this.masterIdentityApprovedLocked(row))
       .map((row) => {
         const identity = this.parseJson(row.visual_identity_json);
         const voice = this.parseJson(row.voice_identity_json);
@@ -157,14 +168,7 @@ export class CharacterLibraryConnector {
   }
 
   private masterIdentityApprovedLocked(row: CharacterLibraryRow) {
-    try {
-      const identity = JSON.parse(row.visual_identity_json || "{}") as Record<string, unknown>;
-      const status = String(identity.master_identity_status ?? identity.approval_status ?? "").toUpperCase();
-      const lock = String(identity.lock_status ?? identity.master_identity_lock ?? "").toUpperCase();
-      return status === "APPROVED" && lock === "LOCKED";
-    } catch {
-      return false;
-    }
+    return isMasterIdentityApprovedLocked(row.visual_identity_json);
   }
 
   private voiceMasterApprovedLocked(row: CharacterLibraryRow) {

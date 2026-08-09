@@ -5,6 +5,7 @@ import {
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   shortFilmProductionReadinessBlockers,
+  ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowSchema,
 } from "./index";
 
@@ -266,6 +267,38 @@ test("từ chối link tham khảo chưa xác nhận quyền hoặc vượt quá
     ...project,
     reference_sources: Array.from({ length: 6 }, () => reference),
   }), /tối đa 5 link/);
+});
+
+test("từ chối URL không khớp nền tảng tham khảo", () => {
+  assert.throws(() => ShortFilmScriptGenerationRequestSchema.parse({
+    idea: "Hai chị em cùng giải quyết một biến cố gia đình quan trọng.",
+    target_duration_minutes: 6,
+    language: "vi",
+    characters: shortFilmWorkflow.film_characters,
+    reference_sources: [{
+      platform: "YOUTUBE",
+      url: "https://example.com/not-youtube",
+      usage_mode: "INSPIRATION_ONLY",
+      rights_confirmed: true,
+      notes: "Học nhịp kể",
+    }],
+  }), /Tên miền URL không khớp/);
+});
+
+test("API tạo kịch bản từ chối nguồn chưa xác nhận quyền", () => {
+  assert.throws(() => ShortFilmScriptGenerationRequestSchema.parse({
+    idea: "Hai chị em cùng giải quyết một biến cố gia đình quan trọng.",
+    target_duration_minutes: 6,
+    language: "vi",
+    characters: shortFilmWorkflow.film_characters,
+    reference_sources: [{
+      platform: "TIKTOK",
+      url: "https://www.tiktok.com/@tuhau/video/123",
+      usage_mode: "STRUCTURE_REFERENCE",
+      rights_confirmed: false,
+      notes: "Học cấu trúc",
+    }],
+  }), /Phải xác nhận quyền sử dụng/);
 });
 
 test("từ chối ORIGINAL_FACE_COMPOSITE khi thiếu file_id video gốc", () => {

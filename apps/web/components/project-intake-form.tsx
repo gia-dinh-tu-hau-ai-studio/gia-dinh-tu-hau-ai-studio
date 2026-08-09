@@ -155,12 +155,15 @@ export function ProjectIntakeForm() {
         if (!response.ok) {
           throw new Error(body.message ?? body.code ?? "Không đọc được thư viện nhân vật");
         }
-        setEligibleCharacters(body as EligibleCharacter[]);
-        setCharacterToAdd(body[0]?.character_id ?? "");
+        const approvedCharacters = (body as EligibleCharacter[]).filter(
+          (character) => character.readiness.master_identity === "APPROVED_LOCKED",
+        );
+        setEligibleCharacters(approvedCharacters);
+        setCharacterToAdd(approvedCharacters[0]?.character_id ?? "");
         setLibraryMessage(
-          body.length > 0
-            ? `${body.length} nhân vật đạt ACTIVE + IMAGE_READY + LEGAL_CLEARED.`
-            : "Chưa có nhân vật đủ điều kiện.",
+          approvedCharacters.length > 0
+            ? `${approvedCharacters.length} nhân vật có Character Master APPROVED + LOCKED.`
+            : "Chưa có Character Master APPROVED + LOCKED.",
         );
       })
       .catch((error: unknown) => {
@@ -190,7 +193,7 @@ export function ProjectIntakeForm() {
         performance_role: "ACTOR",
         voice_required: false,
         lip_sync_required: false,
-        identity_mode: "ORIGINAL_FACE_COMPOSITE",
+        identity_mode: "LIBRARY_MASTER",
         original_video_file_id: "",
       },
     ]);
@@ -361,6 +364,13 @@ export function ProjectIntakeForm() {
   }
 
   async function generateShortFilmScript() {
+    const incompleteReference = referenceSources.find(
+      (source) => !source.url.trim() || !source.rights_confirmed,
+    );
+    if (incompleteReference) {
+      setShortFilmSaveResult("Vui lòng nhập URL và xác nhận quyền sử dụng cho từng link trước khi gọi AI tạo kịch bản.");
+      return;
+    }
     setGeneratingScript(true);
     setShortFilmSaveResult("");
     try {
@@ -368,14 +378,11 @@ export function ProjectIntakeForm() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          idea: [
-            shortFilmWorkflow.idea_brief,
-            referenceSources.length ? "Nguồn tham khảo (chỉ phân tích/chuyển thể theo quyền đã khai báo):" : "",
-            ...referenceSources.map((source) => `${source.platform} — ${source.usage_mode} — ${source.url}\nĐiểm tham khảo: ${source.notes || "chưa ghi chú"}`),
-          ].filter(Boolean).join("\n\n").slice(0, 12_000),
+          idea: shortFilmWorkflow.idea_brief,
           target_duration_minutes: shortFilmWorkflow.target_duration_minutes,
           language: shortFilmWorkflow.dialogue.language,
           characters: shortFilmWorkflow.film_characters,
+          reference_sources: referenceSources,
         }),
       });
       const body = await response.json();
@@ -699,8 +706,7 @@ export function ProjectIntakeForm() {
                   <label><span>Vai trò dự án *</span><select value={character.project_role} onChange={(event) => updateCharacter(index, { project_role: event.target.value })}>{projectRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
                   <label><span>Vai trò biểu diễn *</span><select value={character.performance_role} onChange={(event) => updateCharacter(index, { performance_role: event.target.value })}>{performanceRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
                   <label><span>Trang phục APPROVED</span><input disabled value={libraryCharacter?.default_costume_id || "Chưa chọn costume"} /></label>
-                  <label><span>Chế độ danh tính *</span><select value={character.identity_mode} onChange={(event) => updateCharacter(index, { identity_mode: event.target.value as IdentityMode })}><option value="LIBRARY_MASTER">LIBRARY_MASTER</option><option value="ORIGINAL_FACE_COMPOSITE">ORIGINAL_FACE_COMPOSITE</option></select></label>
-                  {character.identity_mode === "ORIGINAL_FACE_COMPOSITE" && <label><span>Link hoặc mã video gốc *</span><input placeholder="Dán link Google Drive hoặc mã file đã tải lên" required value={character.original_video_file_id} onChange={(event) => updateCharacter(index, { original_video_file_id: event.target.value })} /></label>}
+                  <label><span>Danh tính nhân vật</span><input disabled value="Character Master đã duyệt và khóa" /></label>
                 </div>
                 <div className="check-row">
                   <label><input checked={character.voice_required} disabled={!libraryCharacter?.voice_available} onChange={(event) => updateCharacter(index, { voice_required: event.target.checked, ...(!event.target.checked ? { lip_sync_required: false } : {}) })} type="checkbox" /> Dùng voice APPROVED</label>
