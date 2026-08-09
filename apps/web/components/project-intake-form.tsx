@@ -262,6 +262,12 @@ export function ProjectIntakeForm() {
   const [preparingShortFilmPilot, setPreparingShortFilmPilot] = useState(false);
   const [pilotSyncBalanceConfirmed, setPilotSyncBalanceConfirmed] = useState(false);
   const [shortFilmPilotPlanResult, setShortFilmPilotPlanResult] = useState("");
+  const [pilotExecutionApproved, setPilotExecutionApproved] = useState(false);
+  const [pilotExecutionResult, setPilotExecutionResult] = useState("");
+  const [runningPilotExecution, setRunningPilotExecution] = useState(false);
+  const [fullFilmExecutionApproved, setFullFilmExecutionApproved] = useState(false);
+  const [fullFilmExecutionResult, setFullFilmExecutionResult] = useState("");
+  const [runningFullFilmExecution, setRunningFullFilmExecution] = useState(false);
 
   const budgetApproved = providerBudget.approval.decision === "APPROVE" &&
     Boolean(providerBudget.approval.reviewed_at) &&
@@ -691,7 +697,7 @@ export function ProjectIntakeForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           provider_budget: providerBudget,
-          pilot_duration_seconds: 15,
+          pilot_duration_seconds: shortFilmWorkflow.pilot_sampling.clip_duration_seconds,
           manual_sync_balance_confirmed: pilotSyncBalanceConfirmed,
         }),
       });
@@ -701,6 +707,85 @@ export function ProjectIntakeForm() {
       setShortFilmPilotPlanResult("Không chuẩn bị được pilot plan. Chưa gọi provider và không tự gửi lại.");
     } finally {
       setPreparingShortFilmPilot(false);
+    }
+  }
+
+  async function executeShortFilmPilot() {
+    if (!createdProject || !pilotExecutionApproved) return;
+    const totalSeconds = shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds;
+    setRunningPilotExecution(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/execute`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ execution_approved: true, caps: {
+          runway_credits: Math.ceil(totalSeconds * 12 * 1.2),
+          elevenlabs_characters: Math.ceil(totalSeconds * 15 * 1.2),
+          sync_usd: Number((totalSeconds * 0.05 * 1.2).toFixed(2)),
+        } }),
+      });
+      setPilotExecutionResult(JSON.stringify(await response.json(), null, 2));
+    } catch { setPilotExecutionResult("Không submit được pilot batch; hệ thống không tự gửi lại để tránh tính phí trùng."); }
+    finally { setRunningPilotExecution(false); }
+  }
+
+  async function refreshShortFilmPilotStatus() {
+    if (!createdProject) return;
+    const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/status`);
+    const body = await response.json();
+    setPilotExecutionResult(JSON.stringify(body, null, 2));
+    if (body.status === "AWAITING_PILOT_QC" && Array.isArray(body.outputs) && Array.isArray(body.samples)) {
+      setShortFilmWorkflow((current) => ({ ...current, pilot_batch: {
+        samples: body.outputs.map((output: { sample_id: string; video_url: string; drive_file_id: string }) => {
+          const selected = body.samples.find((sample: { sample_id: string }) => sample.sample_id === output.sample_id);
+          return {
+            sample_id: output.sample_id,
+            purpose: selected?.purpose ?? "HIGH_RISK_SHOT",
+            shot_ids: (selected?.shots ?? []).map((shot: { shot_id: string }) => shot.shot_id),
+            duration_seconds: selected?.expected_duration_seconds ?? current.pilot_sampling.clip_duration_seconds,
+            video_url: `/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/outputs/${encodeURIComponent(output.drive_file_id)}`,
+            qc: { identity: false, motion: false, lip_sync: false, voice: false, background: false, lighting: false, continuity: false },
+            review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+          };
+        }),
+        batch_review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+      } }));
+    }
+  }
+
+  function proposedFullFilmCaps() {
+    const shots = shortFilmWorkflow.shot_plan?.execution_shots ?? [];
+    const totalSeconds = shots.reduce((sum, shot) => sum + shot.duration_seconds, 0);
+    const dialogueCharacters = shortFilmWorkflow.production_readiness?.dialogue_line_approvals.reduce(
+      (sum, line) => sum + line.dialogue_text.length, 0,
+    ) ?? 0;
+    const dialogueSeconds = shots.filter((shot) => shortFilmWorkflow.production_readiness?.dialogue_line_approvals.some((line) => line.shot_id === shot.shot_id)).reduce((sum, shot) => sum + shot.duration_seconds, 0);
+    return { runway_credits: Math.ceil(totalSeconds * 12 * 1.2), elevenlabs_characters: Math.ceil(dialogueCharacters * 1.2), sync_usd: Number((dialogueSeconds * 0.05 * 1.2).toFixed(2)) };
+  }
+
+  async function executeShortFilmFullFilm() {
+    if (!createdProject || !fullFilmExecutionApproved) return;
+    setRunningFullFilmExecution(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/full-film/execute`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ execution_approved: true, caps: proposedFullFilmCaps() }),
+      });
+      setFullFilmExecutionResult(JSON.stringify(await response.json(), null, 2));
+    } catch { setFullFilmExecutionResult("Không thể bắt đầu sản xuất toàn phim; hệ thống không tự gửi lại để tránh tính phí trùng."); }
+    finally { setRunningFullFilmExecution(false); }
+  }
+
+  async function refreshShortFilmFullFilmStatus() {
+    if (!createdProject) return;
+    const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/full-film/status`, { method: "POST" });
+    const body = await response.json();
+    setFullFilmExecutionResult(JSON.stringify(body, null, 2));
+    if (body.status === "AWAITING_FINAL_QC" && body.output?.drive_file_id) {
+      setShortFilmWorkflow((current) => ({ ...current, full_film: {
+        video_url: `/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/full-film/outputs/${encodeURIComponent(body.output.drive_file_id)}`,
+        qc: { identity: false, motion: false, lip_sync: false, voice: false, background: false, lighting: false, continuity: false },
+        review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+      } }));
     }
   }
 
@@ -1162,13 +1247,21 @@ export function ProjectIntakeForm() {
         <section className="confirmation-panel">
           <div>
             <h2>Chuẩn bị Pilot Execution Plan</h2>
-            <p>Kiểm tra lại tài khoản theo đúng pilot 15 giây, khóa Character/Voice Master, người nói, keyframe, retry, heartbeat và hạn mức. Bước này chỉ tạo kế hoạch chờ duyệt; chưa gọi Runway, ElevenLabs hoặc Sync.</p>
-            <label className="consent"><input checked={pilotSyncBalanceConfirmed} type="checkbox" onChange={(event) => setPilotSyncBalanceConfirmed(event.target.checked)} /> Tôi đã mở Sync Billing và xác nhận đủ hạn mức cho pilot 15 giây.</label>
+            <p>Kiểm tra tài khoản cho đúng đợt {shortFilmWorkflow.pilot_sampling.sample_count} clip mẫu × {shortFilmWorkflow.pilot_sampling.clip_duration_seconds} giây, rồi khóa Character/Voice Master, người nói, keyframe, retry, heartbeat và hạn mức. Chưa gọi Runway, ElevenLabs hoặc Sync.</p>
+            <label className="consent"><input checked={pilotSyncBalanceConfirmed} type="checkbox" onChange={(event) => setPilotSyncBalanceConfirmed(event.target.checked)} /> Tôi đã mở Sync Billing và xác nhận đủ hạn mức cho đợt clip mẫu này.</label>
           </div>
           <button disabled={!budgetApproved || !pilotSyncBalanceConfirmed || preparingShortFilmPilot} onClick={() => void prepareShortFilmPilot()} type="button">
             {preparingShortFilmPilot ? "Đang chuẩn bị…" : "Chuẩn bị pilot plan — chưa gọi provider"}
           </button>
           {shortFilmPilotPlanResult && <ResultDetails value={shortFilmPilotPlanResult} />}
+          {shortFilmPilotPlanResult && <div className="approval-gate">
+            <strong>Duyệt chi phí chạy thật đợt clip mẫu</strong>
+            <p>Đề xuất tối đa: {Math.ceil(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 12 * 1.2).toLocaleString("vi-VN")} Runway credits · {Math.ceil(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 15 * 1.2).toLocaleString("vi-VN")} ElevenLabs characters · {(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 0.05 * 1.2).toFixed(2)} USD Sync.</p>
+            <label className="consent"><input checked={pilotExecutionApproved} type="checkbox" onChange={(event) => setPilotExecutionApproved(event.target.checked)} /> Tôi duyệt đúng hạn mức trên cho đợt clip mẫu; không duyệt sản xuất toàn phim.</label>
+            <button disabled={!pilotExecutionApproved || runningPilotExecution} onClick={() => void executeShortFilmPilot()} type="button">{runningPilotExecution ? "Đang submit…" : "Chạy đợt clip mẫu"}</button>
+            <button className="secondary-button" onClick={() => void refreshShortFilmPilotStatus()} type="button">Cập nhật trạng thái/heartbeat</button>
+            {pilotExecutionResult && <ResultDetails value={pilotExecutionResult} />}
+          </div>}
         </section>
       )}
       {createdProject?.next_action === "PREPARE_MV_PRODUCTION" && (
@@ -1186,6 +1279,20 @@ export function ProjectIntakeForm() {
           </button>
         </section>
       )}
+      {createdProject?.next_action === "PRODUCE_SHORT_FILM" && (() => {
+        const caps = proposedFullFilmCaps();
+        return <section className="confirmation-panel">
+          <div>
+            <h2>Sản xuất toàn phim sau khi pilot đã duyệt</h2>
+            <p>Hệ thống xử lý tuần tự từng shot, tái sử dụng shot pilot đã duyệt và lưu heartbeat sau mỗi bước. Đây là hạn mức tối đa; số thực tế có thể thấp hơn nhờ tái sử dụng.</p>
+            <p><strong>Đề xuất tối đa:</strong> {caps.runway_credits.toLocaleString("vi-VN")} Runway credits · {caps.elevenlabs_characters.toLocaleString("vi-VN")} ElevenLabs characters · {caps.sync_usd.toFixed(2)} USD Sync.</p>
+            <label className="consent"><input checked={fullFilmExecutionApproved} type="checkbox" onChange={(event) => setFullFilmExecutionApproved(event.target.checked)} /> Tôi duyệt đúng hạn mức trên để sản xuất toàn phim.</label>
+          </div>
+          <button disabled={!fullFilmExecutionApproved || runningFullFilmExecution} onClick={() => void executeShortFilmFullFilm()} type="button">{runningFullFilmExecution ? "Đang khởi tạo…" : "Bắt đầu sản xuất toàn phim"}</button>
+          <button className="secondary-button" onClick={() => void refreshShortFilmFullFilmStatus()} type="button">Xử lý bước tiếp theo / cập nhật heartbeat</button>
+          {fullFilmExecutionResult && <ResultDetails value={fullFilmExecutionResult} />}
+        </section>;
+      })()}
       {preparationResult && <ResultDetails value={preparationResult} />}
       {createdProject?.next_action === "APPROVE_MV_PRODUCTION_PLAN" && (
         <section className="confirmation-panel">

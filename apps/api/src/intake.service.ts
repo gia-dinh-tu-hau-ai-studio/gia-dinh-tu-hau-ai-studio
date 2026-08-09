@@ -34,6 +34,7 @@ import {
 } from "./providers/short-film-script.provider";
 import { getShortFilmProviderStatus } from "./providers/short-film-provider-status";
 import { checkProviderAccounts } from "./providers/provider-account-preflight";
+import { DriveConnector } from "./connectors/google-drive/drive.connector";
 
 @Injectable()
 export class IntakeService {
@@ -41,6 +42,7 @@ export class IntakeService {
     private readonly characterLibrary: CharacterLibraryConnector,
     private readonly projectRegistry: ProjectRegistryConnector,
     private readonly shortFilmScriptProvider: ShortFilmScriptProvider,
+    private readonly drive: DriveConnector,
   ) {}
 
   async listEligibleCharacters() {
@@ -242,15 +244,17 @@ export class IntakeService {
     if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
     const requestSchema = z.object({
       provider_budget: ProviderBudgetPlanSchema,
-      pilot_duration_seconds: z.number().int().min(10).max(20),
+      pilot_duration_seconds: z.number().int().min(10).max(20).optional(),
       manual_sync_balance_confirmed: z.boolean().default(false),
     });
     try {
       const request = requestSchema.parse(body);
       const stored = await this.projectRegistry.getShortFilmWorkflow(projectId);
+      const pilotDurationSeconds = stored.workflow.pilot_sampling.clip_duration_seconds;
+      const pilotSampleCount = stored.workflow.pilot_sampling.sample_count;
       const checked = await checkProviderAccounts({
         project_type: "SHORT_FILM",
-        duration_seconds: request.pilot_duration_seconds,
+        duration_seconds: pilotDurationSeconds * pilotSampleCount,
         providers: request.provider_budget.providers,
       }, process.env);
       const preparedAt = new Date().toISOString();
@@ -263,14 +267,17 @@ export class IntakeService {
           checked_at: preparedAt,
           manual_balance_confirmed: item.provider === "SYNC" && request.manual_sync_balance_confirmed,
         }));
-      return prepareShortFilmPilotPlan({
+      const plan = prepareShortFilmPilotPlan({
         project_id: projectId,
         workflow: stored.workflow,
         provider_budget: request.provider_budget,
-        pilot_duration_seconds: request.pilot_duration_seconds,
+        pilot_duration_seconds: pilotDurationSeconds,
         account_checks: accountChecks,
         prepared_at: preparedAt,
       });
+      const context = await this.projectRegistry.getShortFilmExecutionContext(projectId);
+      const manifestFileId = await this.drive.writePilotJson(context.project_folder_id, "SHORT_FILM_PILOT_EXECUTION_V1.json", plan);
+      return { ...plan, manifest_file_id: manifestFileId };
     } catch (error) {
       if (error instanceof ZodError) {
         throw new ConflictException({ code: "SHORT_FILM_PILOT_PREPARATION_BLOCKED", errors: error.issues });

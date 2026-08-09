@@ -5,6 +5,8 @@ import { CharacterLibraryConnector } from "./connectors/google-sheets/character-
 import { ProjectRegistryConnector } from "./connectors/google-sheets/project-registry.connector";
 import { IntakeService } from "./intake.service";
 import { ShortFilmScriptProvider } from "./providers/short-film-script.provider";
+import { ShortFilmPilotExecutionService } from "./providers/short-film-pilot-execution.service";
+import { ShortFilmFullExecutionService } from "./providers/short-film-full-execution.service";
 
 @Module({
   controllers: [AppController],
@@ -13,6 +15,8 @@ import { ShortFilmScriptProvider } from "./providers/short-film-script.provider"
     CharacterLibraryConnector,
     ProjectRegistryConnector,
     ShortFilmScriptProvider,
+    ShortFilmPilotExecutionService,
+    ShortFilmFullExecutionService,
     IntakeService,
   ],
 })

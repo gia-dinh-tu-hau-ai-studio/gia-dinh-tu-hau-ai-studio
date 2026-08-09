@@ -2689,6 +2689,25 @@ export class ProjectRegistryConnector {
     }
   }
 
+  async getShortFilmExecutionContext(projectId: string) {
+    const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
+    const sheets = this.createSheetsClient();
+    try {
+      const response = await sheets.spreadsheets.values.get({ spreadsheetId, range: "'PROJECTS'!A:Y" });
+      const row = (response.data.values ?? []).find((candidate, index) => index > 0 && String(candidate[1] ?? "").trim() === projectId);
+      if (!row) throw new ProjectRegistryProjectNotFoundError(`Không tìm thấy project_id ${projectId}`);
+      if (String(row[3] ?? "").trim() !== "SHORT_FILM") throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không phải SHORT_FILM`);
+      const contract = parseObject(row[24], "contract_json");
+      const workflow = ShortFilmWorkflowSchema.parse(contract.short_film_workflow);
+      const projectFolderId = String(row[20] ?? "").trim();
+      if (!projectFolderId) throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} thiếu project_folder_id`);
+      return { project_id: projectId, project_folder_id: projectFolderId, workflow, provider_budget: contract.provider_budget };
+    } catch (error) {
+      if (error instanceof ProjectRegistryProjectNotFoundError || error instanceof ProjectRegistryInvalidStateError) throw error;
+      throw new ProjectRegistryUnavailableError(error instanceof Error ? error.message : "Không đọc được execution context");
+    }
+  }
+
   async getProjectProgress(projectId: string) {
     const spreadsheetId = requiredSetting("GIA_DINH_TU_HAU_DATABASE_ID");
     const sheets = this.createSheetsClient();

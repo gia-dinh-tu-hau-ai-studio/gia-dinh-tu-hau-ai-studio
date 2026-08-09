@@ -6,6 +6,7 @@ import {
   normalizeProjectIntake,
   providerBudgetApproved,
   prepareShortFilmPilotPlan,
+  selectShortFilmPilotSamples,
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   shortFilmProductionReadinessBlockers,
@@ -192,6 +193,8 @@ test("pilot plan khóa provider và tài sản nhưng chưa gọi provider", () 
   assert.equal(plan.submission_gate, "AWAITING_PROJECT_OWNER_APPROVAL");
   assert.equal(plan.provider_calls_made, false);
   assert.equal(plan.pilot_shot_ids[0], "SHOT-001");
+  assert.equal(plan.pilot_samples.length, 3);
+  assert.equal(plan.total_sample_duration_seconds, 45);
   assert.deepEqual(plan.locked_identity_master_ids, ["TUONG_VY_MASTER_IDENTITY_V1"]);
   assert.deepEqual(plan.locked_voice_master_ids, ["TUONG_VY_VOICE_MASTER_AI_V1"]);
   assert.equal(plan.stages.find((stage) => stage.provider === "SYNC")?.required, true);
@@ -218,6 +221,46 @@ test("pilot plan từ chối số dư thiếu, xác nhận Sync thiếu và acco
       { provider: "SYNC", status: "UNVERIFIED", checked_at: preparedAt, manual_balance_confirmed: false },
     ],
   }), /RUNWAY_ACCOUNT_NOT_SUFFICIENT|SYNC_ACCOUNT_NOT_CONFIRMED|RUNWAY_ACCOUNT_CHECK_STALE/);
+});
+
+test("khóa sản xuất toàn phim cho đến khi mọi clip mẫu và pilot batch được duyệt", () => {
+  const approvedQc = { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true };
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "ok", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-10T10:00:00.000Z" },
+    shot_plan: { summary: "Representative shot", shots: ["A"] },
+    production_readiness: productionReadiness,
+    pilot_sampling: { sample_count: 3, clip_duration_seconds: 15, selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS", required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"] },
+    pilot_batch: {
+      samples: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"].map((purpose, index) => ({
+        sample_id: `PILOT-${index + 1}`, purpose, shot_ids: [`SHOT-00${index + 1}`], duration_seconds: 15,
+        video_url: `https://drive.google.com/file/d/pilot-${index + 1}/view`, qc: approvedQc,
+        review: { decision: "APPROVE", notes: "ok", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-10T10:00:00.000Z" },
+      })),
+      batch_review: { decision: "APPROVE", notes: "all passed", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-10T10:00:00.000Z" },
+    },
+  });
+  assert.equal(shortFilmNextAction(workflow), "PRODUCE_SHORT_FILM");
+  assert.throws(() => ShortFilmWorkflowSchema.parse({ ...workflow, pilot_batch: { ...workflow.pilot_batch, samples: workflow.pilot_batch!.samples.map((sample, index) => index === 0 ? { ...sample, qc: { ...sample.qc, identity: false } } : sample) } }), /PILOT_SAMPLE_NOT_APPROVED/);
+});
+
+test("chọn clip mẫu theo rủi ro từ các execution shot hợp lệ của phim dài", () => {
+  const shots = Array.from({ length: 9 }, (_, index) => ({
+    shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+    summary: `Shot ${index + 1}`,
+    runway_prompt: `Cinematic natural performance for approved character in shot ${index + 1}`,
+    duration_seconds: 5,
+    risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 3 ? ["MOTION_PERFORMANCE"] : index === 6 ? ["MULTI_CHARACTER_CONTINUITY"] : [],
+  }));
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "ok", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "Nine shots", shots: shots.map((shot) => shot.summary), execution_shots: shots },
+  });
+  const samples = selectShortFilmPilotSamples(parsed);
+  assert.equal(samples.length, 3);
+  assert.ok(samples.every((sample) => sample.expected_duration_seconds === 15 && sample.shots.length === 3));
+  assert.equal(new Set(samples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id))).size, 9);
 });
 
 test("mở yêu cầu kịch bản AI khi dự toán và kinh phí đã duyệt", () => {

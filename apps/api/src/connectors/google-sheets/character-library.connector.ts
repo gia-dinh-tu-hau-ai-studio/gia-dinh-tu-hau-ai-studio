@@ -50,6 +50,7 @@ export type EligibleCharacter = {
   master_identity_id?: string;
   master_identity_version?: string;
   voice_master_id?: string;
+  elevenlabs_voice_id?: string;
   voice_casting_profile?: string;
   readiness: {
     character: "ACTIVE";
@@ -133,6 +134,7 @@ export class CharacterLibraryConnector {
           master_identity_id: identityLocked ? String(identity.master_identity_id ?? "").trim() || undefined : undefined,
           master_identity_version: identityLocked ? String(identity.reference_set_version ?? row.version).trim() || undefined : undefined,
           voice_master_id: voiceLocked ? String(voice.voice_master_id ?? "").trim() || undefined : undefined,
+          elevenlabs_voice_id: voiceLocked ? String(voice.elevenlabs_voice_id ?? voice.provider_voice_id ?? "").trim() || undefined : undefined,
           voice_casting_profile: voiceLocked ? String(voice.casting_profile ?? "").trim() || undefined : undefined,
           readiness: {
             character: "ACTIVE" as const,

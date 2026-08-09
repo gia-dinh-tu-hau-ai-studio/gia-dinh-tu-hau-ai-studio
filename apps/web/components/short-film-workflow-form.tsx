@@ -79,6 +79,12 @@ export function createInitialShortFilmWorkflow(): ShortFilmWorkflow {
       singing_scene: false,
       singing_scene_notes: "",
     },
+    pilot_sampling: {
+      sample_count: 3,
+      clip_duration_seconds: 15,
+      selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
+      required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
+    },
   };
 }
 
@@ -105,7 +111,10 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     }));
   const availableActors = libraryActors.length > 0 ? libraryActors : temporaryActors;
   const scriptApproved = value.script_review.decision === "APPROVE";
-  const pilotApproved = Boolean(value.pilot && value.pilot.review.decision === "APPROVE" && allQcPassed(value.pilot.qc));
+  const pilotApproved = Boolean(
+    (value.pilot && value.pilot.review.decision === "APPROVE" && allQcPassed(value.pilot.qc)) ||
+    value.pilot_batch?.batch_review.decision === "APPROVE",
+  );
   const finalApproved = Boolean(value.full_film && value.full_film.review.decision === "APPROVE" && allQcPassed(value.full_film.qc));
 
   useEffect(() => {
@@ -190,6 +199,20 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     });
   }
 
+  function initializeExecutionShots() {
+    if (!value.shot_plan) return;
+    patch({ shot_plan: {
+      ...value.shot_plan,
+      execution_shots: value.shot_plan.shots.map((summary, index) => ({
+        shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+        summary,
+        runway_prompt: `${summary}. Cinematic Vietnamese television drama, natural acting and movement, preserve the approved character identity, costume and continuity.`,
+        duration_seconds: 5,
+        risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 1 ? ["MOTION_PERFORMANCE"] : index === 2 ? ["MULTI_CHARACTER_CONTINUITY"] : [],
+      })),
+    } });
+  }
+
   const readinessBlockers = value.production_readiness
     ? shortFilmProductionReadinessBlockers(value)
     : ["PRODUCTION_READINESS_MISSING"];
@@ -266,8 +289,14 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 
       <fieldset disabled={!scriptApproved} className={!scriptApproved ? "locked-stage" : ""}>
         <legend>Shot Plan — chỉ mở sau SCRIPT_APPROVED</legend>
-        <label><span>Tóm tắt Shot Plan</span><textarea value={value.shot_plan?.summary ?? ""} onChange={(event) => patch({ shot_plan: { summary: event.target.value, shots: value.shot_plan?.shots ?? ["Shot 01"] } })} /></label>
-        <label><span>Danh sách shot (mỗi dòng một shot)</span><textarea value={(value.shot_plan?.shots ?? []).join("\n")} onChange={(event) => patch({ shot_plan: { summary: value.shot_plan?.summary ?? "Shot Plan", shots: event.target.value.split("\n").filter(Boolean) } })} /></label>
+        <label><span>Tóm tắt Shot Plan</span><textarea value={value.shot_plan?.summary ?? ""} onChange={(event) => patch({ shot_plan: { summary: event.target.value, shots: value.shot_plan?.shots ?? ["Shot 01"], execution_shots: value.shot_plan?.execution_shots ?? [] } })} /></label>
+        <label><span>Danh sách shot (mỗi dòng một shot)</span><textarea value={(value.shot_plan?.shots ?? []).join("\n")} onChange={(event) => patch({ shot_plan: { summary: value.shot_plan?.summary ?? "Shot Plan", shots: event.target.value.split("\n").filter(Boolean), execution_shots: [] } })} /></label>
+        <button type="button" disabled={!value.shot_plan?.shots.length} onClick={initializeExecutionShots}>Tạo execution shots để kiểm tra</button>
+        {(value.shot_plan?.execution_shots ?? []).map((shot, index) => <article className="workflow-card" key={shot.shot_id}>
+          <h4>{shot.shot_id} · {shot.summary}</h4>
+          <label><span>Prompt chuyển động</span><textarea value={shot.runway_prompt} onChange={(event) => patch({ shot_plan: { ...value.shot_plan!, execution_shots: value.shot_plan!.execution_shots.map((item, itemIndex) => itemIndex === index ? { ...item, runway_prompt: event.target.value } : item) } })} /></label>
+          <label><span>Thời lượng shot</span><select value={shot.duration_seconds} onChange={(event) => patch({ shot_plan: { ...value.shot_plan!, execution_shots: value.shot_plan!.execution_shots.map((item, itemIndex) => itemIndex === index ? { ...item, duration_seconds: Number(event.target.value) } : item) } })}>{[2,3,4,5,6,7,8,9,10].map((seconds) => <option key={seconds} value={seconds}>{seconds} giây</option>)}</select></label>
+        </article>)}
       </fieldset>
 
       <fieldset disabled={!scriptApproved || !value.shot_plan} className={!scriptApproved || !value.shot_plan ? "locked-stage" : ""}>
@@ -393,11 +422,25 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 
       <fieldset disabled={!scriptApproved || !value.shot_plan || !productionReady} className={!scriptApproved || !value.shot_plan || !productionReady ? "locked-stage" : ""}>
         <legend>Pilot 10–20 giây và QC</legend>
+        <p className="gate-note">TuhauAI chỉ tạo đợt clip mẫu đại diện trước. Toàn bộ clip còn lại và bước ghép phim bị khóa cho đến khi từng mẫu và cổng duyệt tổng đều APPROVE.</p>
+        <label><span>Số clip mẫu cần xem</span><select value={value.pilot_sampling.sample_count} onChange={(event) => patch({ pilot_sampling: { ...value.pilot_sampling, sample_count: Number(event.target.value) } })}><option value={2}>2 clip</option><option value={3}>3 clip — khuyến nghị</option><option value={4}>4 clip</option><option value={5}>5 clip</option></select></label>
+        <label><span>Thời lượng mỗi clip</span><select value={value.pilot_sampling.clip_duration_seconds} onChange={(event) => patch({ pilot_sampling: { ...value.pilot_sampling, clip_duration_seconds: Number(event.target.value) } })}><option value={10}>10 giây</option><option value={15}>15 giây — khuyến nghị</option><option value={20}>20 giây</option></select></label>
+        <p className="gate-note">Mẫu bắt buộc phủ nhận dạng + thoại, diễn xuất chuyển động và nhiều nhân vật/continuity. Shot Plan ưu tiên thêm cảnh rủi ro cao khi chọn 4–5 mẫu.</p>
+        {value.pilot_batch?.samples.map((sample, index) => <article className="workflow-card" key={sample.sample_id}>
+          <h4>Clip mẫu {index + 1} · {sample.purpose}</h4>
+          <video controls src={sample.video_url} />
+          <QcChecklist qc={sample.qc} onChange={(qc) => patch({ pilot_batch: { ...value.pilot_batch!, samples: value.pilot_batch!.samples.map((item) => item.sample_id === sample.sample_id ? { ...item, qc, review: { ...item.review, decision: "PENDING" } } : item) } })} />
+          <ReviewGate label={`Duyệt ${sample.sample_id}`} review={sample.review} onChange={(review) => patch({ pilot_batch: { ...value.pilot_batch!, samples: value.pilot_batch!.samples.map((item) => item.sample_id === sample.sample_id ? { ...item, review } : item), batch_review: { ...value.pilot_batch!.batch_review, decision: "PENDING" } } })} />
+        </article>)}
+        {value.pilot_batch && <ReviewGate label="Duyệt toàn bộ đợt clip mẫu" review={value.pilot_batch.batch_review} onChange={(batch_review) => patch({ pilot_batch: { samples: value.pilot_batch!.samples, batch_review } })} />}
+        {!value.pilot_batch && <p className="gate-note">Chưa tạo clip mẫu — sản xuất toàn phim đang khóa.</p>}
+        <details><summary>Tương thích pilot đơn cũ</summary>
         <label><span>Player URL</span><input type="url" value={value.pilot?.video_url ?? ""} onChange={(event) => patch({ pilot: { duration_seconds: value.pilot?.duration_seconds ?? 15, video_url: event.target.value, qc: value.pilot?.qc ?? { ...emptyQc }, review: value.pilot?.review ?? { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } } })} /></label>
         <label><span>Thời lượng</span><input min={10} max={20} type="number" value={value.pilot?.duration_seconds ?? 15} onChange={(event) => value.pilot && patch({ pilot: { ...value.pilot, duration_seconds: Number(event.target.value) } })} /></label>
         {value.pilot?.video_url && <video controls src={value.pilot.video_url} />}
         <QcChecklist qc={value.pilot?.qc ?? emptyQc} onChange={(qc) => value.pilot && patch({ pilot: { ...value.pilot, qc } })} />
         <ReviewGate label="Pilot gate" review={value.pilot?.review} onChange={(review) => value.pilot && patch({ pilot: { ...value.pilot, review } })} />
+        </details>
       </fieldset>
 
       <fieldset disabled={!pilotApproved} className={!pilotApproved ? "locked-stage" : ""}>
