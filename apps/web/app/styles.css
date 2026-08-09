@@ -54,6 +54,9 @@ label { display: grid; gap: 8px; color: #e4d7d1; font-size: 14px; }
 .validation-feedback.error strong { color: #ffd2d8; }
 .validation-feedback.success { border-color: #4f9663; background: rgba(22, 82, 43, .48); }
 .validation-feedback.success strong { color: #bdf5ca; }
+.validation-target-button { justify-self: start; width: auto; margin-top: 4px; padding: 10px 14px; color: #1d1208; background: #f0c765; }
+.validation-target-error { border-radius: 12px; outline: 3px solid #ffcf70; outline-offset: 4px; animation: validation-pulse 1.2s ease-in-out 2; }
+@keyframes validation-pulse { 50% { outline-color: #ff718b; background-color: rgba(128, 31, 49, .28); } }
 .post-intake-note { display: grid; gap: 8px; padding: 18px; border: 1px solid #4f9663; border-radius: 14px; background: rgba(22, 82, 43, .32); }
 .post-intake-note strong { color: #bdf5ca; font-size: 18px; }
 .post-intake-note p { margin: 0; color: #e1d7d2; line-height: 1.55; }
