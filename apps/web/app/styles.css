@@ -51,6 +51,14 @@ button:disabled { opacity: .6; cursor: wait; }
 .check-row { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 18px; }
 .check-row label { display: flex; align-items: center; gap: 8px; }
 .check-row input { width: auto; }
+.duration-picker { grid-column: 1 / -1; padding: 0; border: 0; }
+.duration-picker > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 9px; }
+.duration-picker label { display: block; cursor: pointer; }
+.duration-picker input { position: absolute; opacity: 0; pointer-events: none; }
+.duration-picker label span { display: grid; min-height: 46px; place-items: center; padding: 8px; border: 1px solid #57494f; border-radius: 10px; background: #171215; color: #e9ddd7; font-weight: 700; text-align: center; }
+.duration-picker label.selected span { border-color: var(--gold); background: #4a3212; color: #ffe6aa; box-shadow: 0 0 0 1px var(--gold); }
+.duration-picker small { display: block; margin-top: 8px; color: #aa9ca2; }
+@media (max-width: 600px) { .duration-picker > div { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .platform-field { margin: 18px 0 0; padding: 0; border: 0; }
 .platform-field legend { color: #e4d7d1; font-size: 14px; }
 .confirmation-panel { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; border-color: var(--gold); }
