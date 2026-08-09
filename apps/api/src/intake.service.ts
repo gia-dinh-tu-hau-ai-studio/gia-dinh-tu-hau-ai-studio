@@ -220,8 +220,19 @@ export class IntakeService {
     return getShortFilmProviderStatus(process.env);
   }
 
-  checkProviderAccounts(body: unknown) {
-    return checkProviderAccounts(body, process.env);
+  async checkProviderAccounts(body: unknown) {
+    try {
+      return await checkProviderAccounts(body, process.env);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BadRequestException({
+          code: "PROVIDER_ACCOUNT_PREFLIGHT_REQUEST_INVALID",
+          message: "Dữ liệu dự toán gửi sang kiểm tra tài khoản không hợp lệ.",
+          errors: error.issues,
+        });
+      }
+      throw error;
+    }
   }
 
   async prepareMvProduction(projectIdInput: string) {

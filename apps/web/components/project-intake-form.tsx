@@ -173,6 +173,15 @@ function ResultDetails({ value }: { value: string }) {
   return <details className="result-details"><summary>Xem chi tiết kỹ thuật</summary><pre>{value}</pre></details>;
 }
 
+function accountAction(status: string) {
+  if (status === "INSUFFICIENT") return "Nạp thêm credit hoặc giảm thời lượng/dịch vụ rồi kiểm tra lại.";
+  if (status === "NOT_CONFIGURED") return "Cấu hình API key/secret của đúng nhà cung cấp.";
+  if (status === "AUTH_ERROR") return "Tạo hoặc lưu lại API key hợp lệ và kiểm tra quyền đọc tài khoản.";
+  if (status === "UNVERIFIED") return "Thử lại; nếu vẫn lỗi, mở trang Billing của nhà cung cấp để kiểm tra thủ công.";
+  if (status === "SUFFICIENT") return "Không cần xử lý.";
+  return "Báo quản trị hệ thống kèm mã HTTP hiển thị ở trên.";
+}
+
 export function ProjectIntakeForm() {
   const [projectType, setProjectType] = useState<FormProjectType>("SHORT_FILM");
   const [projectStarted, setProjectStarted] = useState(false);
@@ -249,7 +258,8 @@ export function ProjectIntakeForm() {
         body: JSON.stringify({ project_type: projectType, duration_seconds: providerBudget.estimate.estimated_duration_seconds, providers: providerBudget.providers }),
       });
       const body = await response.json();
-      setAccountPreflight(response.ok ? body as AccountPreflight : { checked_at: new Date().toISOString(), execution_gate: "BLOCKED", providers: [{ provider: "SYSTEM", status: "ERROR", message: body.message ?? body.code ?? "Không kiểm tra được tài khoản." }] });
+      const errorDetail = [body.code, typeof body.message === "string" ? body.message : undefined].filter(Boolean).join(" · ");
+      setAccountPreflight(response.ok ? body as AccountPreflight : { checked_at: new Date().toISOString(), execution_gate: "BLOCKED", providers: [{ provider: "SYSTEM", status: `HTTP_${response.status}`, message: errorDetail || "Không kiểm tra được tài khoản. Hãy thử lại; nếu lỗi lặp lại, báo quản trị hệ thống." }] });
     } catch {
       setAccountPreflight({ checked_at: new Date().toISOString(), execution_gate: "BLOCKED", providers: [{ provider: "SYSTEM", status: "ERROR", message: "Không kết nối được dịch vụ kiểm tra tài khoản." }] });
     } finally {
@@ -979,9 +989,9 @@ export function ProjectIntakeForm() {
         <div className={`account-preflight ${accountExecutionReady ? "approved" : "pending"}`}>
           <div><strong>KIỂM TRA TÀI KHOẢN TRƯỚC KHI CHẠY</strong><p>Chỉ đọc số dư/hạn mức. Không tạo ảnh, video, giọng hoặc trừ credit.</p></div>
           <button disabled={!budgetApproved || checkingAccounts} type="button" onClick={() => void checkAccounts()}>{checkingAccounts ? "Đang kiểm tra…" : "Kiểm tra tài khoản"}</button>
-          {accountPreflight && <div className="account-check-results">{accountPreflight.providers.map((item) => <article key={item.provider}><strong>{item.provider} · {item.status}</strong><span>{item.message}</span>{item.required_units !== undefined && <small>Cần {item.required_units.toLocaleString("vi-VN")} {item.unit}{item.available_units !== undefined ? ` · Còn ${item.available_units.toLocaleString("vi-VN")} ${item.unit}` : ""}</small>}</article>)}</div>}
+          {accountPreflight && <div className="account-check-results">{accountPreflight.providers.map((item) => <article key={item.provider}><strong>{item.provider} · {item.status}</strong><span>{item.message}</span>{item.required_units !== undefined && <small>Cần {item.required_units.toLocaleString("vi-VN")} {item.unit}{item.available_units !== undefined ? ` · Còn ${item.available_units.toLocaleString("vi-VN")} ${item.unit}` : ""}</small>}<small><b>Hành động:</b> {accountAction(item.status)}</small></article>)}</div>}
           {accountPreflight?.execution_gate === "MANUAL_CONFIRMATION_REQUIRED" && <label className="consent"><input checked={manualBalanceConfirmed} type="checkbox" onChange={(event) => setManualBalanceConfirmed(event.target.checked)} /> Tôi đã kiểm tra Billing của các nhà cung cấp không có API số dư và xác nhận đủ hạn mức.</label>}
-          {accountPreflight?.execution_gate === "BLOCKED" && <p className="operation-error">ĐÃ KHÓA CHẠY: hãy nạp thêm tiền/credit hoặc sửa API key rồi kiểm tra lại.</p>}
+          {accountPreflight?.execution_gate === "BLOCKED" && <p className="operation-error">ĐÃ KHÓA CHẠY: xem đúng trạng thái và “Hành động” của từng nhà cung cấp ở trên; không mặc định rằng mọi lỗi đều do thiếu tiền.</p>}
           {accountExecutionReady && <p className="operation-success">TÀI KHOẢN ĐÃ SẴN SÀNG CHO DỰ TOÁN HIỆN TẠI.</p>}
         </div>
       </section>
