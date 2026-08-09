@@ -269,7 +269,31 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         <label><span>Tên kịch bản</span><input placeholder="Ví dụ: Chiếc bẫy sau lời hứa" value={value.script_title} onChange={(event) => patch({ script_title: event.target.value })} /></label>
         <label><span>Tóm tắt nội dung</span><textarea placeholder="Tóm tắt câu chuyện trong 3–5 câu" value={value.script_synopsis} onChange={(event) => patch({ script_synopsis: event.target.value })} /></label>
         <label className="wide-field"><span>Toàn bộ kịch bản để duyệt</span><textarea placeholder="Kịch bản AI hoặc kịch bản của chủ dự án sẽ hiển thị tại đây" rows={14} value={value.full_script} onChange={(event) => patch({ full_script: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
-        <div className="approval-gate"><strong>Quyết định kịch bản</strong><select value={value.script_review.decision} onChange={(event) => patch({ script_review: { ...value.script_review, decision: event.target.value as ShortFilmWorkflow["script_review"]["decision"], reviewed_at: new Date().toISOString() } })}><option value="PENDING">Chờ duyệt</option><option value="REQUEST_CHANGES">Yêu cầu sửa</option><option value="APPROVE">Duyệt</option><option value="REJECT">Từ chối</option></select><textarea placeholder="Ghi rõ điểm cần sửa hoặc lý do duyệt/từ chối" value={value.script_review.notes} onChange={(event) => patch({ script_review: { ...value.script_review, notes: event.target.value } })} /></div>
+        <div className="approval-gate script-approval-gate">
+          <strong>Quyết định kịch bản</strong>
+          <p className="gate-note">Chọn một hành động rõ ràng. Duyệt kịch bản chỉ mở phần chuẩn bị tiếp theo, chưa gọi nhà cung cấp và chưa phát sinh chi phí media.</p>
+          <div className="script-approval-actions" role="group" aria-label="Quyết định kịch bản">
+            <button
+              className={value.script_review.decision === "APPROVE" ? "approval-action selected" : "approval-action"}
+              onClick={() => patch({ script_review: { ...value.script_review, decision: "APPROVE", reviewed_at: new Date().toISOString() } })}
+              type="button"
+            >Duyệt và mở bước tiếp theo</button>
+            <button
+              className={value.script_review.decision === "REQUEST_CHANGES" ? "secondary-button selected" : "secondary-button"}
+              onClick={() => patch({ script_review: { ...value.script_review, decision: "REQUEST_CHANGES", reviewed_at: new Date().toISOString() } })}
+              type="button"
+            >Yêu cầu sửa</button>
+            <button
+              className={value.script_review.decision === "REJECT" ? "remove-button selected" : "remove-button"}
+              onClick={() => patch({ script_review: { ...value.script_review, decision: "REJECT", reviewed_at: new Date().toISOString() } })}
+              type="button"
+            >Từ chối</button>
+          </div>
+          <p className={`script-review-status ${scriptApproved ? "approved" : ""}`} aria-live="polite">
+            {scriptApproved ? "Đã duyệt — phần tiếp theo đã được mở." : value.script_review.decision === "REQUEST_CHANGES" ? "Đang yêu cầu sửa kịch bản." : value.script_review.decision === "REJECT" ? "Kịch bản đã bị từ chối." : "Đang chờ chủ dự án duyệt."}
+          </p>
+          <textarea placeholder="Ghi rõ điểm cần sửa hoặc lý do duyệt/từ chối" value={value.script_review.notes} onChange={(event) => patch({ script_review: { ...value.script_review, notes: event.target.value } })} />
+        </div>
       </fieldset>
 
       <fieldset className="provider-status" aria-label="Trạng thái dịch vụ">

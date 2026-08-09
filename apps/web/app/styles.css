@@ -98,6 +98,12 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .wide-field, .approval-gate, .qc-grid, .gate-note, .short-film-workflow video { grid-column: 1 / -1; }
 .approval-gate { display: grid; grid-template-columns: auto minmax(180px, .5fr) 1fr; gap: 12px; align-items: center; padding: 15px; border: 1px solid var(--gold); border-radius: 12px; }
 .approval-gate textarea { min-height: 60px; }
+.script-approval-gate { grid-template-columns: 1fr; }
+.script-approval-actions { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+.script-approval-actions button { width: 100%; }
+.script-approval-actions .selected { box-shadow: 0 0 0 2px #ffe6aa; }
+.script-review-status { margin: 0; padding: 11px 13px; color: #ffe6aa; background: #21191c; border: 1px solid #59464e; border-radius: 10px; }
+.script-review-status.approved { color: #8fe2a1; border-color: #477554; background: #132219; }
 .qc-grid { display: flex; flex-wrap: wrap; gap: 12px; padding: 14px; border-radius: 12px; background: #151114; }
 .qc-grid label { display: flex; align-items: center; gap: 7px; }
 .qc-grid input { width: auto; }
@@ -146,4 +152,4 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .locked-stage input, .locked-stage select, .locked-stage textarea { cursor: not-allowed; }
 .short-film-workflow video { width: 100%; max-height: 480px; border-radius: 12px; background: #000; }
 @media (max-width: 760px) { main { width: min(calc(100% - 20px), 1080px); padding-top: 28px; } .hero { margin-bottom: 24px; } .project-grid, .field-grid, .character-picker, .confirmation-panel, .reference-row, .budget-approval, .progress-search { grid-template-columns: 1fr; } section { padding: 18px; border-radius: 16px; } input, select, textarea { min-height: 48px; font-size: 16px; } button { width: 100%; justify-self: stretch; } .wizard-bar { align-items: stretch; flex-direction: column; } }
-@media (max-width: 760px) { .short-film-workflow fieldset, .approval-gate { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .short-film-workflow fieldset, .approval-gate, .script-approval-actions { grid-template-columns: 1fr; } }
