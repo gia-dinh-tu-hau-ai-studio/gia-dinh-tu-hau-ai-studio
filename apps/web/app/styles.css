@@ -30,6 +30,24 @@ label { display: grid; gap: 8px; color: #e4d7d1; font-size: 14px; }
 .field-help { color: #aa9ca2; line-height: 1.4; }
 .wizard-bar { position: sticky; top: 8px; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(14, 11, 13, .96); }
 .wizard-bar button { justify-self: start; padding: 10px 16px; }
+.frame-navigator { position: sticky; top: 72px; z-index: 4; display: grid; gap: 10px; padding: 14px; border: 1px solid var(--gold); border-radius: 16px; background: rgba(14, 11, 13, .98); box-shadow: 0 12px 30px rgba(0,0,0,.35); }
+.frame-navigator header { display: flex; justify-content: space-between; gap: 12px; color: #ffe6aa; }
+.frame-progress { overflow: hidden; height: 8px; border-radius: 999px; background: #34282d; }
+.frame-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c58c2d, #75d68a); transition: width .25s ease; }
+.frame-navigator ol { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; margin: 0; padding: 0; list-style: none; }
+.frame-navigator button { display: grid; width: 100%; min-height: 52px; grid-template-columns: auto 1fr; gap: 7px; align-items: center; padding: 8px; border-radius: 10px; text-align: left; }
+.frame-navigator button b { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 50%; background: #2c2024; }
+.frame-navigator li.completed button { color: #d9ffe1; background: #1b3924; }
+.frame-navigator li.current button { color: #2b1700; background: linear-gradient(135deg, #f4d58b, #c58c2d); }
+.frame-navigator li.pending button { color: #776b70; background: #171215; opacity: .7; cursor: not-allowed; }
+.frame-guide { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 22px; padding: 15px; border: 1px solid #5b4931; border-radius: 12px; background: rgba(99,24,42,.18); }
+.frame-guide > b { flex: 0 0 auto; color: #ffe6aa; }
+.frame-guide strong { color: #fff2d0; font-size: 18px; }
+.frame-guide p { margin: 5px 0 0; color: #cdbfb8; line-height: 1.45; }
+.frame-actions { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.frame-actions span { color: #cdbfb8; }
+.frame-message { position: sticky; top: 250px; z-index: 3; margin: 0; padding: 14px 16px; color: #ffe6aa; border: 1px solid #b5792f; border-radius: 12px; background: #2a1b0d; }
+.final-check-button { width: 100%; justify-self: stretch; font-size: 17px; }
 .reference-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; padding: 16px; border: 1px solid #3b2e33; border-radius: 14px; background: #151114; }
 .reference-row .consent { grid-column: 1 / -1; display: flex; align-items: center; }
 .reference-row .consent input { width: auto; }
@@ -104,6 +122,10 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .script-approval-actions .selected { box-shadow: 0 0 0 2px #ffe6aa; }
 .script-review-status { margin: 0; padding: 11px 13px; color: #ffe6aa; background: #21191c; border: 1px solid #59464e; border-radius: 10px; }
 .script-review-status.approved { color: #8fe2a1; border-color: #477554; background: #132219; }
+.review-click-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.review-click-actions button { width: 100%; min-height: 46px; padding: 10px 12px; }
+.review-click-actions .selected { box-shadow: 0 0 0 2px #ffe6aa; }
+.compact-approval { grid-template-columns: 1fr; }
 .qc-grid { display: flex; flex-wrap: wrap; gap: 12px; padding: 14px; border-radius: 12px; background: #151114; }
 .qc-grid label { display: flex; align-items: center; gap: 7px; }
 .qc-grid input { width: auto; }
@@ -148,8 +170,8 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .progress-result li small { color: #aa9ca2; }
 .progress-result li.completed { color: #8fe2a1; }
 .progress-result li.current { color: #ffe6aa; border-color: var(--gold); }
-.locked-stage { opacity: .52; }
-.locked-stage input, .locked-stage select, .locked-stage textarea { cursor: not-allowed; }
+.locked-stage,
+.system-only { display: none !important; }
 .short-film-workflow video { width: 100%; max-height: 480px; border-radius: 12px; background: #000; }
-@media (max-width: 760px) { main { width: min(calc(100% - 20px), 1080px); padding-top: 28px; } .hero { margin-bottom: 24px; } .project-grid, .field-grid, .character-picker, .confirmation-panel, .reference-row, .budget-approval, .progress-search { grid-template-columns: 1fr; } section { padding: 18px; border-radius: 16px; } input, select, textarea { min-height: 48px; font-size: 16px; } button { width: 100%; justify-self: stretch; } .wizard-bar { align-items: stretch; flex-direction: column; } }
-@media (max-width: 760px) { .short-film-workflow fieldset, .approval-gate, .script-approval-actions { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { main { width: min(calc(100% - 20px), 1080px); padding-top: 28px; } .hero { margin-bottom: 24px; } .project-grid, .field-grid, .character-picker, .confirmation-panel, .reference-row, .budget-approval, .progress-search { grid-template-columns: 1fr; } section { padding: 18px; border-radius: 16px; } input, select, textarea { min-height: 48px; font-size: 16px; } button { width: 100%; justify-self: stretch; } .wizard-bar { position: static; align-items: stretch; flex-direction: column; } .frame-navigator { top: 8px; } .frame-navigator header { display: grid; } .frame-navigator ol { grid-template-columns: repeat(6, 38px); overflow-x: auto; } .frame-navigator button { display: grid; place-items: center; min-height: 38px; padding: 5px; } .frame-navigator button span { display: none; } .frame-actions { display: grid; grid-template-columns: 1fr; } .frame-actions .secondary-button { order: 2; } .frame-message { top: 150px; } }
+@media (max-width: 760px) { .short-film-workflow fieldset, .approval-gate, .script-approval-actions, .review-click-actions { grid-template-columns: 1fr; } }
