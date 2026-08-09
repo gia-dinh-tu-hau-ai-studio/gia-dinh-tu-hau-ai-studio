@@ -194,6 +194,31 @@ function validationFrameForPath(path: Array<string | number>, projectType: FormP
   return 2;
 }
 
+function shortFilmIntakeOnly(workflow: ShortFilmWorkflow): ShortFilmWorkflow {
+  const intake = { ...workflow };
+  delete intake.shot_plan;
+  delete intake.production_readiness;
+  delete intake.pilot;
+  delete intake.pilot_batch;
+  delete intake.full_film;
+  return intake;
+}
+
+function userValidationMessage(frame: number, path: Array<string | number>) {
+  const field = String(path.at(-1) ?? "");
+  const labels: Record<string, string> = {
+    idea_brief: "Ý tưởng phim",
+    script_title: "Tên kịch bản",
+    script_synopsis: "Tóm tắt kịch bản",
+    full_script: "Nội dung kịch bản",
+    singing_scene_notes: "Mô tả hoặc nguồn cảnh hát",
+  };
+  const label = labels[field];
+  return label
+    ? `Khung ${frame} còn thiếu hoặc chưa hoàn chỉnh: ${label}.`
+    : `Khung ${frame} còn nội dung chưa hoàn chỉnh. Vui lòng kiểm tra các mục đang để trống.`;
+}
+
 function FrameNavigator({ currentFrame, maxFrameReached, onSelect }: { currentFrame: number; maxFrameReached: number; onSelect: (frame: number) => void }) {
   return <nav className="frame-navigator" aria-label="Tiến độ nhập dự án">
     <header><strong>Đang thực hiện Khung {currentFrame}/6</strong><span>{intakeFrames[currentFrame - 1]?.title}</span></header>
@@ -696,7 +721,7 @@ export function ProjectIntakeForm() {
       platforms: form.getAll("platforms").map(String),
       reference_sources: referenceSources.filter((source) => source.url.trim()),
       provider_budget: providerBudget,
-      short_film_workflow: projectType === "SHORT_FILM" ? shortFilmWorkflow : undefined,
+      short_film_workflow: projectType === "SHORT_FILM" ? shortFilmIntakeOnly(shortFilmWorkflow) : undefined,
       characters: characters.map((character) => {
         const libraryCharacter = eligibleCharacters.find(
           (item) => item.character_id === character.character_id,
@@ -739,13 +764,13 @@ export function ProjectIntakeForm() {
         window.setTimeout(() => document.querySelector(".confirmation-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
       } else {
         const issues = Array.isArray(body?.errors) ? body.errors : Array.isArray(body?.message?.errors) ? body.message.errors : [];
-        const issue = issues[0] as { path?: Array<string | number>; message?: string } | undefined;
+        const issue = issues[0] as { path?: Array<string | number> } | undefined;
         const path = Array.isArray(issue?.path) ? issue.path : [];
         const frame = validationFrameForPath(path, projectType);
-        const detail = issue?.message ?? body?.message ?? body?.code ?? "Dữ liệu chưa đáp ứng yêu cầu kiểm tra.";
+        const detail = userValidationMessage(frame, path);
         setCurrentFrame(frame);
-        setFrameMessage(`Khung ${frame} cần chỉnh sửa: ${detail}`);
-        setValidationFeedback({ kind: "error", title: "Dữ liệu chưa đạt", message: `Khung ${frame} cần chỉnh sửa: ${detail}` });
+        setFrameMessage(detail);
+        setValidationFeedback({ kind: "error", title: "Dữ liệu chưa đạt", message: detail });
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch {
