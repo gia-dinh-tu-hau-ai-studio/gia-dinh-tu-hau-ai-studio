@@ -555,8 +555,8 @@ export function ProjectIntakeForm() {
         setCharacterToAdd(approvedCharacters[0]?.character_id ?? "");
         setLibraryMessage(
           approvedCharacters.length > 0
-            ? `${approvedCharacters.length} nhân vật có Character Master APPROVED + LOCKED.`
-            : "Chưa có Character Master APPROVED + LOCKED.",
+            ? `${approvedCharacters.length} nhân vật sẵn sàng sử dụng.`
+            : "Chưa có nhân vật sẵn sàng sử dụng.",
         );
       })
       .catch((error: unknown) => {
@@ -1210,16 +1210,9 @@ export function ProjectIntakeForm() {
 
       <section className={`budget-panel intake-frame ${currentFrame === 4 ? "active" : ""}`} hidden={currentFrame !== 4} id="intake-frame-4">
         <FrameGuide number={4} />
-        <div className="section-heading"><span>05</span><div><h2>Nhà cung cấp &amp; dự toán kinh phí</h2><p>Chọn dịch vụ theo chức năng. Không nhà cung cấp nào được gọi trước khi kinh phí được duyệt.</p></div></div>
+        <div className="section-heading"><span>05</span><div><h2>Dự toán kinh phí</h2><p>Xem tổng chi phí dự kiến và bấm duyệt. Cấu hình kỹ thuật đã được hệ thống thiết lập sẵn.</p></div></div>
         <div className="internal-service-grid">
-          <label><span>Hậu kỳ nội bộ</span><select disabled value={providerBudget.internal_services.post_production}><option value="TUHAUAI_FFMPEG_CLOUD_RUN">TuhauAI · FFmpeg · Cloud Run</option></select><small>Cắt ghép, mix âm thanh và xuất bản master trong pipeline nội bộ.</small></label>
           <label><span>Nguồn nhạc phim</span><select value={providerBudget.internal_services.music_source} onChange={(event) => setProviderBudget((current) => ({ ...current, internal_services: { ...current.internal_services, music_source: event.target.value as ProviderBudgetPlan["internal_services"]["music_source"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="NOT_SELECTED">Chưa chọn</option><option value="PROJECT_OWNER_LICENSED">Chủ dự án cung cấp · đã có quyền</option><option value="LICENSED_LIBRARY">Thư viện nhạc đã cấp phép</option></select><small>Không sử dụng nhạc chưa xác nhận quyền.</small></label>
-        </div>
-        <div className="provider-budget-grid">
-          <label><span>Tạo kịch bản</span><select value={providerBudget.providers.script} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, script: event.target.value as ProviderBudgetPlan["providers"]["script"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="OPENAI_RESPONSES">OpenAI Responses API</option><option value="PROJECT_OWNER">Chủ dự án tự cung cấp</option></select><small>{providerBudget.providers.script === "OPENAI_RESPONSES" ? (shortFilmProviderStatus.script?.configured ? "Đã kết nối" : "Chưa cấu hình API") : "Không phát sinh phí AI"}</small></label>
-          <label><span>Tạo video</span><select value={providerBudget.providers.video} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, video: event.target.value as ProviderBudgetPlan["providers"]["video"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="RUNWAY">Runway</option><option value="NONE">Chưa sử dụng</option></select><small>{providerBudget.providers.video === "RUNWAY" ? (shortFilmProviderStatus.image_to_video?.configured ? "Đã kết nối" : "Chưa cấu hình API") : "Đã tắt"}</small></label>
-          <label><span>Giọng nói AI</span><select value={providerBudget.providers.voice} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, voice: event.target.value as ProviderBudgetPlan["providers"]["voice"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="ELEVENLABS">ElevenLabs</option><option value="APPROVED_VOICE_MASTER">Voice Master đã duyệt</option><option value="NONE">Không dùng giọng</option></select><small>{providerBudget.providers.voice === "ELEVENLABS" ? "Dùng Voice Master đã khóa qua ElevenLabs" : "Không gọi ElevenLabs"}</small></label>
-          <label><span>Khớp khẩu hình</span><select value={providerBudget.providers.lip_sync} onChange={(event) => setProviderBudget((current) => ({ ...current, providers: { ...current.providers, lip_sync: event.target.value as ProviderBudgetPlan["providers"]["lip_sync"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="SYNC">Sync</option><option value="NONE">Không lip-sync</option></select><small>{providerBudget.providers.lip_sync === "SYNC" ? (shortFilmProviderStatus.lip_sync?.configured ? "Đã kết nối" : "Chưa cấu hình API") : "Đã tắt"}</small></label>
         </div>
         <div className="budget-estimate-grid">
           {(["script", "video", "voice", "lip_sync", "contingency"] as const).map((key) => <div className="budget-line" key={key}><span>{({ script: "Kịch bản AI", video: "Tạo video", voice: "Giọng nói", lip_sync: "Khớp khẩu hình", contingency: "Dự phòng 20%" } as const)[key]}</span><strong>{providerBudget.estimate[key].toLocaleString("vi-VN")} USD</strong></div>)}
@@ -1242,7 +1235,7 @@ export function ProjectIntakeForm() {
 
       <section className={currentFrame === 6 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 6} id="intake-frame-6">
         <FrameGuide number={6} />
-        <div className="section-heading"><span>06</span><div><h2>Nhân vật & vai trò</h2><p>Chỉ chọn nhân vật đã duyệt; hệ thống khóa đúng gương mặt, giọng và người nói.</p></div></div>
+        <div className="section-heading"><span>06</span><div><h2>Nhân vật &amp; vai trò</h2><p>Chọn người xuất hiện và vai trò trong dự án. Các thiết lập đã chốt được áp dụng tự động.</p></div></div>
         <p className="library-status">{libraryMessage}</p>
         <div className="character-picker">
           <label>
@@ -1268,7 +1261,6 @@ export function ProjectIntakeForm() {
                 <div className="character-card-heading">
                   <div>
                     <strong>{libraryCharacter?.character_name}</strong>
-                    <small>{character.character_id}</small>
                   </div>
                   <button className="remove-button" onClick={() => {
                     invalidateConfirmation();
@@ -1278,12 +1270,6 @@ export function ProjectIntakeForm() {
                 <div className="field-grid">
                   <label><span>Vai trò dự án *</span><select value={character.project_role} onChange={(event) => updateCharacter(index, { project_role: event.target.value })}>{projectRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
                   <label><span>Vai trò biểu diễn *</span><select value={character.performance_role} onChange={(event) => updateCharacter(index, { performance_role: event.target.value })}>{performanceRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
-                  <label><span>Trang phục APPROVED</span><input disabled value={libraryCharacter?.default_costume_id || "Chưa chọn costume"} /></label>
-                  <label><span>Danh tính nhân vật</span><input disabled value="Character Master đã duyệt và khóa" /></label>
-                </div>
-                <div className="check-row">
-                  <label><input checked={character.voice_required} disabled={!libraryCharacter?.voice_available} onChange={(event) => updateCharacter(index, { voice_required: event.target.checked, ...(!event.target.checked ? { lip_sync_required: false } : {}) })} type="checkbox" /> Dùng voice APPROVED</label>
-                  <label><input checked={character.lip_sync_required} disabled={!character.voice_required || !libraryCharacter?.voice_available} onChange={(event) => updateCharacter(index, { lip_sync_required: event.target.checked })} type="checkbox" /> Khớp khẩu hình với thoại</label>
                 </div>
               </article>
             );
