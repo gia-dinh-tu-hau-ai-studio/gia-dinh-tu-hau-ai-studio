@@ -43,6 +43,12 @@ type ValidatedSubmission = {
   payload: Record<string, unknown>;
 };
 
+type ValidationFeedback = {
+  kind: "checking" | "error" | "success";
+  title: string;
+  message: string;
+};
+
 type ReferenceSource = {
   platform: "YOUTUBE" | "TIKTOK" | "FACEBOOK";
   url: string;
@@ -178,6 +184,16 @@ const intakeFrames = [
   { number: 6, title: "Kiểm tra & tạo dự án", help: "Xem lại dữ liệu đã nhập, kiểm tra và xác nhận tạo dự án." },
 ] as const;
 
+function validationFrameForPath(path: Array<string | number>, projectType: FormProjectType) {
+  const root = String(path[0] ?? "");
+  if (root === "reference_sources") return 3;
+  if (root === "provider_budget") return 4;
+  if (root === "short_film_workflow") return 5;
+  if (root === "characters") return projectType === "SHORT_FILM" ? 5 : 6;
+  if (["story_idea", "social_theme", "story_genre", "primary_setting", "ending_direction", "dialogue_source", "song_title", "song_topic", "music_genre", "lyrics_source_mode", "lyrics", "music_source_mode", "vocal_source_mode", "visual_direction", "clip_start_time", "clip_end_time"].includes(root)) return 5;
+  return 2;
+}
+
 function FrameNavigator({ currentFrame, maxFrameReached, onSelect }: { currentFrame: number; maxFrameReached: number; onSelect: (frame: number) => void }) {
   return <nav className="frame-navigator" aria-label="Tiến độ nhập dự án">
     <header><strong>Đang thực hiện Khung {currentFrame}/6</strong><span>{intakeFrames[currentFrame - 1]?.title}</span></header>
@@ -256,6 +272,7 @@ export function ProjectIntakeForm() {
   const [characterToAdd, setCharacterToAdd] = useState("");
   const [libraryMessage, setLibraryMessage] = useState("Đang đọc CHARACTER_LIBRARY…");
   const [result, setResult] = useState<string>("");
+  const [validationFeedback, setValidationFeedback] = useState<ValidationFeedback | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [validatedSubmission, setValidatedSubmission] = useState<ValidatedSubmission | null>(null);
   const [creating, setCreating] = useState(false);
@@ -635,21 +652,43 @@ export function ProjectIntakeForm() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setSubmitting(true);
     setResult("");
     setValidatedSubmission(null);
     setCreationResult("");
+    setValidationFeedback({ kind: "checking", title: "Đang kiểm tra dữ liệu…", message: "Vui lòng giữ nguyên trang trong giây lát." });
+
+    const invalidField = Array.from(formElement.elements).find((element) =>
+      (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) &&
+      element.willValidate && !element.checkValidity(),
+    ) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | undefined;
+    if (invalidField) {
+      const frame = Number(invalidField.closest<HTMLElement>(".intake-frame")?.id.replace("intake-frame-", "")) || 2;
+      const label = invalidField.closest("label")?.querySelector("span")?.textContent?.replace(" *", "") ?? "mục bắt buộc";
+      const message = `Khung ${frame} còn thiếu hoặc chưa đúng: ${label}.`;
+      setCurrentFrame(frame);
+      setFrameMessage(message);
+      setValidationFeedback({ kind: "error", title: "Chưa thể tiếp tục", message: `${message} Hệ thống đã mở đúng khung để bạn chỉnh sửa.` });
+      setSubmitting(false);
+      window.setTimeout(() => { invalidField.focus(); invalidField.reportValidity(); window.scrollTo({ top: 0, behavior: "smooth" }); }, 50);
+      return;
+    }
 
     const incompleteReference = referenceSources.find(
       (source) => !source.url.trim() || !source.rights_confirmed,
     );
     if (incompleteReference) {
       setResult("Vui lòng nhập URL và xác nhận quyền sử dụng cho từng link tham khảo.");
+      setCurrentFrame(3);
+      setFrameMessage("Khung 3 còn link tham khảo chưa có URL hoặc chưa xác nhận quyền sử dụng.");
+      setValidationFeedback({ kind: "error", title: "Chưa thể tiếp tục", message: "Khung 3 còn link tham khảo chưa hoàn chỉnh. Hệ thống đã mở đúng khung để bạn chỉnh sửa." });
       setSubmitting(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
 
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const payload = {
       ...Object.fromEntries(
         [...form.entries()].filter(([, value]) => String(value).trim() !== ""),
@@ -696,9 +735,23 @@ export function ProjectIntakeForm() {
           submissionId: body.submission_id,
           payload,
         });
+        setValidationFeedback({ kind: "success", title: "Dữ liệu đã đạt", message: "Bước kiểm tra đã xong. Bấm “Xác nhận tạo dự án TuhauAI” ở bên dưới để hoàn tất." });
+        window.setTimeout(() => document.querySelector(".confirmation-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+      } else {
+        const issues = Array.isArray(body?.errors) ? body.errors : Array.isArray(body?.message?.errors) ? body.message.errors : [];
+        const issue = issues[0] as { path?: Array<string | number>; message?: string } | undefined;
+        const path = Array.isArray(issue?.path) ? issue.path : [];
+        const frame = validationFrameForPath(path, projectType);
+        const detail = issue?.message ?? body?.message ?? body?.code ?? "Dữ liệu chưa đáp ứng yêu cầu kiểm tra.";
+        setCurrentFrame(frame);
+        setFrameMessage(`Khung ${frame} cần chỉnh sửa: ${detail}`);
+        setValidationFeedback({ kind: "error", title: "Dữ liệu chưa đạt", message: `Khung ${frame} cần chỉnh sửa: ${detail}` });
+        window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch {
       setResult("Không kết nối được API. Hãy thử lại hoặc liên hệ quản trị viên.");
+      setValidationFeedback({ kind: "error", title: "Không thể kiểm tra dữ liệu", message: "Không kết nối được hệ thống kiểm tra. Hãy thử lại; dữ liệu bạn đã nhập vẫn được giữ nguyên." });
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setSubmitting(false);
     }
@@ -1102,7 +1155,7 @@ export function ProjectIntakeForm() {
   }
 
   return (
-    <form data-intake-form onBlur={rememberInput} onChange={(event) => { invalidateConfirmation(); saveDraft(event.currentTarget); }} onInput={(event) => saveDraft(event.currentTarget)} onSubmit={handleSubmit}>
+    <form data-intake-form noValidate onBlur={rememberInput} onChange={(event) => { invalidateConfirmation(); saveDraft(event.currentTarget); }} onInput={(event) => saveDraft(event.currentTarget)} onSubmit={handleSubmit}>
       {Object.entries(inputHistory).map(([name, values]) => <datalist id={`history-${name.replace(/[^a-zA-Z0-9_-]/g, "-")}`} key={name}>{values.map((value) => <option key={value} value={value} />)}</datalist>)}
       {!projectStarted && <section className="project-gateway">
         <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chỉ chọn một loại. Dữ liệu nhánh ẩn không đi vào payload.</p></div></div>
@@ -1134,6 +1187,7 @@ export function ProjectIntakeForm() {
       <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => { setProjectStarted(false); setCurrentFrame(1); setMaxFrameReached(1); }}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong><small>{draftSavedAt ? "Đã tự động lưu nháp trên thiết bị này" : "Nội dung sẽ tự động lưu trên thiết bị này"}</small></div>
       <FrameNavigator currentFrame={currentFrame} maxFrameReached={maxFrameReached} onSelect={(frame) => moveToFrame(frame)} />
       {frameMessage && <p className="frame-message" role="alert">{frameMessage}</p>}
+      {validationFeedback && <div className={`validation-feedback ${validationFeedback.kind}`} role={validationFeedback.kind === "error" ? "alert" : "status"} aria-live="polite"><strong>{validationFeedback.title}</strong><span>{validationFeedback.message}</span></div>}
 
       <section className={currentFrame === 2 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 2} id="intake-frame-2">
         <FrameGuide number={2} />
