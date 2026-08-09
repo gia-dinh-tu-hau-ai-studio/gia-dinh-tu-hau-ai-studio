@@ -355,11 +355,10 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
               patch({ production_readiness: { ...value.production_readiness!, voice_masters, review: { ...value.production_readiness!.review, decision: "PENDING" } } });
             }} /></label>
             {voice.audition_audio_url && <audio controls src={voice.audition_audio_url} />}
-            <label><span>Duyệt audition</span><select value={voice.audition_review?.decision ?? "PENDING"} onChange={(event) => {
-              const decision = event.target.value as "PENDING" | "REQUEST_CHANGES" | "APPROVE" | "REJECT";
+            <div className="approval-gate compact-approval"><strong>Duyệt audition</strong><ReviewDecisionButtons value={voice.audition_review?.decision ?? "PENDING"} onChange={(decision) => {
               const voice_masters = value.production_readiness!.voice_masters.map((item) => item.source_actor_id === voice.source_actor_id ? { ...item, audition_review: { decision, notes: item.audition_review?.notes ?? "", reviewer: "PROJECT_OWNER" as const, reviewed_at: new Date().toISOString() } } : item);
               patch({ production_readiness: { ...value.production_readiness!, voice_masters, review: { ...value.production_readiness!.review, decision: "PENDING" } } });
-            }}><option value="PENDING">Chờ nghe</option><option value="REQUEST_CHANGES">REQUEST_CHANGES</option><option value="APPROVE">APPROVE</option><option value="REJECT">REJECT</option></select></label>
+            }} /></div>
           </article>)}
           {(value.shot_plan?.shots ?? []).map((shot, index) => {
             const shotId = `SHOT-${String(index + 1).padStart(3, "0")}`;
@@ -424,22 +423,22 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
                       const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.map((item) => item.shot_id === shotId ? { ...item, target_duration_ms: Number(event.target.value), reviewed_at: new Date().toISOString() } : item);
                       patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
                     }} /></label>
-                    {line && <label><span>Duyệt câu thoại</span><select value={line.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "APPROVE" : "PENDING"} onChange={(event) => {
+                    {line && <div className="approval-gate compact-approval"><strong>Duyệt câu thoại</strong><ReviewDecisionButtons simple value={line.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "APPROVE" : "PENDING"} onChange={(decision) => {
                       if (!value.production_readiness) return;
-                      const decision = event.target.value as "PENDING" | "APPROVE";
+                      if (decision !== "PENDING" && decision !== "APPROVE") return;
                       const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.map((item) => item.shot_id === shotId ? { ...item, pronunciation_decision: decision, age_casting_decision: decision, timing_decision: decision, reviewed_at: new Date().toISOString() } : item);
                       patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
-                    }}><option value="PENDING">Chờ nghe và kiểm tra</option><option value="APPROVE">APPROVE độ tuổi · phát âm · timing</option></select></label>}
+                    }} /></div>}
                     <p className="gate-note">{line?.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "PROJECT_OWNER APPROVED: độ tuổi · phát âm miền Tây · timing khẩu hình" : "Chưa duyệt câu thoại — provider bị khóa"}</p>
                   </>;
                 })()}
               </>}
             </article>;
           })}
-          <div className="approval-gate"><strong>Production readiness gate</strong><select value={value.production_readiness.review.decision} onChange={(event) => {
+          <div className="approval-gate"><strong>Production readiness gate</strong><ReviewDecisionButtons approveDisabled={readinessBlockers.some((blocker) => blocker !== "PRODUCTION_READINESS_NOT_APPROVED")} value={value.production_readiness.review.decision} onChange={(decision) => {
             if (!value.production_readiness) return;
-            patch({ production_readiness: { ...value.production_readiness, review: { ...value.production_readiness.review, decision: event.target.value as ShortFilmWorkflow["script_review"]["decision"], reviewed_at: new Date().toISOString() } } });
-          }}><option value="PENDING">Chờ review</option><option value="REQUEST_CHANGES">REQUEST_CHANGES</option><option disabled={readinessBlockers.some((blocker) => blocker !== "PRODUCTION_READINESS_NOT_APPROVED")} value="APPROVE">APPROVE</option><option value="REJECT">REJECT</option></select><textarea value={value.production_readiness.review.notes} onChange={(event) => patch({ production_readiness: { ...value.production_readiness!, review: { ...value.production_readiness!.review, notes: event.target.value } } })} /></div>
+            patch({ production_readiness: { ...value.production_readiness, review: { ...value.production_readiness.review, decision, reviewed_at: new Date().toISOString() } } });
+          }} /><textarea value={value.production_readiness.review.notes} onChange={(event) => patch({ production_readiness: { ...value.production_readiness!, review: { ...value.production_readiness!.review, notes: event.target.value } } })} /></div>
           <p className="gate-note">{productionReady ? "PROVIDER_EXECUTION_ALLOWED" : `PROVIDER_LOCKED: ${readinessBlockers.join(", ")}`}</p>
         </>}
       </fieldset>
@@ -486,7 +485,16 @@ function QcChecklist({ qc, onChange }: { qc: typeof emptyQc; onChange: (qc: type
 
 function ReviewGate({ label, review, onChange }: { label: string; review?: ShortFilmWorkflow["script_review"]; onChange: (review: ShortFilmWorkflow["script_review"]) => void }) {
   const current = review ?? { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" };
-  return <div className="approval-gate"><strong>{label}</strong><select value={current.decision} onChange={(event) => onChange({ ...current, decision: event.target.value as typeof current.decision, reviewed_at: new Date().toISOString() })}><option value="PENDING">Chờ review</option><option value="REQUEST_CHANGES">REQUEST_CHANGES</option><option value="APPROVE">APPROVE</option><option value="REJECT">REJECT</option></select><textarea placeholder="Ghi chú review" value={current.notes} onChange={(event) => onChange({ ...current, notes: event.target.value })} /></div>;
+  return <div className="approval-gate"><strong>{label}</strong><ReviewDecisionButtons value={current.decision} onChange={(decision) => onChange({ ...current, decision, reviewed_at: new Date().toISOString() })} /><textarea placeholder="Ghi chú review" value={current.notes} onChange={(event) => onChange({ ...current, notes: event.target.value })} /></div>;
+}
+
+function ReviewDecisionButtons({ value, onChange, approveDisabled = false, simple = false }: { value: ShortFilmWorkflow["script_review"]["decision"]; onChange: (decision: ShortFilmWorkflow["script_review"]["decision"]) => void; approveDisabled?: boolean; simple?: boolean }) {
+  return <div className="review-click-actions" role="group" aria-label="Lựa chọn duyệt">
+    <button className={value === "APPROVE" ? "selected" : ""} disabled={approveDisabled} onClick={() => onChange("APPROVE")} type="button">✓ Duyệt</button>
+    {!simple && <button className={value === "REQUEST_CHANGES" ? "secondary-button selected" : "secondary-button"} onClick={() => onChange("REQUEST_CHANGES")} type="button">↻ Yêu cầu sửa</button>}
+    {!simple && <button className={value === "REJECT" ? "remove-button selected" : "remove-button"} onClick={() => onChange("REJECT")} type="button">× Từ chối</button>}
+    {simple && <button className={value === "PENDING" ? "secondary-button selected" : "secondary-button"} onClick={() => onChange("PENDING")} type="button">Chưa duyệt</button>}
+  </div>;
 }
 
 function ReferenceImage({ label, url }: { label: string; url?: string }) {
