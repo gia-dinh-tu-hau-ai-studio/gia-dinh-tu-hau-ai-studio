@@ -225,24 +225,24 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         <span>Kịch bản, nhân vật, giọng nói, pilot và phim hoàn chỉnh đều phải được duyệt trước khi đi tiếp.</span>
       </div>
 
-      <fieldset>
+      <fieldset data-validation-path="film_characters">
         <legend>Diễn viên nguồn và nhân vật trong phim</legend>
-        <label><span>Số lượng nhân vật</span><input min={1} max={20} type="number" value={value.character_count} onChange={(event) => setCharacterCount(Number(event.target.value))} /></label>
+        <label data-validation-path="character_count"><span>Số lượng nhân vật</span><input min={1} max={20} type="number" value={value.character_count} onChange={(event) => setCharacterCount(Number(event.target.value))} /></label>
         <p className="gate-note">Chọn nhân vật và vai diễn. Hệ thống tự áp dụng hình ảnh, giọng nói và các thiết lập đã chốt.</p>
         {value.film_characters.map((character, index) => (
           <article className="workflow-card" key={`${index}-${character.source_actor_id}`}>
             <h4>Nhân vật {index + 1}</h4>
-            <label><span>Diễn viên nguồn</span><select value={character.source_actor_id} onChange={(event) => {
+            <label data-validation-path={`film_characters.${index}.source_actor_id`}><span>Diễn viên nguồn</span><select value={character.source_actor_id} onChange={(event) => {
               const next = [...value.film_characters]; next[index] = { ...character, source_actor_id: event.target.value };
               const selected = availableActors.find((actor) => actor.source_actor_id === event.target.value);
               patch({ film_characters: next, source_actors: selected && !value.source_actors.some((actor) => actor.source_actor_id === selected.source_actor_id) ? [...value.source_actors, { ...selected }] : value.source_actors });
             }}>{availableActors.map((actor) => <option key={actor.source_actor_id} value={actor.source_actor_id}>{actor.source_actor_name}</option>)}</select></label>
-            <label><span>Tên nhân vật trong phim</span><input placeholder="Ví dụ: Vy, An, Má Lan" value={character.film_character_name} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_character_name: event.target.value }; patch({ film_characters: next }); }} /></label>
-            <label><span>Vai diễn</span><select value={character.film_role} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_role: event.target.value as typeof character.film_role }; patch({ film_characters: next }); }}><option value="PROTAGONIST">Nhân vật chính</option><option value="ANTAGONIST">Đối trọng</option><option value="SUPPORTING">Hỗ trợ</option><option value="CAMEO">Khách mời</option><option value="EXTRA">Quần chúng</option></select></label>
+            <label data-validation-path={`film_characters.${index}.film_character_name`}><span>Tên nhân vật trong phim</span><input placeholder="Ví dụ: Vy, An, Má Lan" value={character.film_character_name} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_character_name: event.target.value }; patch({ film_characters: next }); }} /></label>
+            <label data-validation-path={`film_characters.${index}.film_role`}><span>Vai diễn</span><select value={character.film_role} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_role: event.target.value as typeof character.film_role }; patch({ film_characters: next }); }}><option value="PROTAGONIST">Nhân vật chính</option><option value="ANTAGONIST">Đối trọng</option><option value="SUPPORTING">Hỗ trợ</option><option value="CAMEO">Khách mời</option><option value="EXTRA">Quần chúng</option></select></label>
             {value.script_source === "PROJECT_OWNER_PROVIDED" ? <>
-              <label><span>Quan hệ (không bắt buộc)</span><input placeholder="Ví dụ: chị của An, con của Má Lan" value={character.relationships} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, relationships: event.target.value }; patch({ film_characters: next }); }} /></label>
-              <label><span>Tính cách (không bắt buộc)</span><textarea placeholder="Ví dụ: mạnh mẽ, chân thành, phản ứng nhanh" value={character.personality} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, personality: event.target.value }; patch({ film_characters: next }); }} /></label>
-              <label><span>Ngoại hình trong cảnh (không bắt buộc)</span><textarea placeholder="Chỉ mô tả trang phục hoặc tạo hình cần thấy trong phim" value={character.appearance} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, appearance: event.target.value }; patch({ film_characters: next }); }} /></label>
+              <label data-validation-path={`film_characters.${index}.relationships`}><span>Quan hệ (không bắt buộc)</span><input placeholder="Ví dụ: chị của An, con của Má Lan" value={character.relationships} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, relationships: event.target.value }; patch({ film_characters: next }); }} /></label>
+              <label data-validation-path={`film_characters.${index}.personality`}><span>Tính cách (không bắt buộc)</span><textarea placeholder="Ví dụ: mạnh mẽ, chân thành, phản ứng nhanh" value={character.personality} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, personality: event.target.value }; patch({ film_characters: next }); }} /></label>
+              <label data-validation-path={`film_characters.${index}.appearance`}><span>Ngoại hình trong cảnh (không bắt buộc)</span><textarea placeholder="Chỉ mô tả trang phục hoặc tạo hình cần thấy trong phim" value={character.appearance} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, appearance: event.target.value }; patch({ film_characters: next }); }} /></label>
             </> : <p className="ai-character-note">AI sẽ tự xây dựng quan hệ, tính cách và ngoại hình trong cảnh từ ý tưởng và kịch bản. Bạn không cần nhập các mục này.</p>}
           </article>
         ))}
@@ -250,14 +250,14 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 
       <fieldset>
         <legend>Kịch bản và duyệt kịch bản</legend>
-        <label><span>Nguồn kịch bản</span><select value={value.script_source} onChange={(event) => patch({ script_source: event.target.value as ShortFilmWorkflow["script_source"] })}><option value="AI_GENERATED">AI tạo</option><option value="PROJECT_OWNER_PROVIDED">Chủ dự án cung cấp</option><option value="AI_DEVELOPED_FROM_IDEA">AI phát triển từ ý tưởng</option></select></label>
-        <label><span>Thời lượng mục tiêu (phút)</span><input min={1} max={60} type="number" value={value.target_duration_minutes} onChange={(event) => patch({ target_duration_minutes: Number(event.target.value) })} /></label>
-        <label className="wide-field"><span>Ý tưởng để AI phát triển</span><textarea placeholder="Nhập xung đột chính, thông điệp, bối cảnh và hướng kết thúc (tối thiểu 20 ký tự)." rows={6} value={value.idea_brief} onChange={(event) => patch({ idea_brief: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
+        <label data-validation-path="script_source"><span>Nguồn kịch bản</span><select value={value.script_source} onChange={(event) => patch({ script_source: event.target.value as ShortFilmWorkflow["script_source"] })}><option value="AI_GENERATED">AI tạo</option><option value="PROJECT_OWNER_PROVIDED">Chủ dự án cung cấp</option><option value="AI_DEVELOPED_FROM_IDEA">AI phát triển từ ý tưởng</option></select></label>
+        <label data-validation-path="target_duration_minutes"><span>Thời lượng mục tiêu (phút)</span><input min={1} max={60} type="number" value={value.target_duration_minutes} onChange={(event) => patch({ target_duration_minutes: Number(event.target.value) })} /></label>
+        <label className="wide-field" data-validation-path="idea_brief"><span>Ý tưởng để AI phát triển</span><textarea placeholder="Nhập xung đột chính, thông điệp, bối cảnh và hướng kết thúc (tối thiểu 20 ký tự)." rows={6} value={value.idea_brief} onChange={(event) => patch({ idea_brief: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
         {value.script_source !== "PROJECT_OWNER_PROVIDED" && onGenerateScript && <><button disabled={generatingScript || (providerBudgetApproved && value.idea_brief.trim().length < 20)} onClick={providerBudgetApproved ? onGenerateScript : onRequestBudgetApproval} type="button">{generatingScript ? "AI đang tạo kịch bản…" : providerBudgetApproved ? "Tạo bản nháp kịch bản từ ý tưởng" : "Đi đến duyệt kinh phí"}</button>{!providerBudgetApproved && <p className="gate-note">Bấm nút trên để đi thẳng đến dự toán. OpenAI vẫn bị khóa cho đến khi cổng Duyệt kinh phí đạt.</p>}</>}
-        <label><span>Tên kịch bản</span><input placeholder="Ví dụ: Chiếc bẫy sau lời hứa" value={value.script_title} onChange={(event) => patch({ script_title: event.target.value })} /></label>
-        <label><span>Tóm tắt nội dung</span><textarea placeholder="Tóm tắt câu chuyện trong 3–5 câu" value={value.script_synopsis} onChange={(event) => patch({ script_synopsis: event.target.value })} /></label>
-        <label className="wide-field"><span>Toàn bộ kịch bản để duyệt</span><textarea placeholder="Kịch bản AI hoặc kịch bản của chủ dự án sẽ hiển thị tại đây" rows={14} value={value.full_script} onChange={(event) => patch({ full_script: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
-        <div className="approval-gate script-approval-gate">
+        <label data-validation-path="script_title"><span>Tên kịch bản</span><input placeholder="Ví dụ: Chiếc bẫy sau lời hứa" value={value.script_title} onChange={(event) => patch({ script_title: event.target.value })} /></label>
+        <label data-validation-path="script_synopsis"><span>Tóm tắt nội dung</span><textarea placeholder="Tóm tắt câu chuyện trong 3–5 câu" value={value.script_synopsis} onChange={(event) => patch({ script_synopsis: event.target.value })} /></label>
+        <label className="wide-field" data-validation-path="full_script"><span>Toàn bộ kịch bản để duyệt</span><textarea placeholder="Kịch bản AI hoặc kịch bản của chủ dự án sẽ hiển thị tại đây" rows={14} value={value.full_script} onChange={(event) => patch({ full_script: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
+        <div className="approval-gate script-approval-gate" data-validation-path="script_review">
           <strong>Quyết định kịch bản</strong>
           <p className="gate-note">Chọn một hành động rõ ràng. Duyệt kịch bản chỉ mở phần chuẩn bị tiếp theo, chưa gọi nhà cung cấp và chưa phát sinh chi phí media.</p>
           <div className="script-approval-actions" role="group" aria-label="Quyết định kịch bản">
@@ -286,10 +286,10 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 
       <fieldset>
         <legend>Thoại, ngôn ngữ và cảnh hát</legend>
-        <label><span>Ngôn ngữ</span><input value={value.dialogue.language} onChange={(event) => patch({ dialogue: { ...value.dialogue, language: event.target.value } })} /></label>
-        <label><span>Cấu hình thoại</span><select value={value.dialogue.dialogue_mode} onChange={(event) => patch({ dialogue: { ...value.dialogue, dialogue_mode: event.target.value as ShortFilmWorkflow["dialogue"]["dialogue_mode"] } })}><option value="DIALOGUE">Đối thoại</option><option value="VOICE_OVER">Voice-over</option><option value="MIXED">Kết hợp</option></select></label>
+        <label data-validation-path="dialogue.language"><span>Ngôn ngữ</span><input value={value.dialogue.language} onChange={(event) => patch({ dialogue: { ...value.dialogue, language: event.target.value } })} /></label>
+        <label data-validation-path="dialogue.dialogue_mode"><span>Cấu hình thoại</span><select value={value.dialogue.dialogue_mode} onChange={(event) => patch({ dialogue: { ...value.dialogue, dialogue_mode: event.target.value as ShortFilmWorkflow["dialogue"]["dialogue_mode"] } })}><option value="DIALOGUE">Đối thoại</option><option value="VOICE_OVER">Voice-over</option><option value="MIXED">Kết hợp</option></select></label>
         <label><input checked={value.dialogue.singing_scene} type="checkbox" onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene: event.target.checked } })} /> Có cảnh hát</label>
-        {value.dialogue.singing_scene && <label><span>Mô tả/nguồn cảnh hát</span><textarea value={value.dialogue.singing_scene_notes} onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene_notes: event.target.value } })} /></label>}
+        {value.dialogue.singing_scene && <label data-validation-path="dialogue.singing_scene_notes"><span>Mô tả/nguồn cảnh hát</span><textarea value={value.dialogue.singing_scene_notes} onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene_notes: event.target.value } })} /></label>}
       </fieldset>
 
       <div className="system-only" aria-hidden="true">

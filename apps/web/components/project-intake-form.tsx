@@ -47,6 +47,7 @@ type ValidationFeedback = {
   kind: "checking" | "error" | "success";
   title: string;
   message: string;
+  targetPath?: string;
 };
 
 type ReferenceSource = {
@@ -204,19 +205,41 @@ function shortFilmIntakeOnly(workflow: ShortFilmWorkflow): ShortFilmWorkflow {
   return intake;
 }
 
-function userValidationMessage(frame: number, path: Array<string | number>) {
-  const field = String(path.at(-1) ?? "");
+function validationTargetForIssue(frame: number, path: Array<string | number>) {
+  const normalized = path[0] === "short_film_workflow" ? path.slice(1) : path;
+  const field = String(normalized.at(-1) ?? "");
   const labels: Record<string, string> = {
     idea_brief: "Ý tưởng phim",
     script_title: "Tên kịch bản",
     script_synopsis: "Tóm tắt kịch bản",
     full_script: "Nội dung kịch bản",
     singing_scene_notes: "Mô tả hoặc nguồn cảnh hát",
+    source_actor_id: "Diễn viên nguồn",
+    source_actor_name: "Diễn viên nguồn",
+    film_character_name: "Tên nhân vật trong phim",
+    film_role: "Vai diễn",
+    relationships: "Quan hệ",
+    personality: "Tính cách",
+    appearance: "Ngoại hình trong cảnh",
+    language: "Ngôn ngữ thoại",
+    dialogue_mode: "Cấu hình thoại",
+    character_count: "Số lượng nhân vật",
+    decision: "Quyết định duyệt kịch bản",
+    reviewed_at: "Thời điểm duyệt kịch bản",
   };
   const label = labels[field];
-  return label
-    ? `Khung ${frame} còn thiếu hoặc chưa hoàn chỉnh: ${label}.`
-    : `Khung ${frame} còn nội dung chưa hoàn chỉnh. Vui lòng kiểm tra các mục đang để trống.`;
+  const characterIndex = normalized[0] === "film_characters" || normalized[0] === "source_actors"
+    ? Number(normalized[1])
+    : Number.NaN;
+  const message = label
+    ? Number.isInteger(characterIndex)
+      ? `Nhân vật ${characterIndex + 1}: kiểm tra mục “${label}”.`
+      : `Khung ${frame}: kiểm tra mục “${label}”.`
+    : `Khung ${frame} còn nội dung chưa hoàn chỉnh.`;
+  const targetParts = normalized[0] === "source_actors" && Number.isInteger(characterIndex)
+    ? ["film_characters", characterIndex, "source_actor_id"]
+    : normalized;
+  return { message, targetPath: targetParts.join(".") };
 }
 
 function FrameNavigator({ currentFrame, maxFrameReached, onSelect }: { currentFrame: number; maxFrameReached: number; onSelect: (frame: number) => void }) {
@@ -675,6 +698,34 @@ export function ProjectIntakeForm() {
     );
   }
 
+  function focusValidationTarget(targetPath?: string) {
+    document.querySelectorAll(".validation-target-error").forEach((element) => element.classList.remove("validation-target-error"));
+    if (!targetPath) {
+      document.getElementById(`intake-frame-${currentFrame}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    const parts = targetPath.split(".");
+    let target: HTMLElement | null = null;
+    while (parts.length > 0 && !target) {
+      target = document.querySelector<HTMLElement>(`[data-validation-path="${parts.join(".")}"]`);
+      if (!target) parts.pop();
+    }
+    if (!target) {
+      const fieldName = targetPath.split(".").at(-1);
+      target = fieldName ? document.querySelector<HTMLElement>(`[name="${fieldName}"]`) : null;
+    }
+    if (!target) {
+      document.getElementById(`intake-frame-${currentFrame}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    target.classList.add("validation-target-error");
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    const control = target.matches("input, select, textarea, button")
+      ? target
+      : target.querySelector<HTMLElement>("input, select, textarea, button");
+    window.setTimeout(() => control?.focus(), 250);
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -693,8 +744,8 @@ export function ProjectIntakeForm() {
       const label = invalidField.closest("label")?.querySelector("span")?.textContent?.replace(" *", "") ?? "mục bắt buộc";
       const message = `Khung ${frame} còn thiếu hoặc chưa đúng: ${label}.`;
       setCurrentFrame(frame);
-      setFrameMessage(message);
-      setValidationFeedback({ kind: "error", title: "Chưa thể tiếp tục", message: `${message} Hệ thống đã mở đúng khung để bạn chỉnh sửa.` });
+      setFrameMessage("");
+      setValidationFeedback({ kind: "error", title: "Chưa thể tiếp tục", message: `${message} Hệ thống đã mở đúng ô để bạn chỉnh sửa.` });
       setSubmitting(false);
       window.setTimeout(() => { invalidField.focus(); invalidField.reportValidity(); window.scrollTo({ top: 0, behavior: "smooth" }); }, 50);
       return;
@@ -706,7 +757,7 @@ export function ProjectIntakeForm() {
     if (incompleteReference) {
       setResult("Vui lòng nhập URL và xác nhận quyền sử dụng cho từng link tham khảo.");
       setCurrentFrame(3);
-      setFrameMessage("Khung 3 còn link tham khảo chưa có URL hoặc chưa xác nhận quyền sử dụng.");
+      setFrameMessage("");
       setValidationFeedback({ kind: "error", title: "Chưa thể tiếp tục", message: "Khung 3 còn link tham khảo chưa hoàn chỉnh. Hệ thống đã mở đúng khung để bạn chỉnh sửa." });
       setSubmitting(false);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -767,11 +818,11 @@ export function ProjectIntakeForm() {
         const issue = issues[0] as { path?: Array<string | number> } | undefined;
         const path = Array.isArray(issue?.path) ? issue.path : [];
         const frame = validationFrameForPath(path, projectType);
-        const detail = userValidationMessage(frame, path);
+        const target = validationTargetForIssue(frame, path);
         setCurrentFrame(frame);
-        setFrameMessage(detail);
-        setValidationFeedback({ kind: "error", title: "Dữ liệu chưa đạt", message: detail });
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        setFrameMessage("");
+        setValidationFeedback({ kind: "error", title: "Dữ liệu chưa đạt", message: target.message, targetPath: target.targetPath });
+        window.setTimeout(() => focusValidationTarget(target.targetPath), 80);
       }
     } catch {
       setResult("Không kết nối được API. Hãy thử lại hoặc liên hệ quản trị viên.");
@@ -1212,7 +1263,7 @@ export function ProjectIntakeForm() {
       <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => { setProjectStarted(false); setCurrentFrame(1); setMaxFrameReached(1); }}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong><small>{draftSavedAt ? "Đã tự động lưu nháp trên thiết bị này" : "Nội dung sẽ tự động lưu trên thiết bị này"}</small></div>
       <FrameNavigator currentFrame={currentFrame} maxFrameReached={maxFrameReached} onSelect={(frame) => moveToFrame(frame)} />
       {frameMessage && <p className="frame-message" role="alert">{frameMessage}</p>}
-      {validationFeedback && <div className={`validation-feedback ${validationFeedback.kind}`} role={validationFeedback.kind === "error" ? "alert" : "status"} aria-live="polite"><strong>{validationFeedback.title}</strong><span>{validationFeedback.message}</span></div>}
+      {validationFeedback && <div className={`validation-feedback ${validationFeedback.kind}`} role={validationFeedback.kind === "error" ? "alert" : "status"} aria-live="polite"><strong>{validationFeedback.title}</strong><span>{validationFeedback.message}</span>{validationFeedback.kind === "error" && <button className="validation-target-button" onClick={() => focusValidationTarget(validationFeedback.targetPath)} type="button">Đi đến mục cần sửa ↓</button>}</div>}
 
       <section className={currentFrame === 2 ? "intake-frame active" : "intake-frame"} hidden={currentFrame !== 2} id="intake-frame-2">
         <FrameGuide number={2} />
