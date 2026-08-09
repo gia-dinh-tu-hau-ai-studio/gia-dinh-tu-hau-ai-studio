@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  calculateSuggestedProviderBudget,
   calculateProjectProgress,
   normalizeProjectIntake,
   providerBudgetApproved,
@@ -14,7 +15,7 @@ import {
 const approvedProviderBudget = {
   internal_services: { post_production: "TUHAUAI_FFMPEG_CLOUD_RUN", music_source: "PROJECT_OWNER_LICENSED" },
   providers: { script: "OPENAI_RESPONSES", video: "RUNWAY", voice: "ELEVENLABS", lip_sync: "SYNC" },
-  estimate: { currency: "USD", script: 1, video: 50, voice: 5, lip_sync: 4, contingency: 10, total: 70 },
+  estimate: { basis_version: "TUHAUAI_BUDGET_2026-08-09", estimated_duration_seconds: 300, currency: "USD", script: 1, video: 50, voice: 5, lip_sync: 4, contingency: 10, total: 70 },
   approval: { decision: "APPROVE", approved_limit: 70, reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-09T00:00:00.000Z" },
 } as const;
 
@@ -153,6 +154,18 @@ test("khóa nhà cung cấp khi kinh phí chưa duyệt hoặc hạn mức khôn
     reference_sources: [],
     provider_budget: { ...approvedProviderBudget, approval: { ...approvedProviderBudget.approval, approved_limit: 60 } },
   }), /Hạn mức duyệt/);
+});
+
+test("tự tính dự toán có dự phòng theo thời lượng và provider", () => {
+  const estimate = calculateSuggestedProviderBudget({
+    project_type: "SHORT_FILM",
+    duration_seconds: 300,
+    providers: approvedProviderBudget.providers,
+  });
+  assert.equal(estimate.basis_version, "TUHAUAI_BUDGET_2026-08-09");
+  assert.equal(estimate.video, 54);
+  assert.equal(estimate.total, 74.82);
+  assert.equal(estimate.contingency, 12.47);
 });
 
 test("mở yêu cầu kịch bản AI khi dự toán và kinh phí đã duyệt", () => {

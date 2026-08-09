@@ -710,7 +710,7 @@ test("tạo mã dự án MV Gia Đình Tư Hậu", () => {
     provider_budget: {
       internal_services: { post_production: "TUHAUAI_FFMPEG_CLOUD_RUN", music_source: "PROJECT_OWNER_LICENSED" },
       providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "NONE", lip_sync: "NONE" },
-      estimate: { currency: "USD", script: 0, video: 50, voice: 0, lip_sync: 0, contingency: 5, total: 55 },
+      estimate: { basis_version: "TUHAUAI_BUDGET_2026-08-09", estimated_duration_seconds: 240, currency: "USD", script: 0, video: 50, voice: 0, lip_sync: 0, contingency: 5, total: 55 },
       approval: { decision: "APPROVE", approved_limit: 55, reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-04T00:00:00.000Z" },
     },
     characters: [{
