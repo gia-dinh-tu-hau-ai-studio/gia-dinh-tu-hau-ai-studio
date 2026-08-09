@@ -105,6 +105,11 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .budget-line strong { color: #f8f0e7; font-size: 18px; }
 .budget-total { border-color: var(--gold); }
 .budget-total strong { color: #ffe6aa; font-size: 28px; }
+.account-preflight { display: grid; gap: 14px; margin-top: 16px; padding: 18px; border: 1px solid #705321; border-radius: 14px; background: #18130e; }
+.account-preflight.approved { border-color: #397653; background: #0f1913; }
+.account-check-results { display: grid; gap: 10px; }
+.account-check-results article { display: grid; gap: 5px; padding: 12px; border: 1px solid #3b3430; border-radius: 10px; background: #100e0d; }
+.account-check-results span, .account-check-results small { color: #c9bbb2; }
 .provider-budget-grid { margin-bottom: 20px; }
 .provider-budget-grid label { padding: 15px; border: 1px solid #3b2e33; border-radius: 12px; background: #151114; }
 .provider-budget-grid small { color: #aa9ca2; line-height: 1.4; }

@@ -31,6 +31,7 @@ import {
   ShortFilmScriptProviderUnavailableError,
 } from "./providers/short-film-script.provider";
 import { getShortFilmProviderStatus } from "./providers/short-film-provider-status";
+import { checkProviderAccounts } from "./providers/provider-account-preflight";
 
 @Injectable()
 export class IntakeService {
@@ -217,6 +218,10 @@ export class IntakeService {
 
   shortFilmProviderStatus() {
     return getShortFilmProviderStatus(process.env);
+  }
+
+  checkProviderAccounts(body: unknown) {
+    return checkProviderAccounts(body, process.env);
   }
 
   async prepareMvProduction(projectIdInput: string) {

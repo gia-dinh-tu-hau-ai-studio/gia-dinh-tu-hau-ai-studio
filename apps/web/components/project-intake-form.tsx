@@ -130,6 +130,12 @@ type ProjectProgress = {
   milestones: Array<{ action: string; label: string; status: "COMPLETED" | "CURRENT" | "PENDING" }>;
 };
 
+type AccountPreflight = {
+  checked_at: string;
+  execution_gate: "READY" | "BLOCKED" | "MANUAL_CONFIRMATION_REQUIRED";
+  providers: Array<{ provider: string; status: string; required_units?: number; available_units?: number; unit?: string; message: string }>;
+};
+
 const projectTypes: Array<{ value: FormProjectType; label: string; description: string }> = [
   { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Kịch bản, nhân vật, thoại, pilot và phim hoàn chỉnh." },
   { value: "MUSIC_VIDEO", label: "MV âm nhạc", description: "Bài hát, giọng hát, hình ảnh và kế hoạch sản xuất MV." },
@@ -208,10 +214,16 @@ export function ProjectIntakeForm() {
   const [draftFormValues, setDraftFormValues] = useState<Record<string, string[]> | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState("");
   const [inputHistory, setInputHistory] = useState<Record<string, string[]>>({});
+  const [accountPreflight, setAccountPreflight] = useState<AccountPreflight | null>(null);
+  const [checkingAccounts, setCheckingAccounts] = useState(false);
+  const [manualBalanceConfirmed, setManualBalanceConfirmed] = useState(false);
 
   const budgetApproved = providerBudget.approval.decision === "APPROVE" &&
     Boolean(providerBudget.approval.reviewed_at) &&
     providerBudget.approval.approved_limit >= providerBudget.estimate.total;
+  const accountExecutionReady = accountPreflight?.execution_gate === "READY" ||
+    (accountPreflight?.execution_gate === "MANUAL_CONFIRMATION_REQUIRED" && manualBalanceConfirmed);
+  const providerRunReady = budgetApproved && accountExecutionReady;
 
   function approveBudget() {
     setProviderBudget((current) => ({
@@ -226,6 +238,25 @@ export function ProjectIntakeForm() {
     invalidateConfirmation();
   }
 
+  async function checkAccounts() {
+    setCheckingAccounts(true);
+    setAccountPreflight(null);
+    setManualBalanceConfirmed(false);
+    try {
+      const response = await fetch("/api/short-film/providers/account-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_type: projectType, duration_seconds: providerBudget.estimate.estimated_duration_seconds, providers: providerBudget.providers }),
+      });
+      const body = await response.json();
+      setAccountPreflight(response.ok ? body as AccountPreflight : { checked_at: new Date().toISOString(), execution_gate: "BLOCKED", providers: [{ provider: "SYSTEM", status: "ERROR", message: body.message ?? body.code ?? "Không kiểm tra được tài khoản." }] });
+    } catch {
+      setAccountPreflight({ checked_at: new Date().toISOString(), execution_gate: "BLOCKED", providers: [{ provider: "SYSTEM", status: "ERROR", message: "Không kết nối được dịch vụ kiểm tra tài khoản." }] });
+    } finally {
+      setCheckingAccounts(false);
+    }
+  }
+
   useEffect(() => {
     const durationSeconds = ({
       "15_SECONDS": 15,
@@ -236,6 +267,8 @@ export function ProjectIntakeForm() {
       "10_MINUTES": 600,
       "15_MINUTES": 900,
     } as Record<string, number>)[durationTarget] ?? 300;
+    setAccountPreflight(null);
+    setManualBalanceConfirmed(false);
     setProviderBudget((current) => {
       const estimate = calculateSuggestedProviderBudget({ project_type: projectType, duration_seconds: durationSeconds, providers: current.providers });
       if (estimate.total === current.estimate.total && estimate.estimated_duration_seconds === current.estimate.estimated_duration_seconds) return current;
@@ -892,7 +925,7 @@ export function ProjectIntakeForm() {
               generatingScript={generatingScript}
               onGenerateScript={generateShortFilmScript}
               onRequestBudgetApproval={() => document.getElementById("provider-budget")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              providerBudgetApproved={budgetApproved}
+              providerBudgetApproved={providerRunReady}
               providerStatus={shortFilmProviderStatus}
               onChange={(workflow) => {
                 invalidateConfirmation();
@@ -941,6 +974,14 @@ export function ProjectIntakeForm() {
         <div className={`budget-approval ${budgetApproved ? "approved" : "pending"}`}>
           <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "KINH PHÍ CHƯA DUYỆT"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Provider vẫn chờ các approval gate sản xuất.` : "Hãy kiểm tra dự toán và bấm Duyệt kinh phí. Việc bấm duyệt không gọi provider và không trừ tiền."}</p></div>
           <button type="button" onClick={approveBudget}>Duyệt {providerBudget.estimate.total.toLocaleString("vi-VN")} USD</button>
+        </div>
+        <div className={`account-preflight ${accountExecutionReady ? "approved" : "pending"}`}>
+          <div><strong>KIỂM TRA TÀI KHOẢN TRƯỚC KHI CHẠY</strong><p>Chỉ đọc số dư/hạn mức. Không tạo ảnh, video, giọng hoặc trừ credit.</p></div>
+          <button disabled={!budgetApproved || checkingAccounts} type="button" onClick={() => void checkAccounts()}>{checkingAccounts ? "Đang kiểm tra…" : "Kiểm tra tài khoản"}</button>
+          {accountPreflight && <div className="account-check-results">{accountPreflight.providers.map((item) => <article key={item.provider}><strong>{item.provider} · {item.status}</strong><span>{item.message}</span>{item.required_units !== undefined && <small>Cần {item.required_units.toLocaleString("vi-VN")} {item.unit}{item.available_units !== undefined ? ` · Còn ${item.available_units.toLocaleString("vi-VN")} ${item.unit}` : ""}</small>}</article>)}</div>}
+          {accountPreflight?.execution_gate === "MANUAL_CONFIRMATION_REQUIRED" && <label className="consent"><input checked={manualBalanceConfirmed} type="checkbox" onChange={(event) => setManualBalanceConfirmed(event.target.checked)} /> Tôi đã kiểm tra Billing của các nhà cung cấp không có API số dư và xác nhận đủ hạn mức.</label>}
+          {accountPreflight?.execution_gate === "BLOCKED" && <p className="operation-error">ĐÃ KHÓA CHẠY: hãy nạp thêm tiền/credit hoặc sửa API key rồi kiểm tra lại.</p>}
+          {accountExecutionReady && <p className="operation-success">TÀI KHOẢN ĐÃ SẴN SÀNG CHO DỰ TOÁN HIỆN TẠI.</p>}
         </div>
       </section>
 
@@ -994,7 +1035,7 @@ export function ProjectIntakeForm() {
         </div>
       </section>
 
-      <button disabled={submitting || characters.length === 0 || !budgetApproved} type="submit">{submitting ? "Đang kiểm tra…" : budgetApproved ? "Kiểm tra dữ liệu" : "Duyệt kinh phí trước khi tiếp tục"}</button>
+      <button disabled={submitting || characters.length === 0 || !providerRunReady} type="submit">{submitting ? "Đang kiểm tra…" : !budgetApproved ? "Duyệt kinh phí trước khi tiếp tục" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tiếp tục" : "Kiểm tra dữ liệu"}</button>
       </>}
       {result && <ResultDetails value={result} />}
       {validatedSubmission && (
