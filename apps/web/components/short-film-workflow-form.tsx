@@ -54,9 +54,9 @@ export function createInitialShortFilmWorkflow(): ShortFilmWorkflow {
       source_actor_id: actor.source_actor_id,
       film_character_name: index === 0 ? "Nhân vật A" : "Nhân vật B",
       film_role: index === 0 ? "PROTAGONIST" : "SUPPORTING",
-      relationships: "Chưa xác định",
-      personality: "Chưa xác định",
-      appearance: "Bám Character Master đã duyệt",
+      relationships: "",
+      personality: "",
+      appearance: "",
     })),
     script_source: "AI_DEVELOPED_FROM_IDEA",
     idea_brief: "",
@@ -151,9 +151,9 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         source_actor_id: availableActors[index % availableActors.length]?.source_actor_id ?? "GDTH-CHAR-001",
         film_character_name: `Nhân vật ${index + 1}`,
         film_role: index === 0 ? "PROTAGONIST" as const : "SUPPORTING" as const,
-        relationships: "Chưa xác định",
-        personality: "Chưa xác định",
-        appearance: "Bám Character Master đã duyệt",
+        relationships: "",
+        personality: "",
+        appearance: "",
       },
     );
     patch({ character_count: characterCount, film_characters: filmCharacters });
@@ -239,9 +239,11 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             }}>{availableActors.map((actor) => <option key={actor.source_actor_id} value={actor.source_actor_id}>{actor.source_actor_name}</option>)}</select></label>
             <label><span>Tên nhân vật trong phim</span><input placeholder="Ví dụ: Vy, An, Má Lan" value={character.film_character_name} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_character_name: event.target.value }; patch({ film_characters: next }); }} /></label>
             <label><span>Vai diễn</span><select value={character.film_role} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_role: event.target.value as typeof character.film_role }; patch({ film_characters: next }); }}><option value="PROTAGONIST">Nhân vật chính</option><option value="ANTAGONIST">Đối trọng</option><option value="SUPPORTING">Hỗ trợ</option><option value="CAMEO">Khách mời</option><option value="EXTRA">Quần chúng</option></select></label>
-            <label><span>Quan hệ</span><input placeholder="Ví dụ: chị của An, con của Má Lan" value={character.relationships} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, relationships: event.target.value }; patch({ film_characters: next }); }} /></label>
-            <label><span>Tính cách</span><textarea placeholder="Ví dụ: mạnh mẽ, chân thành, phản ứng nhanh" value={character.personality} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, personality: event.target.value }; patch({ film_characters: next }); }} /></label>
-            <label><span>Ngoại hình trong cảnh</span><textarea placeholder="Chỉ mô tả trang phục hoặc tạo hình cần thấy trong phim" value={character.appearance} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, appearance: event.target.value }; patch({ film_characters: next }); }} /></label>
+            {value.script_source === "PROJECT_OWNER_PROVIDED" ? <>
+              <label><span>Quan hệ (không bắt buộc)</span><input placeholder="Ví dụ: chị của An, con của Má Lan" value={character.relationships} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, relationships: event.target.value }; patch({ film_characters: next }); }} /></label>
+              <label><span>Tính cách (không bắt buộc)</span><textarea placeholder="Ví dụ: mạnh mẽ, chân thành, phản ứng nhanh" value={character.personality} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, personality: event.target.value }; patch({ film_characters: next }); }} /></label>
+              <label><span>Ngoại hình trong cảnh (không bắt buộc)</span><textarea placeholder="Chỉ mô tả trang phục hoặc tạo hình cần thấy trong phim" value={character.appearance} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, appearance: event.target.value }; patch({ film_characters: next }); }} /></label>
+            </> : <p className="ai-character-note">AI sẽ tự xây dựng quan hệ, tính cách và ngoại hình trong cảnh từ ý tưởng và kịch bản. Bạn không cần nhập các mục này.</p>}
           </article>
         ))}
       </fieldset>

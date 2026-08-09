@@ -57,6 +57,7 @@ label { display: grid; gap: 8px; color: #e4d7d1; font-size: 14px; }
 .post-intake-note { display: grid; gap: 8px; padding: 18px; border: 1px solid #4f9663; border-radius: 14px; background: rgba(22, 82, 43, .32); }
 .post-intake-note strong { color: #bdf5ca; font-size: 18px; }
 .post-intake-note p { margin: 0; color: #e1d7d2; line-height: 1.55; }
+.ai-character-note { grid-column: 1 / -1; margin: 0; padding: 12px 14px; border-radius: 10px; color: #c9e8cf; background: rgba(22, 82, 43, .28); line-height: 1.5; }
 .final-check-button { width: 100%; justify-self: stretch; font-size: 17px; }
 .next-step-guide { grid-column: 1 / -1; padding: 18px; border: 1px solid #d9a846; border-radius: 16px; background: linear-gradient(135deg, rgba(217,168,70,.16), rgba(115,188,127,.09)); }
 .next-step-guide > strong { display: block; color: #ffe2a3; font-size: 19px; margin-bottom: 10px; }

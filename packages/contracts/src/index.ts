@@ -115,9 +115,9 @@ export const ShortFilmCharacterSchema = z.object({
   source_actor_id: z.string().trim().min(1),
   film_character_name: z.string().trim().min(1),
   film_role: ShortFilmRoleSchema,
-  relationships: z.string().trim().min(1),
-  personality: z.string().trim().min(1),
-  appearance: z.string().trim().min(1),
+  relationships: z.string().trim().default(""),
+  personality: z.string().trim().default(""),
+  appearance: z.string().trim().default(""),
 });
 
 export const ShortFilmReviewSchema = z.object({

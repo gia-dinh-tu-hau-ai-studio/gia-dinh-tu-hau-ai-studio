@@ -30,6 +30,21 @@ test("migrate legacy short-film draft without deleting user content", () => {
   assert.equal(migrated.dialogue.singing_scene, defaults.dialogue.singing_scene);
 });
 
+test("AI có thể tự xây dựng chi tiết nhân vật còn để trống", () => {
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    film_characters: shortFilmWorkflow.film_characters.map((character) => ({
+      ...character,
+      relationships: "",
+      personality: "",
+      appearance: "",
+    })),
+  });
+  assert.equal(workflow.film_characters[0].relationships, "");
+  assert.equal(workflow.film_characters[0].personality, "");
+  assert.equal(workflow.film_characters[0].appearance, "");
+});
+
 const approvedProviderBudget = {
   internal_services: { post_production: "TUHAUAI_FFMPEG_CLOUD_RUN", music_source: "PROJECT_OWNER_LICENSED" },
   providers: { script: "OPENAI_RESPONSES", video: "RUNWAY", voice: "ELEVENLABS", lip_sync: "SYNC" },
