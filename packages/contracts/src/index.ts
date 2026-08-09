@@ -588,6 +588,28 @@ export const ShortFilmWorkflowSchema = z
 
 export type ShortFilmWorkflow = z.infer<typeof ShortFilmWorkflowSchema>;
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Preserve user-entered draft values while filling fields added by newer form versions. */
+export function migrateShortFilmWorkflowDraft(draft: unknown, defaults: ShortFilmWorkflow): ShortFilmWorkflow {
+  const mergeMissing = (fallback: unknown, stored: unknown): unknown => {
+    if (Array.isArray(fallback)) return Array.isArray(stored) ? stored : fallback;
+    if (isPlainRecord(fallback)) {
+      if (!isPlainRecord(stored)) return fallback;
+      return Object.fromEntries(
+        Object.entries(fallback).map(([key, value]) => [key, mergeMissing(value, stored[key])]).concat(
+          Object.entries(stored).filter(([key]) => !(key in fallback)),
+        ),
+      );
+    }
+    if (stored === undefined || stored === null || typeof stored !== typeof fallback) return fallback;
+    return stored;
+  };
+  return mergeMissing(defaults, draft) as ShortFilmWorkflow;
+}
+
 export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
   const workflow = ShortFilmWorkflowSchema.parse(workflowInput);
   const shots = workflow.shot_plan?.execution_shots ?? [];

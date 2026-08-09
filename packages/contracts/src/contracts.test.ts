@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   calculateSuggestedProviderBudget,
   calculateProjectProgress,
+  migrateShortFilmWorkflowDraft,
   normalizeProjectIntake,
   providerBudgetApproved,
   prepareShortFilmPilotPlan,
@@ -13,6 +14,21 @@ import {
   ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowSchema,
 } from "./index";
+
+test("migrate legacy short-film draft without deleting user content", () => {
+  const defaults = ShortFilmWorkflowSchema.parse(shortFilmWorkflow);
+  const legacy = {
+    ...shortFilmWorkflow,
+    idea_brief: "Ý tưởng người dùng phải được giữ nguyên",
+    pilot_sampling: undefined,
+    dialogue: { language: "vi", dialogue_mode: "DIALOGUE" },
+  };
+  const migrated = migrateShortFilmWorkflowDraft(legacy, defaults);
+  assert.equal(migrated.idea_brief, legacy.idea_brief);
+  assert.deepEqual(migrated.pilot_sampling, defaults.pilot_sampling);
+  assert.equal(migrated.dialogue.voice_master_mode, defaults.dialogue.voice_master_mode);
+  assert.equal(migrated.dialogue.singing_scene, defaults.dialogue.singing_scene);
+});
 
 const approvedProviderBudget = {
   internal_services: { post_production: "TUHAUAI_FFMPEG_CLOUD_RUN", music_source: "PROJECT_OWNER_LICENSED" },
