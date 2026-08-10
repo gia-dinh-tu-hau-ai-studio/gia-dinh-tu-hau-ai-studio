@@ -31,6 +31,9 @@ type Props = {
   scriptBudgetSummary?: string;
   scriptAccountSummary?: string;
   providerStatus?: Record<string, { configured: boolean }>;
+  pilotBudgetApproved?: boolean;
+  pilotBudgetSummary?: string;
+  onApprovePilotBudget?: () => void;
 };
 
 const temporaryActors = [
@@ -127,7 +130,7 @@ function readinessBlockerLabel(blocker: string) {
   return blocker;
 }
 
-export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, checkingScriptAccount = false, scriptGenerationReady = false, scriptBudgetSummary, scriptAccountSummary }: Props) {
+export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, checkingScriptAccount = false, scriptGenerationReady = false, scriptBudgetSummary, scriptAccountSummary, pilotBudgetApproved = false, pilotBudgetSummary, onApprovePilotBudget }: Props) {
   const [shotPlanError, setShotPlanError] = useState("");
   const libraryActors = eligibleCharacters
     .filter((actor) => actor.readiness?.master_identity === "APPROVED_LOCKED")
@@ -397,6 +400,16 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
       <fieldset disabled={value.shot_plan?.review.decision !== "APPROVE"} className={value.shot_plan?.review.decision !== "APPROVE" ? "locked-stage" : ""}>
         <legend>Khóa nhân vật, giọng và keyframe</legend>
         <p className="gate-note">Hệ thống kiểm tra Character Master, Voice Master, người nói và keyframe trước khi cho phép tạo clip mẫu.</p>
+        <div className={`budget-approval ${pilotBudgetApproved ? "approved" : "pending"}`}>
+          <div>
+            <strong>{pilotBudgetApproved ? "NGÂN SÁCH 3 CLIP ĐÃ DUYỆT" : "DUYỆT NGÂN SÁCH 3 CLIP PILOT"}</strong>
+            <p>{pilotBudgetSummary ?? "3 clip × 15 giây · Runway tối đa 700 credits · ElevenLabs tối đa 1.000 credits · Sync tối đa 3 USD."}</p>
+            <small>Chỉ áp dụng cho đợt pilot; không duyệt sản xuất toàn phim.</small>
+          </div>
+          <button className={pilotBudgetApproved ? "action-completed" : "action-current"} disabled={pilotBudgetApproved} type="button" onClick={onApprovePilotBudget}>
+            {pilotBudgetApproved ? "✓ Đã duyệt ngân sách pilot" : "Duyệt ngân sách 3 clip pilot"}
+          </button>
+        </div>
         {!value.production_readiness && <button type="button" onClick={initializeProductionReadiness}>Chuẩn bị danh sách kiểm tra</button>}
         {value.production_readiness && <>
           <div className="provider-grid">
