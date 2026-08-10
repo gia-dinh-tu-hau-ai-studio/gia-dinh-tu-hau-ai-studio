@@ -1312,9 +1312,12 @@ export function ProjectIntakeForm() {
               eligibleCharacters={eligibleCharacters}
               value={shortFilmWorkflow}
               generatingScript={generatingScript}
+              checkingScriptAccount={checkingAccounts}
               onGenerateScript={generateShortFilmScript}
-              onRequestBudgetApproval={() => { setFrameMessage("Kiểm tra tài khoản ở phần dự toán, sau đó quay lại bấm tạo bản nháp kịch bản AI. Chỉ thao tác tạo bản nháp mới gọi OpenAI."); document.getElementById("intake-frame-4")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+              onRequestBudgetApproval={() => { setFrameMessage("Đang kiểm tra tài khoản để mở tạo bản nháp. Chỉ thao tác tạo bản nháp mới gọi OpenAI."); void checkAccounts(); }}
               scriptGenerationReady={scriptGenerationReady}
+              scriptBudgetSummary={`Kịch bản AI tối đa ${providerBudget.estimate.script.toLocaleString("vi-VN")} ${providerBudget.estimate.currency} · Tổng dự toán ${providerBudget.estimate.total.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}`}
+              scriptAccountSummary={openAiAccountCheck ? `OpenAI: ${openAiAccountCheck.status} · ${openAiAccountCheck.message}` : "OpenAI chưa được kiểm tra."}
               providerStatus={shortFilmProviderStatus}
               onChange={(workflow) => {
                 invalidateConfirmation();
