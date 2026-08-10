@@ -19,6 +19,12 @@ type EligibleCharacter = {
   master_identity_version?: string;
   voice_master_id?: string;
   voice_casting_profile?: string;
+  voice_perceived_age_band?: "YOUNG_ADULT" | "ADULT" | "MIDDLE_AGED" | "OLDER_ADULT";
+  voice_locale?: "vi-VN-southwest";
+  voice_performance_style?: "SOUTHERN_TV_DRAMA_DUBBING";
+  pronunciation_lexicon_id?: string;
+  voice_audition_audio_url?: string;
+  voice_audition_approved?: boolean;
   readiness: {
     character: "ACTIVE";
     image: "IMAGE_READY";

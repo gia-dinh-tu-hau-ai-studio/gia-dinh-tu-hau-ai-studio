@@ -13,6 +13,12 @@ type LibraryActor = {
   master_identity_version?: string;
   voice_master_id?: string;
   voice_casting_profile?: string;
+  voice_perceived_age_band?: "YOUNG_ADULT" | "ADULT" | "MIDDLE_AGED" | "OLDER_ADULT";
+  voice_locale?: "vi-VN-southwest";
+  voice_performance_style?: "SOUTHERN_TV_DRAMA_DUBBING";
+  pronunciation_lexicon_id?: string;
+  voice_audition_audio_url?: string;
+  voice_audition_approved?: boolean;
   readiness?: {
     master_identity?: "APPROVED_LOCKED" | "NOT_READY";
     voice_master?: "APPROVED_LOCKED" | "NOT_READY";
@@ -147,6 +153,12 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     voice_master_id: actor.voice_master_id,
     voice_casting_profile: actor.voice_casting_profile,
     voice_master_status: actor.readiness?.voice_master,
+    voice_perceived_age_band: actor.voice_perceived_age_band,
+    voice_locale: actor.voice_locale,
+    voice_performance_style: actor.voice_performance_style,
+    pronunciation_lexicon_id: actor.pronunciation_lexicon_id,
+    voice_audition_audio_url: actor.voice_audition_audio_url,
+    voice_audition_approved: actor.voice_audition_approved,
     }));
   const availableActors = libraryActors.length > 0 ? libraryActors : temporaryActors;
   const scriptApproved = value.script_review.decision === "APPROVE";
@@ -236,6 +248,16 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             voice_master_id: actor.voice_master_id as string,
             casting_profile: actor.voice_casting_profile as string,
             status: "APPROVED_LOCKED" as const,
+            perceived_age_band: actor.voice_perceived_age_band,
+            locale: actor.voice_locale,
+            performance_style: actor.voice_performance_style,
+            pronunciation_lexicon_id: actor.pronunciation_lexicon_id,
+            audition_audio_url: actor.voice_audition_audio_url,
+            audition_review: actor.voice_audition_audio_url ? {
+              decision: actor.voice_audition_approved ? "APPROVE" as const : "PENDING" as const,
+              notes: actor.voice_audition_approved ? "Migrated from APPROVED + LOCKED Voice Master." : "",
+              reviewer: "PROJECT_OWNER" as const,
+            } : undefined,
           })),
         keyframes: [],
         dialogue_shot_ids: value.dialogue.dialogue_mode === "DIALOGUE"
