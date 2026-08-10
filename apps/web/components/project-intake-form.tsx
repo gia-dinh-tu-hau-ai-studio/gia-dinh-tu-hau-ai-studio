@@ -164,18 +164,18 @@ const performanceRoles = [
 ];
 const platformOptions = ["YOUTUBE", "TIKTOK", "FACEBOOK"];
 
-function TextField({ name, label, required = true, type = "text", placeholder, help }: { name: string; label: string; required?: boolean; type?: string; placeholder?: string; help?: string }) {
+function TextField({ name, label, required = true, type = "text", placeholder, help, defaultValue = "" }: { name: string; label: string; required?: boolean; type?: string; placeholder?: string; help?: string; defaultValue?: string }) {
   return (
     <label>
       <span>{label}{required ? " *" : ""}</span>
-      <input name={name} type={type} required={required} placeholder={placeholder} />
+      <input defaultValue={defaultValue} name={name} type={type} required={required} placeholder={placeholder} />
       {help && <small className="field-help">Ví dụ: {help}</small>}
     </label>
   );
 }
 
-function SelectField({ name, label, options }: { name: string; label: string; options: Array<[string, string]> }) {
-  return <label><span>{label} *</span><select name={name} required defaultValue=""><option value="" disabled>Chọn một phương án</option>{options.map(([value, text]) => <option value={value} key={value}>{text}</option>)}</select></label>;
+function SelectField({ name, label, options, defaultValue = "" }: { name: string; label: string; options: Array<[string, string]>; defaultValue?: string }) {
+  return <label><span>{label} *</span><select name={name} required defaultValue={defaultValue}><option value="" disabled>Chọn một phương án</option>{options.map(([value, text]) => <option value={value} key={value}>{text}</option>)}</select></label>;
 }
 
 function shortFilmIntakeOnly(workflow: ShortFilmWorkflow): ShortFilmWorkflow {
@@ -343,6 +343,7 @@ export function ProjectIntakeForm() {
   const [progressActionMessage, setProgressActionMessage] = useState("");
   const [resumingProject, setResumingProject] = useState(false);
   const [draftFormValues, setDraftFormValues] = useState<Record<string, string[]> | null>(null);
+  const [initialFormValues, setInitialFormValues] = useState<Record<string, string[]>>({});
   const [draftSavedAt, setDraftSavedAt] = useState("");
   const [inputHistory, setInputHistory] = useState<Record<string, string[]>>({});
   const [accountPreflight, setAccountPreflight] = useState<AccountPreflight | null>(null);
@@ -487,6 +488,7 @@ export function ProjectIntakeForm() {
       setProviderBudget(snapshot.provider_budget);
       setDurationTarget(snapshot.duration_target);
       setDraftFormValues(snapshot.form_values);
+      setInitialFormValues(snapshot.form_values);
       setAccountPreflight(null);
       setManualBalanceConfirmed(false);
       setCreatedProject({ project_id: projectProgress.project_id, current_stage: projectProgress.current_stage, next_action: body.next_action });
@@ -576,16 +578,19 @@ export function ProjectIntakeForm() {
           setProviderBudget(resetProviderBudgetApprovalForDraft(draft.provider_budget ?? initialProviderBudget));
           setDurationTarget(draft.duration_target ?? fallbackDuration);
           setDraftFormValues(draft.form_values ?? {});
+          setInitialFormValues(draft.form_values ?? {});
           setDraftSavedAt(draft.saved_at ?? "");
         }
       } else {
         setDurationTarget(fallbackDuration);
         setDraftFormValues(null);
+        setInitialFormValues({});
         setDraftSavedAt("");
       }
     } catch {
       setDurationTarget(fallbackDuration);
       setDraftFormValues(null);
+      setInitialFormValues({});
       setDraftSavedAt("");
     }
     setProjectStarted(true);
@@ -1314,25 +1319,25 @@ export function ProjectIntakeForm() {
       <section className="intake-frame active" id="intake-frame-2">
         <div className="section-heading"><span>02</span><div><h2>Thông tin cơ bản</h2><p>Chọn nhanh theo gợi ý; các trường kỹ thuật đã được ẩn.</p></div></div>
         <div className="field-grid">
-          <TextField name="project_name" label="Tên dự án" placeholder="Tập 01 – Bữa cơm gia đình" help="Tập 01 – Bữa cơm gia đình" />
-          <TextField name="client_name" label="Người phụ trách" placeholder="Nguyễn Văn A" help="Tên người tạo dự án" />
-          <TextField name="phone" label="Số điện thoại" type="tel" placeholder="0901 234 567" />
-          <TextField name="email" label="Email" type="email" placeholder="tuhau@example.com" />
+          <TextField defaultValue={initialFormValues.project_name?.[0]} name="project_name" label="Tên dự án" placeholder="Tập 01 – Bữa cơm gia đình" help="Tập 01 – Bữa cơm gia đình" />
+          <TextField defaultValue={initialFormValues.client_name?.[0]} name="client_name" label="Người phụ trách" placeholder="Nguyễn Văn A" help="Tên người tạo dự án" />
+          <TextField defaultValue={initialFormValues.phone?.[0]} name="phone" label="Số điện thoại" type="tel" placeholder="0901 234 567" />
+          <TextField defaultValue={initialFormValues.email?.[0]} name="email" label="Email" type="email" placeholder="tuhau@example.com" />
           <input name="project_subtype" type="hidden" value={projectType} />
           <input name="priority" type="hidden" value="NORMAL" />
           <input name="execution_mode" type="hidden" value="APPROVAL_GATED" />
-          <SelectField name="language" label="Ngôn ngữ" options={[["vi-VN", "Tiếng Việt"], ["vi-VN-southwest", "Tiếng Việt – giọng miền Tây"], ["en", "Tiếng Anh"]]} />
-          <SelectField name="content_rating" label="Độ tuổi phù hợp" options={[["ALL", "Mọi độ tuổi"], ["13+", "Từ 13 tuổi"], ["16+", "Từ 16 tuổi"], ["18+", "Từ 18 tuổi"]]} />
-          <SelectField name="target_audience" label="Khán giả chính" options={[["FAMILY", "Gia đình"], ["YOUTH", "Người trẻ"], ["GENERAL", "Đại chúng"], ["SOUTHWEST_VIETNAM", "Khán giả miền Tây"]]} />
+          <SelectField defaultValue={initialFormValues.language?.[0]} name="language" label="Ngôn ngữ" options={[["vi-VN", "Tiếng Việt"], ["vi-VN-southwest", "Tiếng Việt – giọng miền Tây"], ["en", "Tiếng Anh"]]} />
+          <SelectField defaultValue={initialFormValues.content_rating?.[0]} name="content_rating" label="Độ tuổi phù hợp" options={[["ALL", "Mọi độ tuổi"], ["13+", "Từ 13 tuổi"], ["16+", "Từ 16 tuổi"], ["18+", "Từ 18 tuổi"]]} />
+          <SelectField defaultValue={initialFormValues.target_audience?.[0]} name="target_audience" label="Khán giả chính" options={[["FAMILY", "Gia đình"], ["YOUTH", "Người trẻ"], ["GENERAL", "Đại chúng"], ["SOUTHWEST_VIETNAM", "Khán giả miền Tây"]]} />
           <fieldset className="duration-picker"><legend>Thời lượng *</legend><div>{(projectType === "SHORT_MUSIC_CLIP" ? [["15_SECONDS", "15 giây"], ["30_SECONDS", "30 giây"], ["60_SECONDS", "60 giây"]] : [["3_MINUTES", "3 phút"], ["5_MINUTES", "5 phút"], ["7_MINUTES", "7 phút"], ["10_MINUTES", "10 phút"], ["15_MINUTES", "15 phút"]]).map(([value, text]) => <label className={durationTarget === value ? "selected" : ""} key={value}><input checked={durationTarget === value} name="duration_target" onChange={() => setDurationTarget(value)} required type="radio" value={value} /><span>{text}</span></label>)}</div><small>Chạm trực tiếp vào thời lượng mong muốn; dự toán sẽ tự tính lại.</small></fieldset>
-          <SelectField name="aspect_ratio" label="Khung hình" options={[["9:16", "Dọc 9:16 – TikTok/Reels/Shorts"], ["16:9", "Ngang 16:9 – YouTube/Facebook"], ["1:1", "Vuông 1:1"]]} />
+          <SelectField defaultValue={initialFormValues.aspect_ratio?.[0]} name="aspect_ratio" label="Khung hình" options={[["9:16", "Dọc 9:16 – TikTok/Reels/Shorts"], ["16:9", "Ngang 16:9 – YouTube/Facebook"], ["1:1", "Vuông 1:1"]]} />
         </div>
         <fieldset className="platform-field">
           <legend>Nền tảng xuất bản *</legend>
           <div className="check-row">
             {platformOptions.map((platform) => (
               <label key={platform}>
-                <input name="platforms" type="checkbox" value={platform} /> {platform}
+                <input defaultChecked={initialFormValues.platforms?.includes(platform)} name="platforms" type="checkbox" value={platform} /> {platform}
               </label>
             ))}
           </div>
@@ -1356,12 +1361,12 @@ export function ProjectIntakeForm() {
         <div className="section-heading"><span>04</span><div><h2>Nội dung dự án</h2><p>Chỉ hiển thị thông tin cần cho loại dự án đã chọn.</p></div></div>
         <div className="field-grid">
           {projectType === "SHORT_FILM" && <>
-            <TextField name="story_idea" label="Ý tưởng tập / phim" placeholder="Hai chị em hiểu lầm nhau vì chuyện chăm sóc mẹ" help="Một câu kể chuyện chính" />
-            <SelectField name="social_theme" label="Chủ đề" options={[["FAMILY", "Gia đình"], ["LOVE", "Tình cảm"], ["FRIENDSHIP", "Bạn bè"], ["COMMUNITY", "Đời sống xã hội"], ["EDUCATION", "Giáo dục"]]} />
-            <SelectField name="story_genre" label="Thể loại" options={[["FAMILY_DRAMA", "Tâm lý gia đình"], ["COMEDY", "Hài"], ["ROMANCE", "Tình cảm"], ["INSPIRATIONAL", "Truyền cảm hứng"], ["MYSTERY", "Bí ẩn"]]} />
-            <SelectField name="primary_setting" label="Bối cảnh chính" options={[["HOME", "Trong nhà"], ["RURAL", "Miền quê"], ["CITY", "Thành phố"], ["MARKET", "Chợ/quán ăn"], ["SCHOOL", "Trường học"]]} />
-            <SelectField name="ending_direction" label="Kiểu kết thúc" options={[["HAPPY", "Có hậu"], ["EMOTIONAL", "Cảm động"], ["OPEN", "Kết thúc mở"], ["TWIST", "Bất ngờ"], ["LESSON", "Có bài học"]]} />
-            <SelectField name="dialogue_source" label="Nguồn lời thoại" options={[["AI_DRAFT_OWNER_APPROVES", "AI soạn, chủ dự án duyệt"], ["OWNER_PROVIDED", "Chủ dự án cung cấp"], ["MIXED", "Kết hợp cả hai"]]} />
+            <TextField defaultValue={initialFormValues.story_idea?.[0]} name="story_idea" label="Ý tưởng tập / phim" placeholder="Hai chị em hiểu lầm nhau vì chuyện chăm sóc mẹ" help="Một câu kể chuyện chính" />
+            <SelectField defaultValue={initialFormValues.social_theme?.[0]} name="social_theme" label="Chủ đề" options={[["FAMILY", "Gia đình"], ["LOVE", "Tình cảm"], ["FRIENDSHIP", "Bạn bè"], ["COMMUNITY", "Đời sống xã hội"], ["EDUCATION", "Giáo dục"]]} />
+            <SelectField defaultValue={initialFormValues.story_genre?.[0]} name="story_genre" label="Thể loại" options={[["FAMILY_DRAMA", "Tâm lý gia đình"], ["COMEDY", "Hài"], ["ROMANCE", "Tình cảm"], ["INSPIRATIONAL", "Truyền cảm hứng"], ["MYSTERY", "Bí ẩn"]]} />
+            <SelectField defaultValue={initialFormValues.primary_setting?.[0]} name="primary_setting" label="Bối cảnh chính" options={[["HOME", "Trong nhà"], ["RURAL", "Miền quê"], ["CITY", "Thành phố"], ["MARKET", "Chợ/quán ăn"], ["SCHOOL", "Trường học"]]} />
+            <SelectField defaultValue={initialFormValues.ending_direction?.[0]} name="ending_direction" label="Kiểu kết thúc" options={[["HAPPY", "Có hậu"], ["EMOTIONAL", "Cảm động"], ["OPEN", "Kết thúc mở"], ["TWIST", "Bất ngờ"], ["LESSON", "Có bài học"]]} />
+            <SelectField defaultValue={initialFormValues.dialogue_source?.[0]} name="dialogue_source" label="Nguồn lời thoại" options={[["AI_DRAFT_OWNER_APPROVES", "AI soạn, chủ dự án duyệt"], ["OWNER_PROVIDED", "Chủ dự án cung cấp"], ["MIXED", "Kết hợp cả hai"]]} />
             <ShortFilmWorkflowForm
               eligibleCharacters={eligibleCharacters}
               value={shortFilmWorkflow}
