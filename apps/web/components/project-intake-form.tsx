@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
-import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptReadyForProjectCreation, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -332,7 +332,7 @@ export function ProjectIntakeForm() {
     providerBudget.approval.approved_limit >= providerBudget.estimate.total;
   const accountExecutionReady = accountPreflight?.execution_gate === "READY" ||
     (accountPreflight?.execution_gate === "MANUAL_CONFIRMATION_REQUIRED" && manualBalanceConfirmed);
-  const providerRunReady = budgetApproved && accountExecutionReady;
+  const scriptReadyForCreation = projectType !== "SHORT_FILM" || shortFilmScriptReadyForProjectCreation(shortFilmWorkflow);
 
   async function checkAccounts() {
     setCheckingAccounts(true);
@@ -428,7 +428,7 @@ export function ProjectIntakeForm() {
   }
 
   function saveDraft(form: HTMLFormElement) {
-    if (!projectStarted) return;
+    if (!projectStarted || createdProject) return;
     const draft: IntakeDraft = {
       version: 1,
       form_values: collectFormValues(form),
@@ -445,6 +445,11 @@ export function ProjectIntakeForm() {
 
   function startProject(type: FormProjectType) {
     setProjectType(type);
+    setCreatedProject(null);
+    setValidatedSubmission(null);
+    setCreationResult("");
+    setAccountPreflight(null);
+    setManualBalanceConfirmed(false);
     const fallbackDuration = type === "SHORT_MUSIC_CLIP" ? "30_SECONDS" : "5_MINUTES";
     try {
       const stored = localStorage.getItem(`${INTAKE_DRAFT_PREFIX}${type}`);
@@ -455,7 +460,7 @@ export function ProjectIntakeForm() {
           const defaults = createInitialShortFilmWorkflow();
           setShortFilmWorkflow(migrateShortFilmWorkflowDraft(draft.short_film_workflow, defaults));
           setCharacters(draft.characters ?? []);
-          setProviderBudget(draft.provider_budget ?? initialProviderBudget);
+          setProviderBudget(resetProviderBudgetApprovalForDraft(draft.provider_budget ?? initialProviderBudget));
           setDurationTarget(draft.duration_target ?? fallbackDuration);
           setDraftFormValues(draft.form_values ?? {});
           setDraftSavedAt(draft.saved_at ?? "");
@@ -637,6 +642,7 @@ export function ProjectIntakeForm() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (createdProject) return;
     const formElement = event.currentTarget;
     setSubmitting(true);
     setResult("");
@@ -781,6 +787,8 @@ export function ProjectIntakeForm() {
       ) {
         setValidatedSubmission(null);
         setCreatedProject(body.project as CreatedProject);
+        localStorage.removeItem(`${INTAKE_DRAFT_PREFIX}${projectType}`);
+        setDraftSavedAt("");
         setProgressProjectId(body.project.project_id);
         void checkProjectProgress(body.project.project_id);
       }
@@ -959,6 +967,13 @@ export function ProjectIntakeForm() {
       setShortFilmSaveResult("Vui lòng nhập URL và xác nhận quyền sử dụng cho từng link trước khi gọi AI tạo kịch bản.");
       return;
     }
+    if (!accountExecutionReady) {
+      setShortFilmSaveResult("Hãy kiểm tra tài khoản và xác nhận đủ hạn mức trước khi tạo kịch bản AI.");
+      document.getElementById("intake-frame-4")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    const approvedBudget = approveProviderBudgetForProjectCreation(providerBudget, new Date().toISOString());
+    setProviderBudget(approvedBudget);
     setGeneratingScript(true);
     setShortFilmSaveResult("");
     try {
@@ -971,7 +986,7 @@ export function ProjectIntakeForm() {
           language: shortFilmWorkflow.dialogue.language,
           characters: shortFilmWorkflow.film_characters,
           reference_sources: referenceSources,
-          provider_budget: providerBudget,
+          provider_budget: approvedBudget,
         }),
       });
       const body = await response.json();
@@ -1243,8 +1258,8 @@ export function ProjectIntakeForm() {
               value={shortFilmWorkflow}
               generatingScript={generatingScript}
               onGenerateScript={generateShortFilmScript}
-              onRequestBudgetApproval={() => { setFrameMessage("Hoàn tất nội dung, kiểm tra tài khoản rồi duyệt kinh phí ở cuối trang để khởi tạo dự án."); document.getElementById("intake-frame-4")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-              providerBudgetApproved={providerRunReady}
+              onRequestBudgetApproval={() => { setFrameMessage("Kiểm tra tài khoản ở phần dự toán, sau đó quay lại bấm tạo bản nháp kịch bản AI. Chỉ thao tác tạo bản nháp mới gọi OpenAI."); document.getElementById("intake-frame-4")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+              scriptGenerationReady={accountExecutionReady}
               providerStatus={shortFilmProviderStatus}
               onChange={(workflow) => {
                 invalidateConfirmation();
@@ -1275,7 +1290,7 @@ export function ProjectIntakeForm() {
       </section>
 
       <section className="budget-panel intake-frame active" id="intake-frame-4">
-        <div className="section-heading"><span>05</span><div><h2>Dự toán kinh phí</h2><p>Xem tổng chi phí dự kiến và bấm duyệt. Cấu hình kỹ thuật đã được hệ thống thiết lập sẵn.</p></div></div>
+        <div className="section-heading"><span>05</span><div><h2>Dự toán kinh phí</h2><p>Xem tổng chi phí dự kiến và kiểm tra tài khoản. Kịch bản AI chỉ phát sinh phí khi bạn bấm nút tạo bản nháp rõ ràng.</p></div></div>
         <div className="internal-service-grid">
           <label><span>Nguồn nhạc phim</span><select value={providerBudget.internal_services.music_source} onChange={(event) => setProviderBudget((current) => ({ ...current, internal_services: { ...current.internal_services, music_source: event.target.value as ProviderBudgetPlan["internal_services"]["music_source"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="NOT_SELECTED">Chưa chọn</option><option value="PROJECT_OWNER_LICENSED">Chủ dự án cung cấp · đã có quyền</option><option value="LICENSED_LIBRARY">Thư viện nhạc đã cấp phép</option></select><small>Không sử dụng nhạc chưa xác nhận quyền.</small></label>
         </div>
@@ -1284,7 +1299,7 @@ export function ProjectIntakeForm() {
           <div className="budget-total"><span>Kinh phí đề xuất</span><strong>{providerBudget.estimate.total.toLocaleString("vi-VN")} USD</strong><small>Ước tính cho {providerBudget.estimate.estimated_duration_seconds} giây · {providerBudget.estimate.basis_version}</small></div>
         </div>
         <div className={`budget-approval ${budgetApproved ? "approved" : "pending"}`}>
-          <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "CHỜ DUYỆT KHI KHỞI TẠO"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Provider vẫn chờ các approval gate sản xuất.` : "Sau khi tài khoản đạt, nút ở cuối trang sẽ đồng thời duyệt kinh phí và khởi tạo dự án. Chưa gọi provider và chưa trừ tiền."}</p></div>
+          <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "CHỜ DUYỆT"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Provider media vẫn chờ các approval gate sản xuất.` : projectType === "SHORT_FILM" && shortFilmWorkflow.script_source !== "PROJECT_OWNER_PROVIDED" ? "Sau khi tài khoản đạt, nút tạo bản nháp AI sẽ duyệt hạn mức và chỉ gọi OpenAI. Dự án chỉ được khởi tạo sau khi bạn duyệt kịch bản." : "Nút cuối trang sẽ đồng thời duyệt kinh phí và khởi tạo dự án. Chưa gọi provider media và chưa trừ credit sản xuất."}</p></div>
         </div>
         <div className={`account-preflight ${accountExecutionReady ? "approved" : "pending"}`}>
           <div><strong>KIỂM TRA TÀI KHOẢN TRƯỚC KHI CHẠY</strong><p>Chỉ đọc số dư/hạn mức. Không tạo ảnh, video, giọng hoặc trừ credit.</p></div>
@@ -1361,7 +1376,7 @@ export function ProjectIntakeForm() {
         <div className="final-action-panel">
           <strong>{characters.length === 0 ? "Chưa có nhân vật trong dự án" : `Sẵn sàng kiểm tra ${characters.length} nhân vật`}</strong>
           <span>{characters.length === 0 ? "Quay lại phần nội dung để chọn nhân vật." : "Nhân vật đã được đồng bộ tự động; không cần chọn lại."}</span>
-          <button className="final-check-button" disabled={submitting || creating || characters.length === 0 || !accountExecutionReady} type="submit">{submitting || creating ? "Đang kiểm tra và khởi tạo…" : characters.length === 0 ? "Chưa thể tạo — chưa có nhân vật" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tạo" : `Duyệt ${providerBudget.estimate.total.toLocaleString("vi-VN")} USD & khởi tạo dự án`}</button>
+          <button className="final-check-button" disabled={submitting || creating || Boolean(createdProject) || characters.length === 0 || !accountExecutionReady || !scriptReadyForCreation} type="submit">{createdProject ? `Dự án ${createdProject.project_id} đã được tạo` : submitting || creating ? "Đang kiểm tra và khởi tạo…" : characters.length === 0 ? "Chưa thể tạo — chưa có nhân vật" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tạo" : !scriptReadyForCreation ? "Hoàn thiện và duyệt kịch bản trước khi tạo" : `Duyệt ${providerBudget.estimate.total.toLocaleString("vi-VN")} USD & khởi tạo dự án`}</button>
         </div>
       </section>
       </>}

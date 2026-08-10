@@ -629,6 +629,32 @@ export function approveProviderBudgetForProjectCreation(
   });
 }
 
+export function resetProviderBudgetApprovalForDraft(plan: ProviderBudgetPlan): ProviderBudgetPlan {
+  return ProviderBudgetPlanSchema.parse({
+    ...plan,
+    approval: {
+      ...plan.approval,
+      decision: "PENDING",
+      approved_limit: plan.estimate.total,
+      reviewed_at: undefined,
+    },
+  });
+}
+
+export function shortFilmScriptReadyForProjectCreation(workflow: {
+  idea_brief: string;
+  script_title: string;
+  script_synopsis: string;
+  full_script: string;
+  script_review: { decision: z.infer<typeof ReviewDecisionSchema> };
+}) {
+  return workflow.idea_brief.trim().length >= 20 &&
+    workflow.script_title.trim().length > 0 &&
+    workflow.script_synopsis.trim().length > 0 &&
+    workflow.full_script.trim().length > 0 &&
+    workflow.script_review.decision === "APPROVE";
+}
+
 export function shortFilmSourceActorsNeedSync(
   filmCharacters: ReadonlyArray<ShortFilmWorkflow["film_characters"][number]>,
   sourceActors: ReadonlyArray<ShortFilmWorkflow["source_actors"][number]>,
