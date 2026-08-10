@@ -26,7 +26,7 @@ type Props = {
   onGenerateScript?: () => Promise<void>;
   onRequestBudgetApproval?: () => void;
   generatingScript?: boolean;
-  providerBudgetApproved?: boolean;
+  scriptGenerationReady?: boolean;
   providerStatus?: Record<string, { configured: boolean }>;
 };
 
@@ -92,7 +92,7 @@ function allQcPassed(qc: typeof emptyQc) {
   return Object.values(qc).every(Boolean);
 }
 
-export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, providerBudgetApproved = false }: Props) {
+export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, scriptGenerationReady = false }: Props) {
   const libraryActors = eligibleCharacters
     .filter((actor) => actor.readiness?.master_identity === "APPROVED_LOCKED")
     .map((actor) => ({
@@ -259,7 +259,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         <label data-validation-path="script_source"><span>Nguồn kịch bản *</span><select required value={value.script_source} onChange={(event) => patch({ script_source: event.target.value as ShortFilmWorkflow["script_source"] })}><option value="AI_GENERATED">AI tạo</option><option value="PROJECT_OWNER_PROVIDED">Chủ dự án cung cấp</option><option value="AI_DEVELOPED_FROM_IDEA">AI phát triển từ ý tưởng</option></select></label>
         <label data-validation-path="target_duration_minutes"><span>Thời lượng mục tiêu (phút) *</span><input required min={1} max={60} type="number" value={value.target_duration_minutes} onChange={(event) => patch({ target_duration_minutes: Number(event.target.value) })} /></label>
         <label className="wide-field" data-validation-path="idea_brief"><span>Ý tưởng để AI phát triển *</span><textarea required minLength={20} placeholder="Nhập xung đột chính, thông điệp, bối cảnh và hướng kết thúc (tối thiểu 20 ký tự)." rows={6} value={value.idea_brief} onChange={(event) => patch({ idea_brief: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
-        {value.script_source !== "PROJECT_OWNER_PROVIDED" && onGenerateScript && <><button disabled={generatingScript || (providerBudgetApproved && value.idea_brief.trim().length < 20)} onClick={providerBudgetApproved ? onGenerateScript : onRequestBudgetApproval} type="button">{generatingScript ? "AI đang tạo kịch bản…" : providerBudgetApproved ? "Tạo bản nháp kịch bản từ ý tưởng" : "Đi đến duyệt kinh phí"}</button>{!providerBudgetApproved && <p className="gate-note">Bấm nút trên để đi thẳng đến dự toán. OpenAI vẫn bị khóa cho đến khi cổng Duyệt kinh phí đạt.</p>}</>}
+        {value.script_source !== "PROJECT_OWNER_PROVIDED" && onGenerateScript && <><button disabled={generatingScript || (scriptGenerationReady && value.idea_brief.trim().length < 20)} onClick={scriptGenerationReady ? onGenerateScript : onRequestBudgetApproval} type="button">{generatingScript ? "AI đang tạo kịch bản…" : scriptGenerationReady ? "Duyệt kinh phí & tạo bản nháp kịch bản AI" : "Kiểm tra tài khoản để mở tạo kịch bản AI"}</button>{!scriptGenerationReady && <p className="gate-note">Kiểm tra tài khoản ở phần dự toán trước. Chỉ khi bạn bấm tạo bản nháp, hệ thống mới duyệt hạn mức và gọi OpenAI trong ngân sách đã hiển thị.</p>}</>}
         <label data-validation-path="script_title"><span>Tên kịch bản *</span><input required placeholder="Ví dụ: Chiếc bẫy sau lời hứa" value={value.script_title} onChange={(event) => patch({ script_title: event.target.value })} /></label>
         <label data-validation-path="script_synopsis"><span>Tóm tắt nội dung *</span><textarea required placeholder="Tóm tắt câu chuyện trong 3–5 câu" value={value.script_synopsis} onChange={(event) => patch({ script_synopsis: event.target.value })} /></label>
         <label className="wide-field" data-validation-path="full_script"><span>Toàn bộ kịch bản để duyệt *</span><textarea required placeholder="Kịch bản AI hoặc kịch bản của chủ dự án sẽ hiển thị tại đây" rows={14} value={value.full_script} onChange={(event) => patch({ full_script: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>

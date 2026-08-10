@@ -8,6 +8,8 @@ import {
   migrateShortFilmWorkflowDraft,
   normalizeProjectIntake,
   providerBudgetApproved,
+  resetProviderBudgetApprovalForDraft,
+  shortFilmScriptReadyForProjectCreation,
   prepareShortFilmPilotPlan,
   selectShortFilmPilotSamples,
   shortFilmMediaExecutionDecision,
@@ -23,6 +25,21 @@ test("short-film dialogue derives safe voice and lip-sync requirements", () => {
   assert.deepEqual(deriveShortFilmCharacterMediaRequirements("PROTAGONIST", "DIALOGUE"), { voice_required: true, lip_sync_required: true });
   assert.deepEqual(deriveShortFilmCharacterMediaRequirements("SUPPORTING", "VOICE_OVER"), { voice_required: true, lip_sync_required: false });
   assert.deepEqual(deriveShortFilmCharacterMediaRequirements("EXTRA", "MIXED"), { voice_required: false, lip_sync_required: false });
+});
+
+test("restored draft never keeps a stale budget approval", () => {
+  const restored = resetProviderBudgetApprovalForDraft(approvedProviderBudget);
+  assert.equal(restored.approval.decision, "PENDING");
+  assert.equal(restored.approval.approved_limit, restored.estimate.total);
+  assert.equal(restored.approval.reviewed_at, undefined);
+  assert.equal(providerBudgetApproved(restored), false);
+});
+
+test("project creation waits for a complete owner-approved script", () => {
+  const approvedWorkflow = { ...shortFilmWorkflow, script_review: { ...shortFilmWorkflow.script_review, decision: "APPROVE" as const } };
+  assert.equal(shortFilmScriptReadyForProjectCreation(approvedWorkflow), true);
+  assert.equal(shortFilmScriptReadyForProjectCreation({ ...shortFilmWorkflow, full_script: "" }), false);
+  assert.equal(shortFilmScriptReadyForProjectCreation(shortFilmWorkflow), false);
 });
 
 test("budget approval used by project creation locks the full suggested amount", () => {
