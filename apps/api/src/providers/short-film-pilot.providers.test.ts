@@ -15,13 +15,19 @@ test("Runway submit uses current version and never accepts a shot over ten secon
 });
 
 test("ElevenLabs returns audio and billing metadata without exposing the key", async () => {
-  const provider = new ElevenLabsPilotProvider("secret", (async () => new Response(new Uint8Array([1, 2, 3]), {
-    status: 200, headers: { "request-id": "req-1", "character-cost": "12" },
-  })) as typeof fetch);
+  let requestedUrl = "";
+  const provider = new ElevenLabsPilotProvider("secret", (async (url) => {
+    requestedUrl = String(url);
+    return new Response(new Uint8Array([1, 2, 3]), {
+      status: 200, headers: { "request-id": "req-1", "character-cost": "12" },
+    });
+  }) as typeof fetch);
   const output = await provider.synthesize({ voiceId: "voice-1", text: "Xin chào" });
   assert.equal(output.audio.length, 3);
   assert.equal(output.requestId, "req-1");
   assert.equal(output.characterCost, 12);
+  assert.match(requestedUrl, /output_format=mp3_44100_128$/);
+  assert.doesNotMatch(requestedUrl, /mp3_44100_192/);
 });
 
 test("Sync sends sync-3 multipart and exposes stable failure codes", async () => {

@@ -79,6 +79,14 @@ export class ShortFilmPilotExecutionService {
     if (account.providers.some((provider) => ["INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED"].includes(provider.status))) {
       throw new Error(`PROVIDER_ACCOUNT_BLOCKED:${account.providers.map((provider) => `${provider.provider}:${provider.status}`).join(",")}`);
     }
+    const library = await this.characters.listEligibleCharacters();
+    const charactersById = new Map(library.map((character) => [character.character_id, character]));
+    const voiceMastersById = new Map(context.workflow.production_readiness!.voice_masters.map((voice) => [voice.voice_master_id, voice]));
+    for (const line of dialogueByShot.values()) {
+      const voice = voiceMastersById.get(line.voice_master_id);
+      const providerVoiceId = voice ? charactersById.get(voice.source_actor_id)?.elevenlabs_voice_id : undefined;
+      if (!providerVoiceId) throw new Error(`ELEVENLABS_VOICE_ID_MISSING:${line.voice_master_id}`);
+    }
     const keyframeByShot = new Map(context.workflow.production_readiness!.keyframes.map((keyframe) => [keyframe.shot_id, keyframe.approved_image_url]));
     const now = new Date().toISOString();
     const tasks = samples.flatMap((sample) => sample.shots.map((shot) => {
