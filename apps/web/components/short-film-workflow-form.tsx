@@ -231,20 +231,20 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 
       <fieldset data-validation-path="film_characters">
         <legend>Diễn viên nguồn và nhân vật trong phim</legend>
-        <label data-validation-path="character_count"><span>Số lượng nhân vật</span><input min={1} max={20} type="number" value={value.character_count} onChange={(event) => setCharacterCount(Number(event.target.value))} /></label>
+        <label data-validation-path="character_count"><span>Số lượng nhân vật *</span><input required min={1} max={20} type="number" value={value.character_count} onChange={(event) => setCharacterCount(Number(event.target.value))} /></label>
         <p className="gate-note">Chọn nhân vật và vai diễn. Hệ thống tự áp dụng hình ảnh, giọng nói và các thiết lập đã chốt.</p>
         {value.film_characters.map((character, index) => (
           <article className="workflow-card" key={`${index}-${character.source_actor_id}`}>
             <h4>Nhân vật {index + 1}</h4>
-            <label data-validation-path={`film_characters.${index}.source_actor_id`}><span>Diễn viên nguồn</span><select value={character.source_actor_id} onChange={(event) => {
+            <label data-validation-path={`film_characters.${index}.source_actor_id`}><span>Diễn viên nguồn *</span><select required value={character.source_actor_id} onChange={(event) => {
               const next = [...value.film_characters]; next[index] = { ...character, source_actor_id: event.target.value };
               patch({
                 film_characters: next,
                 source_actors: syncShortFilmSourceActors(next, availableActors, value.source_actors),
               });
             }}>{availableActors.map((actor) => <option key={actor.source_actor_id} value={actor.source_actor_id}>{actor.source_actor_name}</option>)}</select></label>
-            <label data-validation-path={`film_characters.${index}.film_character_name`}><span>Tên nhân vật trong phim</span><input placeholder="Ví dụ: Vy, An, Má Lan" value={character.film_character_name} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_character_name: event.target.value }; patch({ film_characters: next }); }} /></label>
-            <label data-validation-path={`film_characters.${index}.film_role`}><span>Vai diễn</span><select value={character.film_role} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_role: event.target.value as typeof character.film_role }; patch({ film_characters: next }); }}><option value="PROTAGONIST">Nhân vật chính</option><option value="ANTAGONIST">Đối trọng</option><option value="SUPPORTING">Hỗ trợ</option><option value="CAMEO">Khách mời</option><option value="EXTRA">Quần chúng</option></select></label>
+            <label data-validation-path={`film_characters.${index}.film_character_name`}><span>Tên nhân vật trong phim *</span><input required placeholder="Ví dụ: Vy, An, Má Lan" value={character.film_character_name} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_character_name: event.target.value }; patch({ film_characters: next }); }} /></label>
+            <label data-validation-path={`film_characters.${index}.film_role`}><span>Vai diễn *</span><select required value={character.film_role} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_role: event.target.value as typeof character.film_role }; patch({ film_characters: next }); }}><option value="PROTAGONIST">Nhân vật chính</option><option value="ANTAGONIST">Đối trọng</option><option value="SUPPORTING">Hỗ trợ</option><option value="CAMEO">Khách mời</option><option value="EXTRA">Quần chúng</option></select></label>
             {value.script_source === "PROJECT_OWNER_PROVIDED" ? <>
               <label data-validation-path={`film_characters.${index}.relationships`}><span>Quan hệ (không bắt buộc)</span><input placeholder="Ví dụ: chị của An, con của Má Lan" value={character.relationships} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, relationships: event.target.value }; patch({ film_characters: next }); }} /></label>
               <label data-validation-path={`film_characters.${index}.personality`}><span>Tính cách (không bắt buộc)</span><textarea placeholder="Ví dụ: mạnh mẽ, chân thành, phản ứng nhanh" value={character.personality} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, personality: event.target.value }; patch({ film_characters: next }); }} /></label>
