@@ -141,6 +141,7 @@ type ProjectProgress = {
 type AccountPreflight = {
   checked_at: string;
   execution_gate: "READY" | "BLOCKED" | "MANUAL_CONFIRMATION_REQUIRED";
+  script_generation_gate?: "READY" | "BLOCKED";
   providers: Array<{ provider: string; status: string; required_units?: number; available_units?: number; unit?: string; message: string }>;
 };
 
@@ -336,6 +337,9 @@ export function ProjectIntakeForm() {
     providerBudget.approval.approved_limit >= providerBudget.estimate.total;
   const accountExecutionReady = accountPreflight?.execution_gate === "READY" ||
     (accountPreflight?.execution_gate === "MANUAL_CONFIRMATION_REQUIRED" && manualBalanceConfirmed);
+  const openAiAccountCheck = accountPreflight?.providers.find((provider) => provider.provider === "OPENAI");
+  const scriptGenerationReady = accountPreflight?.script_generation_gate === "READY" ||
+    (accountPreflight?.script_generation_gate === undefined && ["SUFFICIENT", "UNVERIFIED"].includes(openAiAccountCheck?.status ?? ""));
   const scriptReadyForCreation = projectType !== "SHORT_FILM" || shortFilmScriptReadyForProjectCreation(shortFilmWorkflow);
 
   async function checkAccounts() {
@@ -1015,8 +1019,8 @@ export function ProjectIntakeForm() {
       setShortFilmSaveResult("Vui lòng nhập URL và xác nhận quyền sử dụng cho từng link trước khi gọi AI tạo kịch bản.");
       return;
     }
-    if (!accountExecutionReady) {
-      setShortFilmSaveResult("Hãy kiểm tra tài khoản và xác nhận đủ hạn mức trước khi tạo kịch bản AI.");
+    if (!scriptGenerationReady) {
+      setShortFilmSaveResult("Hãy kiểm tra tài khoản OpenAI trước khi tạo kịch bản AI.");
       document.getElementById("intake-frame-4")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
@@ -1310,7 +1314,7 @@ export function ProjectIntakeForm() {
               generatingScript={generatingScript}
               onGenerateScript={generateShortFilmScript}
               onRequestBudgetApproval={() => { setFrameMessage("Kiểm tra tài khoản ở phần dự toán, sau đó quay lại bấm tạo bản nháp kịch bản AI. Chỉ thao tác tạo bản nháp mới gọi OpenAI."); document.getElementById("intake-frame-4")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
-              scriptGenerationReady={accountExecutionReady}
+              scriptGenerationReady={scriptGenerationReady}
               providerStatus={shortFilmProviderStatus}
               onChange={(workflow) => {
                 invalidateConfirmation();

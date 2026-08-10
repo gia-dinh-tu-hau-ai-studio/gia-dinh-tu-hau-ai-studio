@@ -65,7 +65,12 @@ export async function checkProviderAccounts(input: unknown, environment: NodeJS.
   if (request.providers.video === "RUNWAY") selected.push(await runwayCheck(environment.RUNWAYML_API_SECRET, Math.ceil(request.duration_seconds * 12 * 1.5), fetcher));
   if (request.providers.voice === "ELEVENLABS") selected.push(await elevenLabsCheck(environment.ELEVENLABS_API_KEY, Math.ceil(request.duration_seconds * dialogueRatio(request.project_type) * 15), fetcher));
   if (request.providers.lip_sync === "SYNC") selected.push({ provider: "SYNC", status: environment.SYNC_API_KEY?.trim() ? "UNVERIFIED" : "NOT_CONFIGURED", message: environment.SYNC_API_KEY?.trim() ? "Sync chưa công bố endpoint số dư ổn định; cần xác nhận thủ công trên Billing." : "Chưa cấu hình Sync API key." });
+  const openAi = selected.find((item) => item.provider === "OPENAI");
+  const scriptGenerationGate = request.providers.script !== "OPENAI_RESPONSES" ||
+    (openAi !== undefined && !["INSUFFICIENT", "NOT_CONFIGURED", "AUTH_ERROR"].includes(openAi.status))
+    ? "READY"
+    : "BLOCKED";
   const blocked = selected.some((item) => ["INSUFFICIENT", "NOT_CONFIGURED", "AUTH_ERROR"].includes(item.status));
   const unverified = selected.some((item) => item.status === "UNVERIFIED");
-  return { checked_at: new Date().toISOString(), execution_gate: blocked ? "BLOCKED" : unverified ? "MANUAL_CONFIRMATION_REQUIRED" : "READY", secret_values_exposed: false as const, providers: selected };
+  return { checked_at: new Date().toISOString(), execution_gate: blocked ? "BLOCKED" : unverified ? "MANUAL_CONFIRMATION_REQUIRED" : "READY", script_generation_gate: scriptGenerationGate, secret_values_exposed: false as const, providers: selected };
 }
