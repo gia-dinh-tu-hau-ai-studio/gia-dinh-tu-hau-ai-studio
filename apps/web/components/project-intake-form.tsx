@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
-import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptReadyForProjectCreation, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, canResumeContractApproval, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptReadyForProjectCreation, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -309,6 +309,8 @@ export function ProjectIntakeForm() {
   const [projectProgress, setProjectProgress] = useState<ProjectProgress | null>(null);
   const [progressMessage, setProgressMessage] = useState("");
   const [checkingProgress, setCheckingProgress] = useState(false);
+  const [approvingProgressContract, setApprovingProgressContract] = useState(false);
+  const [progressActionMessage, setProgressActionMessage] = useState("");
   const [draftFormValues, setDraftFormValues] = useState<Record<string, string[]> | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState("");
   const [inputHistory, setInputHistory] = useState<Record<string, string[]>>({});
@@ -382,6 +384,7 @@ export function ProjectIntakeForm() {
     }
     setCheckingProgress(true);
     setProgressMessage("");
+    setProgressActionMessage("");
     setProjectProgress(null);
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/progress`);
@@ -396,6 +399,26 @@ export function ProjectIntakeForm() {
       setProgressMessage("Không kết nối được kho dự án TuhauAI.");
     } finally {
       setCheckingProgress(false);
+    }
+  }
+
+  async function approveContractFromProgress() {
+    if (!projectProgress || !canResumeContractApproval(projectProgress)) return;
+    setApprovingProgressContract(true);
+    setProgressActionMessage("");
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectProgress.project_id)}/approve-contract`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok || body.approval_status !== "APPROVED") {
+        setProgressActionMessage(body.message ?? body.code ?? "Không duyệt được hợp đồng dự án.");
+        return;
+      }
+      await checkProjectProgress(projectProgress.project_id);
+      setProgressActionMessage("Đã duyệt hợp đồng và cập nhật tiến độ dự án.");
+    } catch {
+      setProgressActionMessage("Không kết nối được kho dự án. Hệ thống không tự gửi lại để tránh ghi lặp sự kiện duyệt.");
+    } finally {
+      setApprovingProgressContract(false);
     }
   }
 
@@ -1192,6 +1215,8 @@ export function ProjectIntakeForm() {
           <header><div><strong>{projectProgress.project_name}</strong><small>{projectProgress.project_id}</small></div><b>{projectProgress.percent_complete}%</b></header>
           <div className="progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={projectProgress.percent_complete}><span style={{ width: `${projectProgress.percent_complete}%` }} /></div>
           <p>Giai đoạn: <strong>{projectProgress.current_stage}</strong> · Bước tiếp theo: <strong>{projectProgress.next_action}</strong></p>
+          {canResumeContractApproval(projectProgress) && <button disabled={approvingProgressContract} type="button" onClick={() => void approveContractFromProgress()}>{approvingProgressContract ? "Đang duyệt hợp đồng…" : "Duyệt hợp đồng và tiếp tục dự án"}</button>}
+          {progressActionMessage && <p className={progressActionMessage.startsWith("Đã duyệt") ? "operation-success" : "operation-error"}>{progressActionMessage}</p>}
           <ol>{projectProgress.milestones.map((milestone) => <li className={milestone.status.toLowerCase()} key={milestone.action}><span>{milestone.status === "COMPLETED" ? "✓" : milestone.status === "CURRENT" ? "●" : "○"}</span><div><strong>{milestone.label}</strong><small>{milestone.status === "CURRENT" ? "Đang thực hiện/chờ duyệt" : milestone.status === "COMPLETED" ? "Đã hoàn thành" : "Chưa bắt đầu"}</small></div></li>)}</ol>
         </div>}
       </section>}
