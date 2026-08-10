@@ -106,6 +106,27 @@ function allQcPassed(qc: typeof emptyQc) {
   return Object.values(qc).every(Boolean);
 }
 
+function readinessBlockerLabel(blocker: string) {
+  const actorOrShot = blocker.split(":")[1];
+  if (blocker === "PRODUCTION_READINESS_MISSING") return "Chưa tạo danh sách kiểm tra nhân vật, giọng và keyframe.";
+  if (blocker === "KEYFRAME_IDENTITY_APPROVAL_INCOMPLETE") return "Chưa đủ keyframe đã duyệt cho toàn bộ cảnh.";
+  if (blocker === "SPEAKER_FACE_LOCKS_INCOMPLETE") return "Chưa khóa đúng người nói và khuôn mặt cho toàn bộ cảnh thoại.";
+  if (blocker === "PRODUCTION_READINESS_NOT_APPROVED") return "Chủ dự án chưa duyệt khóa sản xuất.";
+  if (blocker.startsWith("IDENTITY_MASTER_NOT_LOCKED:")) return `Character Master chưa APPROVED + LOCKED: ${actorOrShot}`;
+  if (blocker.startsWith("VOICE_MASTER_NOT_LOCKED:")) return `Voice Master chưa APPROVED + LOCKED: ${actorOrShot}`;
+  if (blocker.startsWith("VOICE_AGE_NOT_LOCKED:")) return `Chưa khóa đúng độ tuổi giọng: ${actorOrShot}`;
+  if (blocker.startsWith("VOICE_LOCALE_NOT_LOCKED:")) return `Chưa khóa giọng miền Tây Nam Bộ: ${actorOrShot}`;
+  if (blocker.startsWith("VOICE_PERFORMANCE_STYLE_NOT_LOCKED:")) return `Chưa khóa phong cách lồng tiếng phim: ${actorOrShot}`;
+  if (blocker.startsWith("VOICE_PRONUNCIATION_LEXICON_MISSING:")) return `Chưa có bộ phát âm đã duyệt: ${actorOrShot}`;
+  if (blocker.startsWith("VOICE_AUDITION_NOT_APPROVED:")) return `Audition giọng chưa được duyệt: ${actorOrShot}`;
+  if (blocker.startsWith("DIALOGUE_LINE_NOT_APPROVED:")) return `Câu thoại chưa được duyệt: ${actorOrShot}`;
+  if (blocker.startsWith("PRONUNCIATION_NOT_APPROVED:")) return `Phát âm chưa được duyệt: ${actorOrShot}`;
+  if (blocker.startsWith("AGE_CASTING_NOT_APPROVED:")) return `Độ tuổi giọng chưa được duyệt: ${actorOrShot}`;
+  if (blocker.startsWith("DIALOGUE_TIMING_NOT_APPROVED:")) return `Thời lượng câu thoại chưa được duyệt: ${actorOrShot}`;
+  if (blocker.startsWith("SPEAKER_VOICE_MISMATCH:") || blocker.startsWith("DIALOGUE_LINE_VOICE_MISMATCH:")) return `Người nói và Voice Master chưa khớp: ${actorOrShot}`;
+  return blocker;
+}
+
 export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, checkingScriptAccount = false, scriptGenerationReady = false, scriptBudgetSummary, scriptAccountSummary }: Props) {
   const [shotPlanError, setShotPlanError] = useState("");
   const libraryActors = eligibleCharacters
@@ -370,6 +391,29 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
           <button className="secondary-button" type="button" onClick={generateShotPlan}>Tạo lại kế hoạch cảnh từ kịch bản</button>
           {shotPlanError && <p className="operation-error" role="alert">{shotPlanError}</p>}
           <p className="gate-note">Sau khi duyệt, hệ thống mới mở bước kiểm tra nhân vật, giọng nói và hình ảnh cho từng cảnh.</p>
+        </>}
+      </fieldset>
+
+      <fieldset disabled={value.shot_plan?.review.decision !== "APPROVE"} className={value.shot_plan?.review.decision !== "APPROVE" ? "locked-stage" : ""}>
+        <legend>Khóa nhân vật, giọng và keyframe</legend>
+        <p className="gate-note">Hệ thống kiểm tra Character Master, Voice Master, người nói và keyframe trước khi cho phép tạo clip mẫu.</p>
+        {!value.production_readiness && <button type="button" onClick={initializeProductionReadiness}>Chuẩn bị danh sách kiểm tra</button>}
+        {value.production_readiness && <>
+          <div className="provider-grid">
+            <span>Character Master: <strong>{value.production_readiness.identity_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</strong></span>
+            <span>Voice Master: <strong>{value.production_readiness.voice_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</strong></span>
+            <span>Keyframe đã duyệt: <strong>{value.production_readiness.keyframes.length}/{value.shot_plan?.shots.length ?? 0}</strong></span>
+            <span>Cảnh thoại đã khóa: <strong>{value.production_readiness.dialogue_line_approvals.length}/{value.production_readiness.dialogue_shot_ids.length}</strong></span>
+          </div>
+          {readinessBlockers.length > 0 && <div className="operation-error" role="status">
+            <strong>Còn điều kiện cần hoàn tất</strong>
+            <ul>{readinessBlockers.map((blocker) => <li key={blocker}>{readinessBlockerLabel(blocker)}</li>)}</ul>
+          </div>}
+          <button
+            type="button"
+            disabled={readinessBlockers.some((blocker) => blocker !== "PRODUCTION_READINESS_NOT_APPROVED")}
+            onClick={() => patch({ production_readiness: { ...value.production_readiness!, review: { ...value.production_readiness!.review, decision: "APPROVE", reviewed_at: new Date().toISOString() } } })}
+          >{value.production_readiness.review.decision === "APPROVE" ? "✓ Đã khóa và duyệt" : "Duyệt khóa nhân vật, giọng và keyframe"}</button>
         </>}
       </fieldset>
 
