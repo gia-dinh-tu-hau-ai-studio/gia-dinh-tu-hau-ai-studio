@@ -603,6 +603,16 @@ export function syncShortFilmSourceActors(
   });
 }
 
+export function shortFilmSourceActorsNeedSync(
+  filmCharacters: ReadonlyArray<ShortFilmWorkflow["film_characters"][number]>,
+  sourceActors: ReadonlyArray<ShortFilmWorkflow["source_actors"][number]>,
+) {
+  const selectedActorIds = new Set(filmCharacters.map((character) => character.source_actor_id));
+  const sourceActorIds = new Set(sourceActors.map((actor) => actor.source_actor_id));
+  return selectedActorIds.size !== sourceActorIds.size ||
+    [...selectedActorIds].some((actorId) => !sourceActorIds.has(actorId));
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

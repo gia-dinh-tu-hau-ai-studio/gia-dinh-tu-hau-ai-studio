@@ -11,6 +11,7 @@ import {
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   shortFilmProductionReadinessBlockers,
+  shortFilmSourceActorsNeedSync,
   syncShortFilmSourceActors,
   ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowSchema,
@@ -33,7 +34,9 @@ test("syncs a newly added third character into the selected source actors", () =
 
   const selected = syncShortFilmSourceActors(characters, [...actors], [actors[0], actors[1]]);
 
+  assert.equal(shortFilmSourceActorsNeedSync(characters, [actors[0], actors[1]]), true);
   assert.deepEqual(selected.map((actor) => actor.source_actor_id), ["CHAR_TUONG_VY", "CHAR_PHUONG_AN", "CHAR_BA_LAN"]);
+  assert.equal(shortFilmSourceActorsNeedSync(characters, selected), false);
   assert.doesNotThrow(() => ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     character_count: 3,
