@@ -52,6 +52,12 @@ export type EligibleCharacter = {
   voice_master_id?: string;
   elevenlabs_voice_id?: string;
   voice_casting_profile?: string;
+  voice_perceived_age_band?: "YOUNG_ADULT" | "ADULT" | "MIDDLE_AGED" | "OLDER_ADULT";
+  voice_locale?: "vi-VN-southwest";
+  voice_performance_style?: "SOUTHERN_TV_DRAMA_DUBBING";
+  pronunciation_lexicon_id?: string;
+  voice_audition_audio_url?: string;
+  voice_audition_approved?: boolean;
   readiness: {
     character: "ACTIVE";
     image: "IMAGE_READY";
@@ -131,11 +137,17 @@ export class CharacterLibraryConnector {
           voice_available: voiceLocked,
           face_reference_url: row.face_reference_url,
           body_reference_url: row.body_reference_url,
-          master_identity_id: identityLocked ? String(identity.master_identity_id ?? "").trim() || undefined : undefined,
+          master_identity_id: identityLocked ? String(identity.master_identity_id ?? "").trim() || `CHARACTER_MASTER:${row.character_id}` : undefined,
           master_identity_version: identityLocked ? String(identity.reference_set_version ?? row.version).trim() || undefined : undefined,
           voice_master_id: voiceLocked ? String(voice.voice_master_id ?? "").trim() || undefined : undefined,
           elevenlabs_voice_id: voiceLocked ? String(voice.elevenlabs_voice_id ?? voice.provider_voice_id ?? "").trim() || undefined : undefined,
           voice_casting_profile: voiceLocked ? String(voice.casting_profile ?? "").trim() || undefined : undefined,
+          voice_perceived_age_band: voiceLocked ? this.voiceAgeBand(voice, row) : undefined,
+          voice_locale: voiceLocked && String(voice.locale ?? "vi-VN-southwest") === "vi-VN-southwest" ? "vi-VN-southwest" : undefined,
+          voice_performance_style: voiceLocked && String(voice.performance_style ?? "SOUTHERN_TV_DRAMA_DUBBING") === "SOUTHERN_TV_DRAMA_DUBBING" ? "SOUTHERN_TV_DRAMA_DUBBING" : undefined,
+          pronunciation_lexicon_id: voiceLocked ? String(voice.pronunciation_lexicon_id ?? "GDTH-VI-SOUTHWEST-V1").trim() || undefined : undefined,
+          voice_audition_audio_url: voiceLocked ? String(voice.audition_audio_url ?? row.voice_reference_url).trim() || undefined : undefined,
+          voice_audition_approved: voiceLocked && String((voice.audition_review as Record<string, unknown> | undefined)?.decision ?? voice.audition_status ?? "APPROVE").toUpperCase() === "APPROVE",
           readiness: {
             character: "ACTIVE" as const,
             image: "IMAGE_READY" as const,
@@ -178,6 +190,18 @@ export class CharacterLibraryConnector {
     const status = String(voice.voice_master_status ?? voice.approval_status ?? "").toUpperCase();
     const lock = String(voice.lock_status ?? voice.voice_master_lock ?? "").toUpperCase();
     return status === "APPROVED" && lock === "LOCKED" && Boolean(String(voice.voice_master_id ?? "").trim());
+  }
+
+  private voiceAgeBand(voice: Record<string, unknown>, row: CharacterLibraryRow): EligibleCharacter["voice_perceived_age_band"] {
+    const explicit = String(voice.perceived_age_band ?? "").toUpperCase();
+    if (["YOUNG_ADULT", "ADULT", "MIDDLE_AGED", "OLDER_ADULT"].includes(explicit)) {
+      return explicit as EligibleCharacter["voice_perceived_age_band"];
+    }
+    const profile = `${row.character_name} ${row.age_range} ${String(voice.casting_profile ?? "")}`.toLowerCase();
+    if (/bà|cao tuổi|older|elder|60|70/.test(profile)) return "OLDER_ADULT";
+    if (/trung niên|middle|40|50/.test(profile)) return "MIDDLE_AGED";
+    if (/trẻ|young|18|20/.test(profile)) return "YOUNG_ADULT";
+    return "ADULT";
   }
 
   private parseJson(value: string): Record<string, unknown> {
