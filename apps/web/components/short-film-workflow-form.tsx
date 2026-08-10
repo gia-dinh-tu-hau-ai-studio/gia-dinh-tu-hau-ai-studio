@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { createShortFilmShotPlan, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { createShortFilmShotPlan, shortFilmNextAction, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
@@ -47,6 +47,17 @@ const emptyQc = {
   lighting: false,
   continuity: false,
 };
+
+const approvalSequence = [
+  ["REVIEW_SHORT_FILM_SCRIPT", "Duyệt kịch bản"],
+  ["PREPARE_SHORT_FILM_SHOT_PLAN", "Lập Shot Plan"],
+  ["REVIEW_SHORT_FILM_SHOT_PLAN", "Duyệt Shot Plan"],
+  ["LOCK_SHORT_FILM_PRODUCTION_READINESS", "Khóa nhân vật, giọng và keyframe"],
+  ["PREPARE_SHORT_FILM_PILOT", "Tạo pilot"],
+  ["REVIEW_SHORT_FILM_PILOT", "QC và duyệt pilot"],
+  ["PRODUCE_SHORT_FILM", "Sản xuất toàn phim"],
+  ["REVIEW_SHORT_FILM_FINAL", "QC và duyệt phim hoàn chỉnh"],
+] as const;
 
 export function createInitialShortFilmWorkflow(): ShortFilmWorkflow {
   return {
@@ -224,6 +235,12 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     ? shortFilmProductionReadinessBlockers(value)
     : ["PRODUCTION_READINESS_MISSING"];
   const productionReady = readinessBlockers.length === 0;
+  const nextAction = shortFilmNextAction(value);
+  const normalizedNextAction = nextAction === "SCRIPT_REJECTED" ? "REVIEW_SHORT_FILM_SCRIPT" : nextAction;
+  const currentApprovalIndex = normalizedNextAction === "READY_TO_PUBLISH"
+    ? approvalSequence.length
+    : Math.max(0, approvalSequence.findIndex(([action]) => action === normalizedNextAction));
+  const scriptDraftCreated = Boolean(value.script_generation || value.full_script.trim());
 
   return (
     <div className="short-film-workflow">
@@ -231,6 +248,22 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         <strong>Quy trình phim ngắn an toàn</strong>
         <span>Kịch bản, nhân vật, giọng nói, pilot và phim hoàn chỉnh đều phải được duyệt trước khi đi tiếp.</span>
       </div>
+
+      <section className="approval-sequence" aria-label="Thứ tự các bước cần thực hiện">
+        <header>
+          <strong>Các bước thực hiện theo thứ tự</strong>
+          <span>Đi từ trên xuống. Xanh: đã xong · Vàng: đang làm · Xám: chưa tới lượt.</span>
+        </header>
+        <ol>
+          {approvalSequence.map(([action, label], index) => {
+            const status = index < currentApprovalIndex ? "completed" : index === currentApprovalIndex ? "current" : "pending";
+            return <li className={status} key={action}>
+              <b aria-hidden="true">{status === "completed" ? "✓" : index + 1}</b>
+              <div><strong>{label}</strong><small>{status === "completed" ? "Đã thao tác" : status === "current" ? "Đang thực hiện" : "Chưa tới lượt"}</small></div>
+            </li>;
+          })}
+        </ol>
+      </section>
 
       <fieldset data-validation-path="film_characters">
         <legend>Diễn viên nguồn và nhân vật trong phim</legend>
@@ -268,7 +301,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             {scriptBudgetSummary && <span>{scriptBudgetSummary}</span>}
             <small>{scriptAccountSummary ?? "Kiểm tra tài khoản trước khi tạo bản nháp."}</small>
           </div>
-          <button disabled={checkingScriptAccount || generatingScript || (scriptGenerationReady && value.idea_brief.trim().length < 20)} onClick={scriptGenerationReady ? onGenerateScript : onRequestBudgetApproval} type="button">{checkingScriptAccount ? "Đang kiểm tra tài khoản…" : generatingScript ? "AI đang tạo kịch bản…" : scriptGenerationReady ? "Duyệt kinh phí & tạo bản nháp kịch bản AI" : "Kiểm tra OpenAI & mở tạo bản nháp"}</button>
+          <button className={scriptDraftCreated ? "action-completed" : scriptGenerationReady ? "action-current" : "action-pending"} disabled={checkingScriptAccount || generatingScript || (scriptGenerationReady && value.idea_brief.trim().length < 20)} onClick={scriptGenerationReady ? onGenerateScript : onRequestBudgetApproval} type="button">{checkingScriptAccount ? "Đang kiểm tra tài khoản…" : generatingScript ? "AI đang tạo kịch bản…" : scriptDraftCreated ? "✓ Đã tạo bản nháp · Tạo lại nếu cần" : scriptGenerationReady ? "Duyệt kinh phí & tạo bản nháp kịch bản AI" : "Kiểm tra OpenAI & mở tạo bản nháp"}</button>
           <p className="gate-note">Nút kiểm tra chỉ đọc trạng thái tài khoản. Chỉ nút tạo bản nháp mới gọi OpenAI và phát sinh chi phí trong hạn mức hiển thị.</p>
         </div>}
         <label data-validation-path="script_title"><span>Tên kịch bản *</span><input required placeholder="Ví dụ: Chiếc bẫy sau lời hứa" value={value.script_title} onChange={(event) => patch({ script_title: event.target.value })} /></label>
@@ -279,17 +312,17 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
           <p className="gate-note">Chọn một hành động rõ ràng. Duyệt kịch bản chỉ mở phần chuẩn bị tiếp theo, chưa gọi nhà cung cấp và chưa phát sinh chi phí media.</p>
           <div className="script-approval-actions" role="group" aria-label="Quyết định kịch bản">
             <button
-              className={value.script_review.decision === "APPROVE" ? "approval-action selected" : "approval-action"}
+              className={value.script_review.decision === "APPROVE" ? "approval-action decision-approve selected" : "approval-action decision-approve"}
               onClick={() => patch({ script_review: { ...value.script_review, decision: "APPROVE", reviewed_at: new Date().toISOString() } })}
               type="button"
             >Duyệt và mở bước tiếp theo</button>
             <button
-              className={value.script_review.decision === "REQUEST_CHANGES" ? "secondary-button selected" : "secondary-button"}
+              className={value.script_review.decision === "REQUEST_CHANGES" ? "secondary-button decision-change selected" : "secondary-button decision-change"}
               onClick={() => patch({ script_review: { ...value.script_review, decision: "REQUEST_CHANGES", reviewed_at: new Date().toISOString() } })}
               type="button"
             >Yêu cầu sửa</button>
             <button
-              className={value.script_review.decision === "REJECT" ? "remove-button selected" : "remove-button"}
+              className={value.script_review.decision === "REJECT" ? "remove-button decision-reject selected" : "remove-button decision-reject"}
               onClick={() => patch({ script_review: { ...value.script_review, decision: "REJECT", reviewed_at: new Date().toISOString() } })}
               type="button"
             >Từ chối</button>
@@ -511,9 +544,9 @@ function ReviewGate({ label, review, onChange }: { label: string; review?: Short
 
 function ReviewDecisionButtons({ value, onChange, approveDisabled = false, simple = false }: { value: ShortFilmWorkflow["script_review"]["decision"]; onChange: (decision: ShortFilmWorkflow["script_review"]["decision"]) => void; approveDisabled?: boolean; simple?: boolean }) {
   return <div className="review-click-actions" role="group" aria-label="Lựa chọn duyệt">
-    <button className={value === "APPROVE" ? "selected" : ""} disabled={approveDisabled} onClick={() => onChange("APPROVE")} type="button">✓ Duyệt</button>
-    {!simple && <button className={value === "REQUEST_CHANGES" ? "secondary-button selected" : "secondary-button"} onClick={() => onChange("REQUEST_CHANGES")} type="button">↻ Yêu cầu sửa</button>}
-    {!simple && <button className={value === "REJECT" ? "remove-button selected" : "remove-button"} onClick={() => onChange("REJECT")} type="button">× Từ chối</button>}
-    {simple && <button className={value === "PENDING" ? "secondary-button selected" : "secondary-button"} onClick={() => onChange("PENDING")} type="button">Chưa duyệt</button>}
+    <button className={value === "APPROVE" ? "decision-approve selected" : "decision-approve"} disabled={approveDisabled} onClick={() => onChange("APPROVE")} type="button">✓ Duyệt</button>
+    {!simple && <button className={value === "REQUEST_CHANGES" ? "secondary-button decision-change selected" : "secondary-button decision-change"} onClick={() => onChange("REQUEST_CHANGES")} type="button">↻ Yêu cầu sửa</button>}
+    {!simple && <button className={value === "REJECT" ? "remove-button decision-reject selected" : "remove-button decision-reject"} onClick={() => onChange("REJECT")} type="button">× Từ chối</button>}
+    {simple && <button className={value === "PENDING" ? "secondary-button action-pending selected" : "secondary-button action-pending"} onClick={() => onChange("PENDING")} type="button">Chưa duyệt</button>}
   </div>;
 }
