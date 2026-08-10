@@ -1378,6 +1378,9 @@ export function ProjectIntakeForm() {
               scriptBudgetSummary={`Kịch bản AI tối đa ${providerBudget.estimate.script.toLocaleString("vi-VN")} ${providerBudget.estimate.currency} · Tổng dự toán ${providerBudget.estimate.total.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}`}
               scriptAccountSummary={openAiAccountCheck ? `OpenAI: ${openAiAccountCheck.status} · ${openAiAccountCheck.message}` : "OpenAI chưa được kiểm tra."}
               providerStatus={shortFilmProviderStatus}
+              pilotBudgetApproved={pilotExecutionApproved}
+              pilotBudgetSummary="3 clip × 15 giây · Runway tối đa 700 credits · ElevenLabs tối đa 1.000 credits · Sync tối đa 3 USD."
+              onApprovePilotBudget={() => setPilotExecutionApproved(true)}
               onChange={(workflow) => {
                 invalidateConfirmation();
                 setShortFilmWorkflow(workflow);
