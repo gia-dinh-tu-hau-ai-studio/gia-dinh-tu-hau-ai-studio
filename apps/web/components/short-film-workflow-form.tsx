@@ -115,6 +115,13 @@ function allQcPassed(qc: typeof emptyQc) {
   return Object.values(qc).every(Boolean);
 }
 
+function masterImagePreviewUrl(sourceUrl: string) {
+  const driveFileId = sourceUrl.match(/\/file\/d\/([^/]+)/)?.[1] ?? new URL(sourceUrl).searchParams.get("id");
+  return driveFileId
+    ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveFileId)}&sz=w1200`
+    : sourceUrl;
+}
+
 function readinessBlockerLabel(blocker: string) {
   const actorOrShot = blocker.split(":")[1];
   if (blocker === "PRODUCTION_READINESS_MISSING") return "Chưa tạo danh sách kiểm tra nhân vật, giọng và keyframe.";
@@ -468,7 +475,13 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
                 }}>{value.film_characters.map((character) => <option key={character.source_actor_id} value={character.source_actor_id}>{character.film_character_name}</option>)}</select></label>
                 <div className="approval-gate compact-approval">
                   <strong>Ảnh Master dùng làm keyframe</strong>
-                  {masterReferenceUrl ? <a href={masterReferenceUrl} rel="noreferrer" target="_blank">Mở ảnh nhân vật đã duyệt để xem</a> : <p className="operation-error">Nhân vật chưa có ảnh Master hợp lệ.</p>}
+                  {masterReferenceUrl ? <>
+                    <figure className="pilot-master-preview">
+                      <img alt={`Ảnh Master ${value.film_characters.find((character) => character.source_actor_id === speakerActor?.source_actor_id)?.film_character_name ?? "nhân vật"}`} loading="lazy" src={masterImagePreviewUrl(masterReferenceUrl)} />
+                      <figcaption>Ảnh Master APPROVED + LOCKED đang dùng cho {shotId}</figcaption>
+                    </figure>
+                    <a href={masterReferenceUrl} rel="noreferrer" target="_blank">Mở ảnh gốc trên Drive</a>
+                  </> : <p className="operation-error">Nhân vật chưa có ảnh Master hợp lệ.</p>}
                   <button className={keyframe ? "action-completed" : "action-current"} disabled={!masterReferenceUrl || Boolean(keyframe)} type="button" onClick={() => {
                     if (!value.production_readiness || !masterReferenceUrl) return;
                     const keyframes = value.production_readiness.keyframes.filter((item) => item.shot_id !== shotId);

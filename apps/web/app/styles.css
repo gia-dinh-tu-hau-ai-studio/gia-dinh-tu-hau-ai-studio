@@ -165,6 +165,9 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .character-master-images figure { margin: 0; background: #0c090b; }
 .character-master-images img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #050405; }
 .character-master-images figcaption { padding: 8px 10px; color: #c8b9bf; font-size: 12px; }
+.pilot-master-preview { margin: 10px 0; overflow: hidden; border: 1px solid #5f4b38; border-radius: 14px; background: #050405; }
+.pilot-master-preview img { display: block; width: 100%; max-height: 520px; aspect-ratio: 3 / 4; object-fit: contain; background: #050405; }
+.pilot-master-preview figcaption { padding: 9px 12px; color: #d8c8b2; font-size: 13px; }
 .reference-image-missing { display: grid; min-height: 260px; place-content: center; gap: 6px; text-align: center; color: #aa9ca2; background: #0c090b; }
 .reference-image-missing strong { color: #ff8e8e; }
 .character-master-preview dl { display: grid; gap: 8px; margin: 0; padding: 14px 16px; }
