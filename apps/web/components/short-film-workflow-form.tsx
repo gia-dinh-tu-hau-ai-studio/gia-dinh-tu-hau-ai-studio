@@ -503,7 +503,8 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
                   if (!value.production_readiness) return;
                   const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.map((item) => item.shot_id === shotId ? { ...item, pronunciation_decision: "APPROVE" as const, age_casting_decision: "APPROVE" as const, timing_decision: "APPROVE" as const, reviewed_at: new Date().toISOString() } : item);
                   patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
-                }}>{line?.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "✓ Đã duyệt thoại, giọng và khẩu hình" : "Duyệt thoại, độ tuổi giọng và khẩu hình"}</button>
+                }}>{line?.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "✓ Đã duyệt thoại và chất giọng dự kiến" : "Duyệt thoại, độ tuổi giọng và thời lượng dự kiến"}</button>
+                <p className="gate-note">Chưa duyệt khẩu hình tại đây. Khẩu hình chỉ xuất hiện trong checklist QC sau khi clip Sync đã tạo xong.</p>
               </article>;
             })}
           </div>
@@ -627,7 +628,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
                       if (event.target.value) dialogue_line_approvals.push({ line_id: `LINE-${String(index + 1).padStart(3, "0")}`, shot_id: shotId, speaker_source_actor_id: speaker.speaker_source_actor_id, voice_master_id: speaker.voice_master_id, dialogue_text: event.target.value, target_duration_ms: line?.target_duration_ms ?? 2000, pronunciation_decision: "PENDING", age_casting_decision: "PENDING", timing_decision: "PENDING", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() });
                       patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
                     }} /></label>
-                    <label><span>Timing khẩu hình mục tiêu (ms)</span><input min={250} max={60000} type="number" value={line?.target_duration_ms ?? 2000} onChange={(event) => {
+                    <label><span>Thời lượng câu thoại mục tiêu (ms)</span><input min={250} max={60000} type="number" value={line?.target_duration_ms ?? 2000} onChange={(event) => {
                       if (!value.production_readiness || !line) return;
                       const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.map((item) => item.shot_id === shotId ? { ...item, target_duration_ms: Number(event.target.value), reviewed_at: new Date().toISOString() } : item);
                       patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
@@ -638,7 +639,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
                       const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.map((item) => item.shot_id === shotId ? { ...item, pronunciation_decision: decision, age_casting_decision: decision, timing_decision: decision, reviewed_at: new Date().toISOString() } : item);
                       patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
                     }} /></div>}
-                    <p className="gate-note">{line?.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "PROJECT_OWNER APPROVED: độ tuổi · phát âm miền Tây · timing khẩu hình" : "Chưa duyệt câu thoại — provider bị khóa"}</p>
+                    <p className="gate-note">{line?.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "PROJECT_OWNER APPROVED: độ tuổi · phát âm miền Tây · thời lượng thoại dự kiến" : "Chưa duyệt câu thoại — provider bị khóa"}</p>
                   </>;
                 })()}
               </>}
