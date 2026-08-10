@@ -6,6 +6,7 @@ import { CharacterLibraryConnector } from "../connectors/google-sheets/character
 import { ProjectRegistryConnector } from "../connectors/google-sheets/project-registry.connector";
 import { assembleVideoBuffers } from "../media/short-film-pilot-assembler";
 import { ElevenLabsPilotProvider, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
+import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const FULL_MANIFEST = "SHORT_FILM_FULL_EXECUTION_V1.json";
 const PILOT_MANIFEST = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
@@ -21,6 +22,7 @@ type FullManifest = {
   status: "IN_PROGRESS" | "ASSEMBLING" | "AWAITING_FINAL_QC" | "FAILED";
   tasks: FullTask[]; caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number };
   output?: { drive_file_id: string; video_url: string; width: 1920; height: 1080 };
+  runway_assets?: RunwayAssetCache;
   heartbeat_at: string; started_at: string; error?: string;
 };
 
@@ -116,7 +118,10 @@ export class ShortFilmFullExecutionService {
             const uploaded = await this.drive.uploadFullFilmArtifact(context.project_folder_id, `${next.shot_id}.mp3`, "audio/mpeg", audio.audio);
             next.audio_drive_file_id = uploaded.id as string;
           }
-          const submitted = await runway.submit({ imageUrl: next.keyframe_url, prompt: next.prompt, durationSeconds: next.duration_seconds, ratio: "1280:720" });
+          manifest.runway_assets ??= {};
+          const imageUri = await preparePrivateRunwayKeyframe({ referenceUrl: next.keyframe_url, cache: manifest.runway_assets, drive: this.drive, runway });
+          await this.drive.writePilotJson(context.project_folder_id, FULL_MANIFEST, manifest);
+          const submitted = await runway.submit({ imageUrl: imageUri, prompt: next.prompt, durationSeconds: next.duration_seconds, ratio: "1280:720" });
           next.runway_task_id = submitted.taskId; next.status = "RUNWAY_PROCESSING";
         } else if (manifest.tasks.every((task) => task.status === "COMPLETED")) {
           manifest.status = "ASSEMBLING";
