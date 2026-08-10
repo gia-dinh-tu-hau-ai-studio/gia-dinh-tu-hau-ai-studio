@@ -1072,7 +1072,7 @@ test("dialogue line approval must match the locked speaker and voice", () => {
   assert.equal(shortFilmMediaExecutionDecision(parsed).provider_execution_allowed, false);
 });
 
-test("dialogue pronunciation and lip-sync timing require explicit owner approval", () => {
+test("dialogue pronunciation, age casting and target duration require approval before generation", () => {
   const parsed = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
@@ -1089,4 +1089,19 @@ test("dialogue pronunciation and lip-sync timing require explicit owner approval
   const blockers = shortFilmProductionReadinessBlockers(parsed).join(",");
   assert.match(blockers, /PRONUNCIATION_NOT_APPROVED/);
   assert.match(blockers, /DIALOGUE_TIMING_NOT_APPROVED/);
+});
+
+test("approving dialogue target duration never approves actual lip-sync QC before an output exists", () => {
+  assert.throws(() => ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"] },
+    production_readiness: productionReadiness,
+    pilot: {
+      duration_seconds: 15,
+      video_url: "https://drive.google.com/file/d/pilot/view",
+      qc: { identity: true, motion: true, lip_sync: false, voice: true, background: true, lighting: true, continuity: true },
+      review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+    },
+  }), /PILOT_APPROVED/);
 });
