@@ -7,6 +7,7 @@ import {
   canResumeContractApproval,
   canResumeShortFilmWorkflow,
   createShortFilmShotPlan,
+  createShortFilmResumeSnapshot,
   deriveShortFilmCharacterMediaRequirements,
   migrateShortFilmWorkflowDraft,
   normalizeProjectIntake,
@@ -42,12 +43,14 @@ test("creates a provider-free Shot Plan from the approved script and waits for o
   const approved = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     target_duration_minutes: 3,
+    full_script: Array.from({ length: 18 }, (_, index) => `Dien bien ${index + 1} mo ta mot hanh dong rieng biet cua nhan vat trong cau chuyen.`).join(" "),
     script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
   });
   const shotPlan = createShortFilmShotPlan(approved);
   const withPlan = ShortFilmWorkflowSchema.parse({ ...approved, shot_plan: shotPlan });
   assert.equal(shotPlan.execution_shots.length, 18);
   assert.equal(shotPlan.execution_shots.reduce((total, shot) => total + shot.duration_seconds, 0), 180);
+  assert.equal(new Set(shotPlan.execution_shots.map((shot) => shot.summary)).size, 18);
   assert.equal(shotPlan.review.decision, "PENDING");
   assert.equal(shortFilmNextAction(withPlan), "REVIEW_SHORT_FILM_SHOT_PLAN");
   assert.match(shortFilmProductionReadinessBlockers(withPlan).join(","), /SHOT_PLAN_NOT_APPROVED/);
@@ -56,6 +59,7 @@ test("creates a provider-free Shot Plan from the approved script and waits for o
 test("Shot Plan approval is required before character and voice locking", () => {
   const approved = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
+    full_script: Array.from({ length: 48 }, (_, index) => `Dien bien ${index + 1} mo ta mot hanh dong rieng biet cua nhan vat trong cau chuyen.`).join(" "),
     script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
   });
   const shotPlan = createShortFilmShotPlan(approved);
@@ -64,6 +68,16 @@ test("Shot Plan approval is required before character and voice locking", () => 
     shot_plan: { ...shotPlan, review: { decision: "APPROVE", notes: "Shot plan approved", reviewer: "PROJECT_OWNER" } },
   });
   assert.equal(shortFilmNextAction(reviewed), "LOCK_SHORT_FILM_PRODUCTION_READINESS");
+});
+
+test("Shot Plan refuses to fabricate repeated shots when the approved script lacks detail", () => {
+  const approved = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    target_duration_minutes: 3,
+    full_script: "Mot tinh huong ngan chua du dien bien de bao phu ba phut phim.",
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+  });
+  assert.throws(() => createShortFilmShotPlan(approved), /SHOT_PLAN_SCRIPT_DETAIL_INSUFFICIENT:1:18/);
 });
 
 test("short-film dialogue derives safe voice and lip-sync requirements", () => {
@@ -295,6 +309,44 @@ const common = {
     },
   ],
 };
+
+test("canonical short-film resume snapshot preserves the complete saved project", () => {
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    target_duration_minutes: 3,
+    script_review: { decision: "APPROVE", notes: "Da duyet kich ban", reviewer: "PROJECT_OWNER" },
+    shot_plan: {
+      summary: "Shot Plan can sua",
+      shots: ["Shot 01"],
+      execution_shots: [],
+      review: { decision: "REQUEST_CHANGES", notes: "Khong lap noi dung", reviewer: "PROJECT_OWNER" },
+    },
+  });
+  const snapshot = createShortFilmResumeSnapshot({
+    ...common,
+    project_type: "SHORT_FILM",
+    project_name: "Lua dao xin viec",
+    language: "vi-VN-southwest",
+    duration_target: "3_MINUTES",
+    platforms: ["YOUTUBE", "FACEBOOK"],
+    story_idea: "Tim viec qua mang va bi lua chuyen tien giu suat viec nhe luong cao.",
+    social_theme: "COMMUNITY",
+    story_genre: "FAMILY_DRAMA",
+    primary_setting: "CITY",
+    ending_direction: "LESSON",
+    dialogue_source: "AI_DRAFT_OWNER_APPROVES",
+    short_film_workflow: workflow,
+  });
+  assert.deepEqual(snapshot.form_values.duration_target, ["3_MINUTES"]);
+  assert.deepEqual(snapshot.form_values.platforms, ["YOUTUBE", "FACEBOOK"]);
+  assert.deepEqual(snapshot.form_values.story_idea, ["Tim viec qua mang va bi lua chuyen tien giu suat viec nhe luong cao."]);
+  assert.equal(snapshot.duration_target, "3_MINUTES");
+  assert.equal(snapshot.provider_budget.approval.decision, "APPROVE");
+  assert.equal(snapshot.characters.length, 1);
+  assert.equal(snapshot.short_film_workflow.script_review.decision, "APPROVE");
+  assert.equal(snapshot.short_film_workflow.shot_plan?.review.decision, "REQUEST_CHANGES");
+  assert.equal(snapshot.short_film_workflow.shot_plan?.review.notes, "Khong lap noi dung");
+});
 
 test("khóa nhà cung cấp khi kinh phí chưa duyệt hoặc hạn mức không đủ", () => {
   assert.equal(providerBudgetApproved({

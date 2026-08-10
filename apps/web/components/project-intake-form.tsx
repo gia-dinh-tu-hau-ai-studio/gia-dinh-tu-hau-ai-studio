@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
-import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptProvider, shortFilmScriptReadyForProjectCreation, synchronizeShortFilmIntakeFields, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptProvider, shortFilmScriptReadyForProjectCreation, synchronizeShortFilmIntakeFields, type ProviderBudgetPlan, type ShortFilmResumeSnapshot, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -475,12 +475,20 @@ export function ProjectIntakeForm() {
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(projectProgress.project_id)}/short-film/workflow`);
       const body = await response.json();
-      if (!response.ok || !body.workflow || typeof body.next_action !== "string") {
+      if (!response.ok || !body.resume_snapshot || typeof body.next_action !== "string") {
         setProgressActionMessage(body.message ?? body.code ?? "Không mở lại được workflow phim ngắn.");
         return;
       }
+      const snapshot = body.resume_snapshot as ShortFilmResumeSnapshot;
       setProjectType("SHORT_FILM");
-      setShortFilmWorkflow(body.workflow as ShortFilmWorkflow);
+      setShortFilmWorkflow(snapshot.short_film_workflow);
+      setReferenceSources(snapshot.reference_sources);
+      setCharacters(snapshot.characters as CharacterSelection[]);
+      setProviderBudget(snapshot.provider_budget);
+      setDurationTarget(snapshot.duration_target);
+      setDraftFormValues(snapshot.form_values);
+      setAccountPreflight(null);
+      setManualBalanceConfirmed(false);
       setCreatedProject({ project_id: projectProgress.project_id, current_stage: projectProgress.current_stage, next_action: body.next_action });
       setProjectStarted(true);
       setTimeout(() => document.getElementById("intake-frame-5")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);

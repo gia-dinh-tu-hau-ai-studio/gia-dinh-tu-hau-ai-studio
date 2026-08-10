@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createShortFilmShotPlan, shortFilmNextAction, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
@@ -107,6 +107,7 @@ function allQcPassed(qc: typeof emptyQc) {
 }
 
 export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, checkingScriptAccount = false, scriptGenerationReady = false, scriptBudgetSummary, scriptAccountSummary }: Props) {
+  const [shotPlanError, setShotPlanError] = useState("");
   const libraryActors = eligibleCharacters
     .filter((actor) => actor.readiness?.master_identity === "APPROVED_LOCKED")
     .map((actor) => ({
@@ -156,6 +157,18 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 
   function patch(patchValue: Partial<ShortFilmWorkflow>) {
     onChange({ ...value, ...patchValue });
+  }
+
+  function generateShotPlan() {
+    try {
+      setShotPlanError("");
+      patch({ shot_plan: createShortFilmShotPlan(value), production_readiness: undefined });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setShotPlanError(message.startsWith("SHOT_PLAN_SCRIPT_DETAIL_INSUFFICIENT:")
+        ? "Kịch bản chưa đủ chi tiết để lập Shot Plan đúng thời lượng mà không lặp cảnh. Hãy phát triển thêm diễn biến, hành động và lời thoại rồi duyệt lại kịch bản."
+        : "Không thể tạo Shot Plan từ kịch bản hiện tại. Hãy kiểm tra lại kịch bản đã duyệt.");
+    }
   }
 
   function setCharacterCount(count: number) {
@@ -345,7 +358,8 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         <legend>Kế hoạch cảnh — tạo từ kịch bản đã duyệt</legend>
         {!value.shot_plan && <>
           <p className="gate-note">Hệ thống tạo kế hoạch cảnh cục bộ từ kịch bản đã duyệt, không gọi nhà cung cấp và không phát sinh credit.</p>
-          <button type="button" onClick={() => patch({ shot_plan: createShortFilmShotPlan(value) })}>Tạo kế hoạch cảnh để duyệt</button>
+          <button type="button" onClick={generateShotPlan}>Tạo kế hoạch cảnh để duyệt</button>
+          {shotPlanError && <p className="operation-error" role="alert">{shotPlanError}</p>}
         </>}
         {value.shot_plan && <>
           <p><strong>{value.shot_plan.summary}</strong></p>
@@ -353,7 +367,8 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             {value.shot_plan.execution_shots.map((shot, index) => <li key={shot.shot_id}><strong>Cảnh {index + 1} · {shot.duration_seconds} giây</strong><span>{shot.summary}</span></li>)}
           </ol>
           <ReviewGate label="Duyệt kế hoạch cảnh" review={value.shot_plan.review} onChange={(review) => patch({ shot_plan: { ...value.shot_plan!, review } })} />
-          <button className="secondary-button" type="button" onClick={() => patch({ shot_plan: createShortFilmShotPlan(value), production_readiness: undefined })}>Tạo lại kế hoạch cảnh từ kịch bản</button>
+          <button className="secondary-button" type="button" onClick={generateShotPlan}>Tạo lại kế hoạch cảnh từ kịch bản</button>
+          {shotPlanError && <p className="operation-error" role="alert">{shotPlanError}</p>}
           <p className="gate-note">Sau khi duyệt, hệ thống mới mở bước kiểm tra nhân vật, giọng nói và hình ảnh cho từng cảnh.</p>
         </>}
       </fieldset>
