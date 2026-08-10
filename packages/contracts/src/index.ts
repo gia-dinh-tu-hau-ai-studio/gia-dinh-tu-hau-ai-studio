@@ -789,6 +789,7 @@ export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
   return Array.from({ length: workflow.pilot_sampling.sample_count }, (_, sampleIndex) => {
     const purpose = workflow.pilot_sampling.required_purposes[sampleIndex] ?? "HIGH_RISK_SHOT";
     const ordered = [...shots].sort((left, right) => {
+      if (used.has(left.shot_id) !== used.has(right.shot_id)) return used.has(left.shot_id) ? 1 : -1;
       const leftScore = left.risk_tags.includes(purpose) ? 1 : 0;
       const rightScore = right.risk_tags.includes(purpose) ? 1 : 0;
       return rightScore - leftScore;
@@ -796,18 +797,28 @@ export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
     const selected: typeof shots = [];
     let duration = 0;
     for (const shot of ordered) {
+      const remaining = workflow.pilot_sampling.clip_duration_seconds - duration;
+      if (remaining <= 0) break;
       if (used.has(shot.shot_id) && shots.length >= workflow.pilot_sampling.sample_count) continue;
-      selected.push(shot);
+      const selectedDuration = Math.min(shot.duration_seconds, remaining);
+      if (selectedDuration < 2) continue;
+      selected.push({ ...shot, duration_seconds: selectedDuration });
       used.add(shot.shot_id);
-      duration += shot.duration_seconds;
+      duration += selectedDuration;
       if (duration >= workflow.pilot_sampling.clip_duration_seconds) break;
     }
-    if (duration < 10) throw new Error(`PILOT_SAMPLE_TOO_SHORT:${sampleIndex + 1}`);
+    const missing = workflow.pilot_sampling.clip_duration_seconds - duration;
+    const last = selected.at(-1);
+    if (missing > 0 && last && last.duration_seconds + missing <= 10) {
+      last.duration_seconds += missing;
+      duration += missing;
+    }
+    if (duration !== workflow.pilot_sampling.clip_duration_seconds) throw new Error(`PILOT_SAMPLE_DURATION_MISMATCH:${sampleIndex + 1}`);
     return {
       sample_id: `PILOT-SAMPLE-${String(sampleIndex + 1).padStart(2, "0")}`,
       purpose,
       shots: selected,
-      expected_duration_seconds: Math.min(duration, 20),
+      expected_duration_seconds: duration,
     };
   });
 }

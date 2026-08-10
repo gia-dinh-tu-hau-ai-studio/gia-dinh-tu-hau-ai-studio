@@ -730,6 +730,25 @@ test("khóa Shot Plan khi SCRIPT_APPROVED chưa đạt", () => {
   }));
 });
 
+test("ba pilot 15 giây từ Shot Plan 10 giây luôn giữ đúng tổng 45 giây và trần chi phí", () => {
+  const shots = Array.from({ length: 18 }, (_, index) => ({
+    shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+    summary: `Shot ${index + 1}`,
+    runway_prompt: `Cinematic natural performance for approved character in shot ${index + 1}`,
+    duration_seconds: 10,
+    risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 2 ? ["MOTION_PERFORMANCE"] : index === 4 ? ["MULTI_CHARACTER_CONTINUITY"] : [],
+  }));
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "ok", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "Eighteen shots", shots: shots.map((shot) => shot.summary), execution_shots: shots },
+  });
+  const samples = selectShortFilmPilotSamples(parsed);
+  assert.deepEqual(samples.map((sample) => sample.expected_duration_seconds), [15, 15, 15]);
+  assert.equal(samples.flatMap((sample) => sample.shots).reduce((sum, shot) => sum + shot.duration_seconds, 0), 45);
+  assert.equal(new Set(samples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id))).size, 6);
+});
+
 test("cho phép lưu kịch bản đã sửa khi chủ dự án vừa duyệt lại", () => {
   const existing = {
     full_script: "Bản kịch bản cũ",
