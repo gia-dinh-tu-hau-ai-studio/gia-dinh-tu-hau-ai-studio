@@ -7,6 +7,7 @@ import { ProjectRegistryConnector } from "../connectors/google-sheets/project-re
 import { checkProviderAccounts } from "./provider-account-preflight";
 import { ElevenLabsPilotProvider, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { assembleVideoBuffers } from "../media/short-film-pilot-assembler";
+import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const MANIFEST_NAME = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
 
@@ -37,6 +38,7 @@ type PilotExecutionManifest = {
   heartbeat_at: string;
   started_at: string;
   error?: { stage: string; message: string };
+  runway_assets?: RunwayAssetCache;
   outputs?: Array<{ sample_id: string; drive_file_id: string; video_url: string; width: 1920; height: 1080 }>;
 };
 
@@ -139,7 +141,10 @@ export class ShortFilmPilotExecutionService {
         pendingRunway.elevenlabs_request_id = audio.requestId;
         await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
       }
-      const submitted = await runway.submit({ imageUrl, prompt: shot.runway_prompt, durationSeconds: shot.duration_seconds, ratio: "1280:720" });
+      manifest.runway_assets ??= {};
+      const imageUri = await preparePrivateRunwayKeyframe({ referenceUrl: imageUrl, cache: manifest.runway_assets, drive: this.drive, runway });
+      await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
+      const submitted = await runway.submit({ imageUrl: imageUri, prompt: shot.runway_prompt, durationSeconds: shot.duration_seconds, ratio: "1280:720" });
       pendingRunway.runway_task_id = submitted.taskId;
       pendingRunway.runway_status = "PENDING";
       manifest.provider_calls_made = true;

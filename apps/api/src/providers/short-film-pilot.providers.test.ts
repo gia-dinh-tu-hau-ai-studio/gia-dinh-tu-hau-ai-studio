@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
+import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -28,6 +29,32 @@ test("ElevenLabs returns audio and billing metadata without exposing the key", a
   assert.equal(output.characterCost, 12);
   assert.match(requestedUrl, /output_format=mp3_44100_128$/);
   assert.doesNotMatch(requestedUrl, /mp3_44100_192/);
+});
+
+test("private Drive keyframes use a Runway ephemeral upload instead of exposing a protected URL", async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  const provider = new RunwayPilotProvider("secret", (async (url, init) => {
+    requests.push({ url: String(url), init });
+    if (String(url).endsWith("/v1/uploads")) {
+      return new Response(JSON.stringify({ uploadUrl: "https://uploads.example.com/signed", fields: { key: "asset-key", policy: "signed" }, runwayUri: "runway://private-keyframe" }), { status: 200 });
+    }
+    if (String(url) === "https://uploads.example.com/signed") return new Response(null, { status: 204 });
+    return new Response(JSON.stringify({ id: "task-private" }), { status: 200 });
+  }) as typeof fetch);
+  const uploaded = await provider.uploadImage({ content: Buffer.alloc(1_024, 7), fileName: "master.jpg", mimeType: "image/jpeg" });
+  assert.deepEqual(uploaded, { uri: "runway://private-keyframe" });
+  await provider.submit({ imageUrl: uploaded.uri, prompt: "natural cinematic motion", durationSeconds: 5, ratio: "1280:720" });
+  assert.equal(requests.length, 3);
+  assert.equal((requests[1]?.init?.body as FormData).get("key"), "asset-key");
+  assert.equal((requests[1]?.init?.headers as Record<string, string> | undefined)?.Authorization, undefined);
+  assert.match(String(requests[2]?.init?.body), /runway:\/\/private-keyframe/);
+  assert.doesNotMatch(String(requests[2]?.init?.body), /drive\.google\.com/);
+});
+
+test("only canonical private Google Drive references can be resolved as approved keyframes", () => {
+  assert.equal(extractGoogleDriveFileId("https://drive.google.com/file/d/1A173k-4ucI0zsuQKjOa-kxZtXQnqN-0j/view"), "1A173k-4ucI0zsuQKjOa-kxZtXQnqN-0j");
+  assert.equal(extractGoogleDriveFileId("https://drive.usercontent.google.com/download?id=1A173k-4ucI0zsuQKjOa-kxZtXQnqN-0j&export=download"), "1A173k-4ucI0zsuQKjOa-kxZtXQnqN-0j");
+  assert.throws(() => extractGoogleDriveFileId("https://example.com/master.jpg"), /MUST_BE_GOOGLE_DRIVE/);
 });
 
 test("Sync sends sync-3 multipart and exposes stable failure codes", async () => {
