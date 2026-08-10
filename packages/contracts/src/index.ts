@@ -626,8 +626,11 @@ export function createShortFilmShotPlan(workflow: ShortFilmWorkflow) {
   const beats = sourceBeats.length > 0 ? sourceBeats : [workflow.script_synopsis];
   const totalSeconds = workflow.target_duration_minutes * 60;
   const shotCount = Math.max(3, Math.ceil(totalSeconds / 10));
+  if (beats.length < shotCount) {
+    throw new Error(`SHOT_PLAN_SCRIPT_DETAIL_INSUFFICIENT:${beats.length}:${shotCount}`);
+  }
   const shots = Array.from({ length: shotCount }, (_, index) => {
-    const beat = beats[index % beats.length];
+    const beat = beats[index];
     return `Shot ${String(index + 1).padStart(2, "0")}: ${beat.slice(0, 180)}`;
   });
   const executionShots = shots.map((summary, index) => ({
@@ -1087,6 +1090,57 @@ export const ProjectIntakeFormSchema = z.discriminatedUnion("project_type", [
 ]);
 
 export type ProjectIntakeForm = z.infer<typeof ProjectIntakeFormSchema>;
+
+export type ShortFilmProjectIntake = Extract<ProjectIntakeForm, { project_type: "SHORT_FILM" }>;
+
+export type ShortFilmResumeSnapshot = {
+  form_values: Record<string, string[]>;
+  reference_sources: ShortFilmProjectIntake["reference_sources"];
+  short_film_workflow: ShortFilmWorkflow;
+  characters: ShortFilmProjectIntake["characters"];
+  provider_budget: ProviderBudgetPlan;
+  duration_target: string;
+};
+
+export function createShortFilmResumeSnapshot(input: unknown): ShortFilmResumeSnapshot {
+  const parsed = ProjectIntakeFormSchema.parse(input);
+  if (parsed.project_type !== "SHORT_FILM") {
+    throw new Error("SHORT_FILM_PROJECT_REQUIRED");
+  }
+
+  const formValues: Record<string, string[]> = {};
+  const put = (name: string, value: string | undefined) => {
+    if (value !== undefined) formValues[name] = [value];
+  };
+  put("project_name", parsed.project_name);
+  put("client_name", parsed.client_name);
+  put("phone", parsed.phone);
+  put("email", parsed.email);
+  put("project_subtype", parsed.project_subtype);
+  put("priority", parsed.priority);
+  put("execution_mode", parsed.execution_mode);
+  put("language", parsed.language);
+  put("content_rating", parsed.content_rating);
+  put("target_audience", parsed.target_audience);
+  put("duration_target", parsed.duration_target);
+  put("aspect_ratio", parsed.aspect_ratio);
+  put("story_idea", parsed.story_idea);
+  put("social_theme", parsed.social_theme);
+  put("story_genre", parsed.story_genre);
+  put("primary_setting", parsed.primary_setting);
+  put("ending_direction", parsed.ending_direction);
+  put("dialogue_source", parsed.dialogue_source);
+  formValues.platforms = [...parsed.platforms];
+
+  return {
+    form_values: formValues,
+    reference_sources: parsed.reference_sources,
+    short_film_workflow: parsed.short_film_workflow,
+    characters: parsed.characters,
+    provider_budget: parsed.provider_budget,
+    duration_target: parsed.duration_target,
+  };
+}
 
 export type NormalizedProjectIntake = Omit<ProjectIntakeForm, "project_type"> & {
   project_type: z.infer<typeof BackendProjectTypeSchema>;

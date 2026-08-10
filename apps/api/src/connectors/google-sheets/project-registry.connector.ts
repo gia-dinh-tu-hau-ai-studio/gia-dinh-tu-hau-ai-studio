@@ -1,11 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import {
   calculateProjectProgress,
+  createShortFilmResumeSnapshot,
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   ShortFilmWorkflowSchema,
   type NormalizedProjectIntake,
   type ShortFilmWorkflow,
+  type ShortFilmResumeSnapshot,
 } from "@tu-hau/contracts";
 import { randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -56,6 +58,7 @@ export type StoredShortFilmWorkflow = {
   project_id: string;
   project_type: "SHORT_FILM";
   workflow: ShortFilmWorkflow;
+  resume_snapshot: ShortFilmResumeSnapshot;
   next_action: ReturnType<typeof shortFilmNextAction>;
   media_execution: ReturnType<typeof shortFilmMediaExecutionDecision>;
   updated_at: string;
@@ -2674,11 +2677,13 @@ export class ProjectRegistryConnector {
         throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} không phải SHORT_FILM`);
       }
       const contract = parseObject(row[24], "contract_json");
-      const workflow = ShortFilmWorkflowSchema.parse(contract.short_film_workflow);
+      const resumeSnapshot = createShortFilmResumeSnapshot(contract);
+      const workflow = resumeSnapshot.short_film_workflow;
       return {
         project_id: projectId,
         project_type: "SHORT_FILM",
         workflow,
+        resume_snapshot: resumeSnapshot,
         next_action: shortFilmNextAction(workflow),
         media_execution: shortFilmMediaExecutionDecision(workflow),
         updated_at: String(row[23] ?? row[22] ?? ""),
@@ -2784,10 +2789,12 @@ export class ProjectRegistryConnector {
           "AI_EXECUTOR_WEB", `SHORT_FILM_FORM_V1 cập nhật; next_action=${nextAction}. Không gọi provider.`, updatedAt,
         ]] },
       });
+      const resumeSnapshot = createShortFilmResumeSnapshot({ ...contract, short_film_workflow: workflow });
       return {
         project_id: projectId,
         project_type: "SHORT_FILM",
         workflow,
+        resume_snapshot: resumeSnapshot,
         next_action: nextAction,
         media_execution: shortFilmMediaExecutionDecision(workflow),
         updated_at: updatedAt,
