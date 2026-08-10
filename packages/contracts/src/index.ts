@@ -258,7 +258,7 @@ export const ShortFilmSpeakerLockSchema = z
 export const ShortFilmProductionReadinessSchema = z.object({
   identity_masters: z.array(ShortFilmLockedIdentitySchema).min(1),
   voice_masters: z.array(ShortFilmLockedVoiceSchema).default([]),
-  keyframes: z.array(ShortFilmKeyframeApprovalSchema).min(1),
+  keyframes: z.array(ShortFilmKeyframeApprovalSchema).default([]),
   dialogue_shot_ids: z.array(z.string().trim().min(1)).default([]),
   speaker_locks: z.array(ShortFilmSpeakerLockSchema).default([]),
   dialogue_line_approvals: z.array(ShortFilmDialogueLineApprovalSchema).default([]),
