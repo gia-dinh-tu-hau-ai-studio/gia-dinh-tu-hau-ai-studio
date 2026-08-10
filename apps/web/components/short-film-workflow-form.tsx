@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { createShortFilmShotPlan, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
@@ -298,11 +298,28 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         {value.dialogue.singing_scene && <label data-validation-path="dialogue.singing_scene_notes"><span>Mô tả/nguồn cảnh hát</span><textarea value={value.dialogue.singing_scene_notes} onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene_notes: event.target.value } })} /></label>}
       </fieldset>
 
+      <fieldset disabled={!scriptApproved} className={!scriptApproved ? "locked-stage" : ""}>
+        <legend>Shot Plan — tạo từ kịch bản đã duyệt</legend>
+        {!value.shot_plan && <>
+          <p className="gate-note">Hệ thống tạo kế hoạch cảnh cục bộ từ kịch bản đã duyệt, không gọi nhà cung cấp và không phát sinh credit.</p>
+          <button type="button" onClick={() => patch({ shot_plan: createShortFilmShotPlan(value) })}>Tự tạo Shot Plan để review</button>
+        </>}
+        {value.shot_plan && <>
+          <p><strong>{value.shot_plan.summary}</strong></p>
+          <ol className="shot-plan-review-list">
+            {value.shot_plan.execution_shots.map((shot) => <li key={shot.shot_id}><strong>{shot.shot_id} · {shot.duration_seconds} giây</strong><span>{shot.summary}</span><small>{shot.runway_prompt}</small></li>)}
+          </ol>
+          <ReviewGate label="Cổng duyệt Shot Plan" review={value.shot_plan.review} onChange={(review) => patch({ shot_plan: { ...value.shot_plan!, review } })} />
+          <button className="secondary-button" type="button" onClick={() => patch({ shot_plan: createShortFilmShotPlan(value), production_readiness: undefined })}>Tạo lại Shot Plan từ kịch bản</button>
+          <p className="gate-note">Chỉ SHOT_PLAN_APPROVED mới mở bước khóa Character Master, Voice Master, người nói và keyframe.</p>
+        </>}
+      </fieldset>
+
       <div className="system-only" aria-hidden="true">
       <fieldset disabled={!scriptApproved} className={!scriptApproved ? "locked-stage" : ""}>
         <legend>Shot Plan — chỉ mở sau SCRIPT_APPROVED</legend>
-        <label><span>Tóm tắt Shot Plan</span><textarea value={value.shot_plan?.summary ?? ""} onChange={(event) => patch({ shot_plan: { summary: event.target.value, shots: value.shot_plan?.shots ?? ["Shot 01"], execution_shots: value.shot_plan?.execution_shots ?? [] } })} /></label>
-        <label><span>Danh sách shot (mỗi dòng một shot)</span><textarea value={(value.shot_plan?.shots ?? []).join("\n")} onChange={(event) => patch({ shot_plan: { summary: value.shot_plan?.summary ?? "Shot Plan", shots: event.target.value.split("\n").filter(Boolean), execution_shots: [] } })} /></label>
+        <label><span>Tóm tắt Shot Plan</span><textarea value={value.shot_plan?.summary ?? ""} onChange={(event) => patch({ shot_plan: { summary: event.target.value, shots: value.shot_plan?.shots ?? ["Shot 01"], execution_shots: value.shot_plan?.execution_shots ?? [], review: value.shot_plan?.review ?? { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } } })} /></label>
+        <label><span>Danh sách shot (mỗi dòng một shot)</span><textarea value={(value.shot_plan?.shots ?? []).join("\n")} onChange={(event) => patch({ shot_plan: { summary: value.shot_plan?.summary ?? "Shot Plan", shots: event.target.value.split("\n").filter(Boolean), execution_shots: [], review: value.shot_plan?.review ?? { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } } })} /></label>
         <button type="button" disabled={!value.shot_plan?.shots.length} onClick={initializeExecutionShots}>Tạo execution shots để kiểm tra</button>
         {(value.shot_plan?.execution_shots ?? []).map((shot, index) => <article className="workflow-card" key={shot.shot_id}>
           <h4>{shot.shot_id} · {shot.summary}</h4>
