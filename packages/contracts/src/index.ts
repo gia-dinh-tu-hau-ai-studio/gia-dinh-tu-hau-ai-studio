@@ -409,6 +409,7 @@ const ShortFilmProgressActions = [
   ["APPROVE_CONTRACT", "Khởi tạo và duyệt hợp đồng"],
   ["REVIEW_SHORT_FILM_SCRIPT", "Duyệt kịch bản"],
   ["PREPARE_SHORT_FILM_SHOT_PLAN", "Lập Shot Plan"],
+  ["REVIEW_SHORT_FILM_SHOT_PLAN", "Duyệt Shot Plan"],
   ["LOCK_SHORT_FILM_PRODUCTION_READINESS", "Khóa nhân vật, giọng và keyframe"],
   ["PREPARE_SHORT_FILM_PILOT", "Tạo pilot"],
   ["REVIEW_SHORT_FILM_PILOT", "QC và duyệt pilot"],
@@ -518,6 +519,7 @@ export const ShortFilmWorkflowSchema = z
           duration_seconds: z.number().int().min(2).max(10),
           risk_tags: z.array(ShortFilmPilotPurposeSchema).default([]),
         })).default([]),
+        review: ShortFilmReviewSchema.default({ decision: "APPROVE", notes: "Migrated from the pre-review Shot Plan contract.", reviewer: "PROJECT_OWNER" }),
       })
       .optional(),
     production_readiness: ShortFilmProductionReadinessSchema.optional(),
@@ -606,6 +608,49 @@ export const ShortFilmWorkflowSchema = z
   });
 
 export type ShortFilmWorkflow = z.infer<typeof ShortFilmWorkflowSchema>;
+
+export function createShortFilmShotPlan(workflow: ShortFilmWorkflow) {
+  if (workflow.script_review.decision !== "APPROVE") {
+    throw new Error("SCRIPT_APPROVED_REQUIRED");
+  }
+
+  const normalizedScript = workflow.full_script.replace(/\r/g, "").trim();
+  const sceneChunks = normalizedScript
+    .split(/(?=CẢNH\s+\d+)/giu)
+    .map((scene) => scene.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const sourceBeats = (sceneChunks.length > 0 ? sceneChunks : [normalizedScript])
+    .flatMap((scene) => scene.split(/(?<=[.!?])\s+|(?=[A-ZÀ-Ỹ][A-ZÀ-Ỹ ]{2,}:)/u))
+    .map((beat) => beat.replace(/\s+/g, " ").trim())
+    .filter((beat) => beat.length >= 12);
+  const beats = sourceBeats.length > 0 ? sourceBeats : [workflow.script_synopsis];
+  const totalSeconds = workflow.target_duration_minutes * 60;
+  const shotCount = Math.max(3, Math.ceil(totalSeconds / 10));
+  const shots = Array.from({ length: shotCount }, (_, index) => {
+    const beat = beats[index % beats.length];
+    return `Shot ${String(index + 1).padStart(2, "0")}: ${beat.slice(0, 180)}`;
+  });
+  const executionShots = shots.map((summary, index) => ({
+    shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+    summary,
+    runway_prompt: `${summary}. Phim truyền hình Việt Nam điện ảnh, diễn xuất tự nhiên có chuyển động, giữ đúng Character Master, trang phục, bối cảnh và continuity đã duyệt.`,
+    duration_seconds: Math.min(10, totalSeconds - index * 10),
+    risk_tags: index === 0
+      ? ["IDENTITY_DIALOGUE" as const]
+      : index === 1
+        ? ["MOTION_PERFORMANCE" as const]
+        : index === 2
+          ? ["MULTI_CHARACTER_CONTINUITY" as const]
+          : [],
+  }));
+
+  return {
+    summary: `${shots.length} shot bao phủ ${workflow.target_duration_minutes} phút, được tạo cục bộ từ kịch bản đã duyệt.`,
+    shots,
+    execution_shots: executionShots,
+    review: { decision: "PENDING" as const, notes: "", reviewer: "PROJECT_OWNER" as const },
+  };
+}
 
 export function syncShortFilmSourceActors(
   filmCharacters: ReadonlyArray<ShortFilmWorkflow["film_characters"][number]>,
@@ -837,8 +882,9 @@ export function shortFilmProductionReadinessBlockers(
   >,
 ) {
   const readiness = workflow.production_readiness;
-  if (!readiness) return ["PRODUCTION_READINESS_MISSING"];
   const blockers: string[] = [];
+  if (!workflow.shot_plan || workflow.shot_plan.review.decision !== "APPROVE") blockers.push("SHOT_PLAN_NOT_APPROVED");
+  if (!readiness) return [...blockers, "PRODUCTION_READINESS_MISSING"];
   const usedActorIds = new Set(workflow.film_characters.map((character) => character.source_actor_id));
   const sourceActors = new Map(workflow.source_actors.map((actor) => [actor.source_actor_id, actor]));
   const identityActorIds = new Set(readiness.identity_masters.map((master) => master.source_actor_id));
@@ -920,6 +966,7 @@ export function shortFilmNextAction(workflow: ShortFilmWorkflow) {
   if (workflow.script_review.decision === "REJECT") return "SCRIPT_REJECTED" as const;
   if (workflow.script_review.decision !== "APPROVE") return "REVIEW_SHORT_FILM_SCRIPT" as const;
   if (!workflow.shot_plan) return "PREPARE_SHORT_FILM_SHOT_PLAN" as const;
+  if (workflow.shot_plan.review.decision !== "APPROVE") return "REVIEW_SHORT_FILM_SHOT_PLAN" as const;
   if (shortFilmProductionReadinessBlockers(workflow).length > 0) {
     return "LOCK_SHORT_FILM_PRODUCTION_READINESS" as const;
   }

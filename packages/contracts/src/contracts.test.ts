@@ -6,6 +6,7 @@ import {
   calculateProjectProgress,
   canResumeContractApproval,
   canResumeShortFilmWorkflow,
+  createShortFilmShotPlan,
   deriveShortFilmCharacterMediaRequirements,
   migrateShortFilmWorkflowDraft,
   normalizeProjectIntake,
@@ -33,6 +34,34 @@ test("short-film workflow can resume only after contract approval", () => {
   assert.equal(canResumeShortFilmWorkflow({ project_type: "SHORT_FILM", next_action: "REVIEW_SHORT_FILM_SCRIPT" }), true);
   assert.equal(canResumeShortFilmWorkflow({ project_type: "SHORT_FILM", next_action: "APPROVE_CONTRACT" }), false);
   assert.equal(canResumeShortFilmWorkflow({ project_type: "MUSIC_VIDEO", next_action: "PREPARE_MV_PRODUCTION" }), false);
+});
+
+test("creates a provider-free Shot Plan from the approved script and waits for owner review", () => {
+  const approved = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    target_duration_minutes: 3,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+  });
+  const shotPlan = createShortFilmShotPlan(approved);
+  const withPlan = ShortFilmWorkflowSchema.parse({ ...approved, shot_plan: shotPlan });
+  assert.equal(shotPlan.execution_shots.length, 18);
+  assert.equal(shotPlan.execution_shots.reduce((total, shot) => total + shot.duration_seconds, 0), 180);
+  assert.equal(shotPlan.review.decision, "PENDING");
+  assert.equal(shortFilmNextAction(withPlan), "REVIEW_SHORT_FILM_SHOT_PLAN");
+  assert.match(shortFilmProductionReadinessBlockers(withPlan).join(","), /SHOT_PLAN_NOT_APPROVED/);
+});
+
+test("Shot Plan approval is required before character and voice locking", () => {
+  const approved = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+  });
+  const shotPlan = createShortFilmShotPlan(approved);
+  const reviewed = ShortFilmWorkflowSchema.parse({
+    ...approved,
+    shot_plan: { ...shotPlan, review: { decision: "APPROVE", notes: "Shot plan approved", reviewer: "PROJECT_OWNER" } },
+  });
+  assert.equal(shortFilmNextAction(reviewed), "LOCK_SHORT_FILM_PRODUCTION_READINESS");
 });
 
 test("short-film dialogue derives safe voice and lip-sync requirements", () => {
@@ -385,11 +414,11 @@ test("mở yêu cầu kịch bản AI khi dự toán và kinh phí đã duyệt"
 
 test("tính tiến độ phim ngắn theo approval gate thực tế", () => {
   const progress = calculateProjectProgress("SHORT_FILM", "PREPARE_SHORT_FILM_PILOT");
-  assert.equal(progress.completed_steps, 4);
-  assert.equal(progress.total_steps, 9);
-  assert.equal(progress.percent_complete, 44);
-  assert.equal(progress.milestones[4]?.status, "CURRENT");
-  assert.equal(progress.milestones[5]?.status, "PENDING");
+  assert.equal(progress.completed_steps, 5);
+  assert.equal(progress.total_steps, 10);
+  assert.equal(progress.percent_complete, 50);
+  assert.equal(progress.milestones[5]?.status, "CURRENT");
+  assert.equal(progress.milestones[6]?.status, "PENDING");
 });
 
 test("chỉ báo 100% khi dự án READY_TO_PUBLISH", () => {
