@@ -327,7 +327,7 @@ test("canonical short-film resume snapshot preserves the complete saved project"
     project_type: "SHORT_FILM",
     project_name: "Lua dao xin viec",
     language: "vi-VN-southwest",
-    duration_target: "3_MINUTES",
+    duration_target: "5_MINUTES",
     platforms: ["YOUTUBE", "FACEBOOK"],
     story_idea: "Tim viec qua mang va bi lua chuyen tien giu suat viec nhe luong cao.",
     social_theme: "COMMUNITY",

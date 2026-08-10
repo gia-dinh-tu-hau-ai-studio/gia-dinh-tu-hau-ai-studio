@@ -1122,7 +1122,11 @@ export function createShortFilmResumeSnapshot(input: unknown): ShortFilmResumeSn
   put("language", parsed.language);
   put("content_rating", parsed.content_rating);
   put("target_audience", parsed.target_audience);
-  put("duration_target", parsed.duration_target);
+  const workflowDurationTarget = `${parsed.short_film_workflow.target_duration_minutes}_MINUTES`;
+  const durationTarget = ["3_MINUTES", "5_MINUTES", "7_MINUTES", "10_MINUTES", "15_MINUTES"].includes(workflowDurationTarget)
+    ? workflowDurationTarget
+    : parsed.duration_target;
+  put("duration_target", durationTarget);
   put("aspect_ratio", parsed.aspect_ratio);
   put("story_idea", parsed.story_idea);
   put("social_theme", parsed.social_theme);
@@ -1138,7 +1142,7 @@ export function createShortFilmResumeSnapshot(input: unknown): ShortFilmResumeSn
     short_film_workflow: parsed.short_film_workflow,
     characters: parsed.characters,
     provider_budget: parsed.provider_budget,
-    duration_target: parsed.duration_target,
+    duration_target: durationTarget,
   };
 }
 
