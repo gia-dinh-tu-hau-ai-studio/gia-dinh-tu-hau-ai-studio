@@ -903,6 +903,28 @@ test("media providers unlock only after all production readiness gates pass", ()
   assert.equal(shortFilmNextAction(parsed), "PREPARE_SHORT_FILM_PILOT");
 });
 
+test("production readiness draft can be saved before the first keyframe approval", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: {
+      summary: "One shot",
+      shots: Array.from({ length: 9 }, (_, index) => `Close-up Vy ${index + 1}`),
+      execution_shots: Array.from({ length: 9 }, (_, index) => ({
+        shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+        summary: `Close-up Vy ${index + 1}`,
+        runway_prompt: `Cinematic close-up preserving approved identity ${index + 1}`,
+        duration_seconds: 5,
+        risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : [],
+      })),
+      review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    },
+    production_readiness: { ...productionReadiness, keyframes: [], review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } },
+  });
+  assert.deepEqual(parsed.production_readiness?.keyframes, []);
+  assert.match(shortFilmProductionReadinessBlockers(parsed, "PILOT").join(","), /KEYFRAME_IDENTITY_APPROVAL_INCOMPLETE/);
+});
+
 test("pilot readiness requires only selected pilot shots while full-film readiness remains locked", () => {
   const executionShots = Array.from({ length: 5 }, (_, index) => ({
     shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
