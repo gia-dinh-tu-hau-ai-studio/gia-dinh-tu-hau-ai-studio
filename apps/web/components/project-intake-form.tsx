@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
-import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, migrateShortFilmWorkflowDraft, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -509,13 +509,12 @@ export function ProjectIntakeForm() {
             ? "BACKGROUND"
             : "SUPPORTING",
       performance_role: character.film_role === "EXTRA" ? "EXTRA" : "ACTOR",
-      voice_required: false,
-      lip_sync_required: false,
+      ...deriveShortFilmCharacterMediaRequirements(character.film_role, shortFilmWorkflow.dialogue.dialogue_mode),
       identity_mode: "LIBRARY_MASTER",
       original_video_file_id: "",
     }));
     setCharacters((current) => JSON.stringify(current) === JSON.stringify(syncedCharacters) ? current : syncedCharacters);
-  }, [projectType, shortFilmWorkflow.film_characters]);
+  }, [projectType, shortFilmWorkflow.film_characters, shortFilmWorkflow.dialogue.dialogue_mode]);
 
   useEffect(() => {
     try {
@@ -710,7 +709,7 @@ export function ProjectIntakeForm() {
           costume_approval_status: libraryCharacter?.default_costume_id
             ? "APPROVED"
             : undefined,
-          voice_approval_status: character.voice_required ? "APPROVED" : undefined,
+          voice_approval_status: character.voice_required && libraryCharacter?.voice_available && libraryCharacter.readiness.voice_master === "APPROVED_LOCKED" ? "APPROVED" : undefined,
           original_video_file_id:
             character.identity_mode === "ORIGINAL_FACE_COMPOSITE"
               ? character.original_video_file_id

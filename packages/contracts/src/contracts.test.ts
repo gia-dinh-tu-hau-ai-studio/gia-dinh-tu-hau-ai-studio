@@ -4,6 +4,7 @@ import {
   approveProviderBudgetForProjectCreation,
   calculateSuggestedProviderBudget,
   calculateProjectProgress,
+  deriveShortFilmCharacterMediaRequirements,
   migrateShortFilmWorkflowDraft,
   normalizeProjectIntake,
   providerBudgetApproved,
@@ -17,6 +18,12 @@ import {
   ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowSchema,
 } from "./index";
+
+test("short-film dialogue derives safe voice and lip-sync requirements", () => {
+  assert.deepEqual(deriveShortFilmCharacterMediaRequirements("PROTAGONIST", "DIALOGUE"), { voice_required: true, lip_sync_required: true });
+  assert.deepEqual(deriveShortFilmCharacterMediaRequirements("SUPPORTING", "VOICE_OVER"), { voice_required: true, lip_sync_required: false });
+  assert.deepEqual(deriveShortFilmCharacterMediaRequirements("EXTRA", "MIXED"), { voice_required: false, lip_sync_required: false });
+});
 
 test("budget approval used by project creation locks the full suggested amount", () => {
   const approved = approveProviderBudgetForProjectCreation(approvedProviderBudget, "2026-08-10T10:00:00.000Z");

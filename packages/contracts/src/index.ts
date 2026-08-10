@@ -104,6 +104,17 @@ export const ShortFilmRoleSchema = z.enum([
   "EXTRA",
 ]);
 
+export function deriveShortFilmCharacterMediaRequirements(
+  filmRole: z.infer<typeof ShortFilmRoleSchema>,
+  dialogueMode: "DIALOGUE" | "VOICE_OVER" | "MIXED",
+) {
+  const voiceRequired = filmRole !== "EXTRA";
+  return {
+    voice_required: voiceRequired,
+    lip_sync_required: voiceRequired && dialogueMode !== "VOICE_OVER",
+  };
+}
+
 export const ShortFilmSourceActorSchema = z.object({
   source_actor_id: z.string().trim().min(1),
   source_actor_name: z.string().trim().min(1),
