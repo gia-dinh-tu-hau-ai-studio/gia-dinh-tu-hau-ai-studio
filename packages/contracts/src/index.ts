@@ -1146,6 +1146,20 @@ export function createShortFilmResumeSnapshot(input: unknown): ShortFilmResumeSn
   };
 }
 
+export function shortFilmScriptApprovalIsFresh(
+  existing: Pick<ShortFilmWorkflow, "full_script" | "script_review">,
+  incoming: Pick<ShortFilmWorkflow, "full_script" | "script_review">,
+) {
+  if (existing.full_script === incoming.full_script) return true;
+  if (incoming.script_review.decision !== "APPROVE") return false;
+
+  const incomingReviewedAt = Date.parse(incoming.script_review.reviewed_at ?? "");
+  if (!Number.isFinite(incomingReviewedAt)) return false;
+
+  const existingReviewedAt = Date.parse(existing.script_review.reviewed_at ?? "");
+  return !Number.isFinite(existingReviewedAt) || incomingReviewedAt > existingReviewedAt;
+}
+
 export type NormalizedProjectIntake = Omit<ProjectIntakeForm, "project_type"> & {
   project_type: z.infer<typeof BackendProjectTypeSchema>;
   project_subtype?: string;

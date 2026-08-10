@@ -20,6 +20,7 @@ import {
   selectShortFilmPilotSamples,
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
+  shortFilmScriptApprovalIsFresh,
   shortFilmProductionReadinessBlockers,
   shortFilmSourceActorsNeedSync,
   syncShortFilmSourceActors,
@@ -727,6 +728,32 @@ test("khóa Shot Plan khi SCRIPT_APPROVED chưa đạt", () => {
     ...shortFilmWorkflow,
     shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
   }));
+});
+
+test("cho phép lưu kịch bản đã sửa khi chủ dự án vừa duyệt lại", () => {
+  const existing = {
+    full_script: "Bản kịch bản cũ",
+    script_review: { decision: "APPROVE" as const, reviewer: "PROJECT_OWNER" as const, notes: "", reviewed_at: "2026-08-11T08:00:00.000Z" },
+  };
+  const incoming = {
+    full_script: "Bản kịch bản mới có đủ diễn biến",
+    script_review: { decision: "APPROVE" as const, reviewer: "PROJECT_OWNER" as const, notes: "", reviewed_at: "2026-08-11T08:05:00.000Z" },
+  };
+
+  assert.equal(shortFilmScriptApprovalIsFresh(existing, incoming), true);
+});
+
+test("không cho kịch bản sửa giữ lại lần duyệt cũ", () => {
+  const existing = {
+    full_script: "Bản kịch bản cũ",
+    script_review: { decision: "APPROVE" as const, reviewer: "PROJECT_OWNER" as const, notes: "", reviewed_at: "2026-08-11T08:00:00.000Z" },
+  };
+  const incoming = {
+    full_script: "Bản kịch bản bị đổi nhưng chưa duyệt lại",
+    script_review: { ...existing.script_review },
+  };
+
+  assert.equal(shortFilmScriptApprovalIsFresh(existing, incoming), false);
 });
 
 test("khóa toàn phim khi PILOT_APPROVED chưa đạt", () => {
