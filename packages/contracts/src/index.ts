@@ -588,6 +588,21 @@ export const ShortFilmWorkflowSchema = z
 
 export type ShortFilmWorkflow = z.infer<typeof ShortFilmWorkflowSchema>;
 
+export function syncShortFilmSourceActors(
+  filmCharacters: ReadonlyArray<ShortFilmWorkflow["film_characters"][number]>,
+  availableActors: ReadonlyArray<ShortFilmWorkflow["source_actors"][number]>,
+  existingActors: ReadonlyArray<ShortFilmWorkflow["source_actors"][number]> = [],
+): ShortFilmWorkflow["source_actors"] {
+  const actorsById = new Map(
+    [...existingActors, ...availableActors].map((actor) => [actor.source_actor_id, actor]),
+  );
+  const selectedActorIds = [...new Set(filmCharacters.map((character) => character.source_actor_id))];
+  return selectedActorIds.flatMap((actorId) => {
+    const actor = actorsById.get(actorId);
+    return actor ? [{ ...actor }] : [];
+  });
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

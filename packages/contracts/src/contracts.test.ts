@@ -11,9 +11,36 @@ import {
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   shortFilmProductionReadinessBlockers,
+  syncShortFilmSourceActors,
   ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowSchema,
 } from "./index";
+
+test("syncs a newly added third character into the selected source actors", () => {
+  const actors = [
+    { source_actor_id: "CHAR_TUONG_VY", source_actor_name: "Tường Vy", source_kind: "CHARACTER_LIBRARY_MASTER", master_identity_status: "APPROVED_LOCKED" },
+    { source_actor_id: "CHAR_PHUONG_AN", source_actor_name: "Phương An", source_kind: "CHARACTER_LIBRARY_MASTER", master_identity_status: "APPROVED_LOCKED" },
+    { source_actor_id: "CHAR_BA_LAN", source_actor_name: "Bà Lan", source_kind: "CHARACTER_LIBRARY_MASTER", master_identity_status: "APPROVED_LOCKED" },
+  ] as const;
+  const characters = actors.map((actor, index) => ({
+    source_actor_id: actor.source_actor_id,
+    film_character_name: actor.source_actor_name,
+    film_role: index === 0 ? "PROTAGONIST" as const : "SUPPORTING" as const,
+    relationships: "",
+    personality: "",
+    appearance: "",
+  }));
+
+  const selected = syncShortFilmSourceActors(characters, [...actors], [actors[0], actors[1]]);
+
+  assert.deepEqual(selected.map((actor) => actor.source_actor_id), ["CHAR_TUONG_VY", "CHAR_PHUONG_AN", "CHAR_BA_LAN"]);
+  assert.doesNotThrow(() => ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    character_count: 3,
+    source_actors: selected,
+    film_characters: characters,
+  }));
+});
 
 test("migrate legacy short-film draft without deleting user content", () => {
   const defaults = ShortFilmWorkflowSchema.parse(shortFilmWorkflow);

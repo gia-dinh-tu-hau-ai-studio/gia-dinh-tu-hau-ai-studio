@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { shortFilmProductionReadinessBlockers, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { shortFilmProductionReadinessBlockers, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
@@ -156,7 +156,11 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         appearance: "",
       },
     );
-    patch({ character_count: characterCount, film_characters: filmCharacters });
+    patch({
+      character_count: characterCount,
+      film_characters: filmCharacters,
+      source_actors: syncShortFilmSourceActors(filmCharacters, availableActors, value.source_actors),
+    });
   }
 
   function initializeProductionReadiness() {
@@ -234,8 +238,10 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             <h4>Nhân vật {index + 1}</h4>
             <label data-validation-path={`film_characters.${index}.source_actor_id`}><span>Diễn viên nguồn</span><select value={character.source_actor_id} onChange={(event) => {
               const next = [...value.film_characters]; next[index] = { ...character, source_actor_id: event.target.value };
-              const selected = availableActors.find((actor) => actor.source_actor_id === event.target.value);
-              patch({ film_characters: next, source_actors: selected && !value.source_actors.some((actor) => actor.source_actor_id === selected.source_actor_id) ? [...value.source_actors, { ...selected }] : value.source_actors });
+              patch({
+                film_characters: next,
+                source_actors: syncShortFilmSourceActors(next, availableActors, value.source_actors),
+              });
             }}>{availableActors.map((actor) => <option key={actor.source_actor_id} value={actor.source_actor_id}>{actor.source_actor_name}</option>)}</select></label>
             <label data-validation-path={`film_characters.${index}.film_character_name`}><span>Tên nhân vật trong phim</span><input placeholder="Ví dụ: Vy, An, Má Lan" value={character.film_character_name} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_character_name: event.target.value }; patch({ film_characters: next }); }} /></label>
             <label data-validation-path={`film_characters.${index}.film_role`}><span>Vai diễn</span><select value={character.film_role} onChange={(event) => { const next = [...value.film_characters]; next[index] = { ...character, film_role: event.target.value as typeof character.film_role }; patch({ film_characters: next }); }}><option value="PROTAGONIST">Nhân vật chính</option><option value="ANTAGONIST">Đối trọng</option><option value="SUPPORTING">Hỗ trợ</option><option value="CAMEO">Khách mời</option><option value="EXTRA">Quần chúng</option></select></label>
