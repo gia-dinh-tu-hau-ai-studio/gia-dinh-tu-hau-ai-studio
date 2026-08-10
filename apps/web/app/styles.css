@@ -162,6 +162,14 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .approval-gate { display: grid; grid-template-columns: auto minmax(180px, .5fr) 1fr; gap: 12px; align-items: center; padding: 15px; border: 1px solid var(--gold); border-radius: 12px; }
 .approval-gate textarea { min-height: 60px; }
 .script-approval-gate { grid-template-columns: 1fr; }
+.script-generation-controls { grid-column: 1 / -1; display: grid; gap: 12px; padding: 16px; border: 1px solid #705321; border-radius: 14px; background: #18130e; }
+.script-generation-controls.ready { border-color: #397653; background: #0f1913; }
+.script-generation-summary { display: grid; gap: 5px; }
+.script-generation-summary strong { color: #ffe6aa; font-size: 18px; }
+.script-generation-summary span { color: #f8f0e7; font-weight: 700; }
+.script-generation-summary small { color: #c9bbb2; line-height: 1.45; }
+.script-generation-controls button { width: 100%; min-height: 50px; }
+.script-generation-controls .gate-note { margin: 0; }
 .script-approval-actions { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
 .script-approval-actions button { width: 100%; }
 .script-approval-actions .selected { box-shadow: 0 0 0 2px #ffe6aa; }
