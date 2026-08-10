@@ -19,6 +19,7 @@ import {
   prepareShortFilmPilotPlan,
   selectShortFilmPilotSamples,
   shortFilmMediaExecutionDecision,
+  matchShortFilmShotActor,
   shortFilmNextAction,
   shortFilmScriptApprovalIsFresh,
   shortFilmProductionReadinessBlockers,
@@ -122,6 +123,25 @@ test("budget approval used by project creation locks the full suggested amount",
   assert.equal(approved.approval.approved_limit, approved.estimate.total);
   assert.equal(approved.approval.reviewed_at, "2026-08-10T10:00:00.000Z");
   assert.equal(providerBudgetApproved(approved), true);
+});
+
+test("maps each pilot shot to the first named cast member instead of always using Tường Vy", () => {
+  const filmCharacters = [
+    { source_actor_id: "TV", film_character_name: "Nhân vật A" },
+    { source_actor_id: "PA", film_character_name: "Nhân vật B" },
+    { source_actor_id: "BL", film_character_name: "Bà Lan" },
+    { source_actor_id: "MINH", film_character_name: "Minh" },
+  ];
+  const sourceActors = [
+    { source_actor_id: "TV", source_actor_name: "Tường Vy" },
+    { source_actor_id: "PA", source_actor_name: "Phương An" },
+    { source_actor_id: "BL", source_actor_name: "Bà Lan" },
+    { source_actor_id: "MINH", source_actor_name: "Minh" },
+  ];
+  assert.equal(matchShortFilmShotActor("Tường Vy lướt điện thoại tìm việc", filmCharacters, sourceActors), "TV");
+  assert.equal(matchShortFilmShotActor("Minh tự xưng tuyển dụng viên", filmCharacters, sourceActors), "MINH");
+  assert.equal(matchShortFilmShotActor("Phương An nhận thấy Tường Vy căng thẳng", filmCharacters, sourceActors), "PA");
+  assert.equal(matchShortFilmShotActor("Bà Lan nhắc nhà tuyển dụng chân chính không thu tiền", filmCharacters, sourceActors), "BL");
 });
 
 test("syncs a newly added third character into the selected source actors", () => {
