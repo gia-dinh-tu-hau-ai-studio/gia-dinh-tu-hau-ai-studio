@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { selectShortFilmPilotSamples, shortFilmMediaExecutionDecision } from "@tu-hau/contracts";
+import { calculateShortFilmPilotBudget, selectShortFilmPilotSamples, shortFilmMediaExecutionDecision } from "@tu-hau/contracts";
 import { DriveConnector } from "../connectors/google-drive/drive.connector";
 import { CharacterLibraryConnector } from "../connectors/google-sheets/character-library.connector";
 import { ProjectRegistryConnector } from "../connectors/google-sheets/project-registry.connector";
@@ -62,12 +62,18 @@ export class ShortFilmPilotExecutionService {
     if (existing && existing.value.status !== "FAILED") return { ...existing.value, idempotent_replay: true };
     const media = shortFilmMediaExecutionDecision(context.workflow, "PILOT");
     if (!media.provider_execution_allowed) throw new Error(`PRODUCTION_READINESS_BLOCKED:${media.blockers.join(",")}`);
+    const approval = context.workflow.pilot_budget_approval;
+    if (!approval) throw new Error("PILOT_BUDGET_APPROVAL_REQUIRED");
+    if (caps.runway_credits > approval.runway_credits_cap || caps.elevenlabs_characters > approval.elevenlabs_credits_cap || caps.sync_usd > approval.sync_usd_cap) {
+      throw new Error("EXECUTION_CAP_EXCEEDS_APPROVED_BUDGET");
+    }
     const samples = selectShortFilmPilotSamples(context.workflow);
     const uniqueShots = [...new Map(samples.flatMap((sample) => sample.shots.map((shot) => [shot.shot_id, shot]))).values()];
     const dialogueByShot = new Map(context.workflow.production_readiness!.dialogue_line_approvals.map((line) => [line.shot_id, line]));
-    const requiredCredits = uniqueShots.reduce((sum, shot) => sum + shot.duration_seconds * 12, 0);
-    const requiredCharacters = uniqueShots.reduce((sum, shot) => sum + (dialogueByShot.get(shot.shot_id)?.dialogue_text.length ?? 0), 0);
-    const requiredSyncUsd = uniqueShots.reduce((sum, shot) => sum + (dialogueByShot.has(shot.shot_id) ? shot.duration_seconds * 0.05 : 0), 0);
+    const required = calculateShortFilmPilotBudget(context.workflow).required;
+    const requiredCredits = required.runway_credits;
+    const requiredCharacters = required.elevenlabs_characters;
+    const requiredSyncUsd = required.sync_usd;
     if (caps.runway_credits < requiredCredits || caps.elevenlabs_characters < requiredCharacters || caps.sync_usd < requiredSyncUsd) {
       throw new Error(`EXECUTION_CAP_TOO_LOW:RUNWAY=${requiredCredits},ELEVENLABS=${requiredCharacters},SYNC=${requiredSyncUsd.toFixed(2)}`);
     }
