@@ -603,6 +603,21 @@ export function syncShortFilmSourceActors(
   });
 }
 
+export function approveProviderBudgetForProjectCreation(
+  plan: ProviderBudgetPlan,
+  reviewedAt: string,
+): ProviderBudgetPlan {
+  return ProviderBudgetPlanSchema.parse({
+    ...plan,
+    approval: {
+      ...plan.approval,
+      decision: "APPROVE",
+      approved_limit: Math.max(plan.approval.approved_limit, plan.estimate.total),
+      reviewed_at: reviewedAt,
+    },
+  });
+}
+
 export function shortFilmSourceActorsNeedSync(
   filmCharacters: ReadonlyArray<ShortFilmWorkflow["film_characters"][number]>,
   sourceActors: ReadonlyArray<ShortFilmWorkflow["source_actors"][number]>,

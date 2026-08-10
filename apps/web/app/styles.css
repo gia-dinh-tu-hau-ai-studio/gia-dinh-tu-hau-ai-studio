@@ -85,6 +85,20 @@ label { display: grid; gap: 8px; color: #e4d7d1; font-size: 14px; }
 input, select, textarea { width: 100%; padding: 12px 13px; color: #fff; background: #0e0b0d; border: 1px solid #47383e; border-radius: 10px; outline: none; }
 textarea { min-height: 96px; resize: vertical; font: inherit; line-height: 1.5; }
 input:focus, select:focus, textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(224, 180, 92, .1); }
+label:has(> input:required:not([type="radio"]):not([type="checkbox"]):invalid) > input,
+label:has(> select:required:invalid) > select,
+label:has(> textarea:required:invalid) > textarea { border-color: #d95870; background: rgba(86, 18, 32, .28); box-shadow: 0 0 0 2px rgba(217, 88, 112, .18); }
+label:has(> input:required:not([type="radio"]):not([type="checkbox"]):valid) > input,
+label:has(> select:required:valid) > select,
+label:has(> textarea:required:valid) > textarea { border-color: #55ad6b; background: rgba(20, 71, 36, .24); box-shadow: 0 0 0 2px rgba(85, 173, 107, .14); }
+label:has(> input:required:not([type="radio"]):not([type="checkbox"]):invalid)::after,
+label:has(> select:required:invalid)::after,
+label:has(> textarea:required:invalid)::after { content: "Bắt buộc nhập hoặc chọn đúng thông tin."; color: #ff9caf; font-size: 12px; line-height: 1.35; }
+.platform-field { padding: 14px; border: 1px solid transparent; border-radius: 12px; }
+.platform-field:not(:has(input:checked)) { border-color: #d95870; background: rgba(86, 18, 32, .2); }
+.platform-field:not(:has(input:checked))::after { display: block; margin-top: 10px; content: "Bắt buộc chọn ít nhất một nền tảng."; color: #ff9caf; font-size: 12px; }
+.platform-field:has(input:checked) { border-color: #55ad6b; background: rgba(20, 71, 36, .18); }
+.duration-picker:has(input:checked) { padding: 14px; border: 1px solid #55ad6b; border-radius: 12px; background: rgba(20, 71, 36, .18); }
 input:disabled { color: #c8b7ad; background: #191417; }
 button { justify-self: end; padding: 14px 26px; border: 0; border-radius: 999px; color: #2b1700; background: linear-gradient(135deg, #f4d58b, #c58c2d); font-weight: 800; cursor: pointer; }
 button:disabled { opacity: .6; cursor: wait; }
@@ -103,12 +117,12 @@ button:disabled { opacity: .6; cursor: wait; }
 .duration-picker { grid-column: 1 / -1; padding: 0; border: 0; }
 .duration-picker > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 9px; }
 .duration-picker label { display: block; cursor: pointer; }
-.duration-picker input { position: absolute; opacity: 0; pointer-events: none; }
+.duration-picker input { position: absolute; width: 1px; height: 1px; padding: 0; opacity: 0; pointer-events: none; }
 .duration-picker label span { display: grid; min-height: 46px; place-items: center; padding: 8px; border: 1px solid #57494f; border-radius: 10px; background: #171215; color: #e9ddd7; font-weight: 700; text-align: center; }
 .duration-picker label.selected span { border-color: var(--gold); background: #4a3212; color: #ffe6aa; box-shadow: 0 0 0 1px var(--gold); }
 .duration-picker small { display: block; margin-top: 8px; color: #aa9ca2; }
 @media (max-width: 600px) { .duration-picker > div { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.platform-field { margin: 18px 0 0; padding: 0; border: 0; }
+.platform-field { margin: 18px 0 0; padding: 14px; border: 1px solid transparent; border-radius: 12px; }
 .platform-field legend { color: #e4d7d1; font-size: 14px; }
 .confirmation-panel { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; border-color: var(--gold); }
 .confirmation-panel p { margin: 8px 0 0; color: #cdbfb8; line-height: 1.55; }

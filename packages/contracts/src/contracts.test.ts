@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  approveProviderBudgetForProjectCreation,
   calculateSuggestedProviderBudget,
   calculateProjectProgress,
   migrateShortFilmWorkflowDraft,
@@ -16,6 +17,14 @@ import {
   ShortFilmScriptGenerationRequestSchema,
   ShortFilmWorkflowSchema,
 } from "./index";
+
+test("budget approval used by project creation locks the full suggested amount", () => {
+  const approved = approveProviderBudgetForProjectCreation(approvedProviderBudget, "2026-08-10T10:00:00.000Z");
+  assert.equal(approved.approval.decision, "APPROVE");
+  assert.equal(approved.approval.approved_limit, approved.estimate.total);
+  assert.equal(approved.approval.reviewed_at, "2026-08-10T10:00:00.000Z");
+  assert.equal(providerBudgetApproved(approved), true);
+});
 
 test("syncs a newly added third character into the selected source actors", () => {
   const actors = [
