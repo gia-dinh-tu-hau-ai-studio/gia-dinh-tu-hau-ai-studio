@@ -5,6 +5,7 @@ import {
   calculateSuggestedProviderBudget,
   calculateProjectProgress,
   canResumeContractApproval,
+  canResumeShortFilmWorkflow,
   deriveShortFilmCharacterMediaRequirements,
   migrateShortFilmWorkflowDraft,
   normalizeProjectIntake,
@@ -26,6 +27,12 @@ test("contract approval can resume only from the pending contract gate", () => {
   assert.equal(canResumeContractApproval({ current_stage: "CONTRACT", next_action: "APPROVE_CONTRACT" }), true);
   assert.equal(canResumeContractApproval({ current_stage: "PRE_PRODUCTION", next_action: "REVIEW_SHORT_FILM_SCRIPT" }), false);
   assert.equal(canResumeContractApproval({ current_stage: "CONTRACT", next_action: "REVIEW_SHORT_FILM_SCRIPT" }), false);
+});
+
+test("short-film workflow can resume only after contract approval", () => {
+  assert.equal(canResumeShortFilmWorkflow({ project_type: "SHORT_FILM", next_action: "REVIEW_SHORT_FILM_SCRIPT" }), true);
+  assert.equal(canResumeShortFilmWorkflow({ project_type: "SHORT_FILM", next_action: "APPROVE_CONTRACT" }), false);
+  assert.equal(canResumeShortFilmWorkflow({ project_type: "MUSIC_VIDEO", next_action: "PREPARE_MV_PRODUCTION" }), false);
 });
 
 test("short-film dialogue derives safe voice and lip-sync requirements", () => {

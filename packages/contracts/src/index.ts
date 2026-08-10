@@ -401,6 +401,10 @@ export function canResumeContractApproval(progress: { current_stage: string; nex
   return progress.current_stage === "CONTRACT" && progress.next_action === "APPROVE_CONTRACT";
 }
 
+export function canResumeShortFilmWorkflow(progress: { project_type: string; next_action: string }) {
+  return progress.project_type === "SHORT_FILM" && progress.next_action !== "APPROVE_CONTRACT";
+}
+
 const ShortFilmProgressActions = [
   ["APPROVE_CONTRACT", "Khởi tạo và duyệt hợp đồng"],
   ["REVIEW_SHORT_FILM_SCRIPT", "Duyệt kịch bản"],
