@@ -50,7 +50,7 @@ export class ElevenLabsPilotProvider {
 
   async synthesize(input: { voiceId: string; text: string }) {
     const response = await providerResponse(await this.fetcher(
-      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voiceId)}?output_format=mp3_44100_192`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voiceId)}?output_format=mp3_44100_128`,
       {
         method: "POST",
         headers: { "xi-api-key": this.apiKey, "content-type": "application/json" },
