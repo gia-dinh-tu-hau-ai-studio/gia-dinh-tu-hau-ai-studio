@@ -13,6 +13,8 @@ import {
   providerBudgetApproved,
   resetProviderBudgetApprovalForDraft,
   shortFilmScriptReadyForProjectCreation,
+  shortFilmScriptProvider,
+  synchronizeShortFilmIntakeFields,
   prepareShortFilmPilotPlan,
   selectShortFilmPilotSamples,
   shortFilmMediaExecutionDecision,
@@ -83,6 +85,20 @@ test("project creation waits for a complete owner-approved script", () => {
   assert.equal(shortFilmScriptReadyForProjectCreation(approvedWorkflow), true);
   assert.equal(shortFilmScriptReadyForProjectCreation({ ...shortFilmWorkflow, full_script: "" }), false);
   assert.equal(shortFilmScriptReadyForProjectCreation(shortFilmWorkflow), false);
+});
+
+test("thông tin người dùng đồng bộ vào workflow và hủy duyệt cũ khi nội dung đổi", () => {
+  const approvedWorkflow = ShortFilmWorkflowSchema.parse({ ...shortFilmWorkflow, script_review: { ...shortFilmWorkflow.script_review, decision: "APPROVE" as const, reviewed_at: "2026-08-10T10:00:00.000Z" } });
+  const synchronized = synchronizeShortFilmIntakeFields(approvedWorkflow, {
+    idea_brief: "Ý tưởng duy nhất được nhập ở giao diện người dùng và đồng bộ xuống workflow.",
+    target_duration_minutes: 3,
+    language: "vi-VN-southwest",
+  });
+  assert.equal(synchronized.idea_brief, "Ý tưởng duy nhất được nhập ở giao diện người dùng và đồng bộ xuống workflow.");
+  assert.equal(synchronized.target_duration_minutes, 3);
+  assert.equal(synchronized.dialogue.language, "vi-VN-southwest");
+  assert.equal(synchronized.script_review.decision, "PENDING");
+  assert.equal(synchronized.script_review.reviewed_at, undefined);
 });
 
 test("budget approval used by project creation locks the full suggested amount", () => {
@@ -305,6 +321,14 @@ test("tự tính dự toán có dự phòng theo thời lượng và provider", 
   assert.equal(estimate.video, 54);
   assert.equal(estimate.total, 74.82);
   assert.equal(estimate.contingency, 12.47);
+});
+
+test("kịch bản chủ dự án cung cấp không tính phí OpenAI", () => {
+  const providers = { ...approvedProviderBudget.providers, script: shortFilmScriptProvider("PROJECT_OWNER_PROVIDED") };
+  const estimate = calculateSuggestedProviderBudget({ project_type: "SHORT_FILM", duration_seconds: 180, providers });
+  assert.equal(providers.script, "PROJECT_OWNER");
+  assert.equal(estimate.script, 0);
+  assert.equal(estimate.total, 44.17);
 });
 
 test("pilot plan khóa provider và tài sản nhưng chưa gọi provider", () => {

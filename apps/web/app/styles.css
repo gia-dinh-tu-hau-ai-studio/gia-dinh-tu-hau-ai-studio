@@ -102,6 +102,7 @@ label:has(> textarea:required:invalid)::after { content: "Bắt buộc nhập ho
 input:disabled { color: #c8b7ad; background: #191417; }
 button { justify-self: end; padding: 14px 26px; border: 0; border-radius: 999px; color: #2b1700; background: linear-gradient(135deg, #f4d58b, #c58c2d); font-weight: 800; cursor: pointer; }
 button:disabled { opacity: .6; cursor: wait; }
+.action-completed:disabled { opacity: 1; cursor: default; }
 .library-status { margin: -5px 0 18px; color: #cdbfb8; }
 .character-picker { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: end; }
 .secondary-button { background: #3a232b; color: #ffe6aa; border: 1px solid var(--line); }

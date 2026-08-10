@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
-import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptReadyForProjectCreation, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptProvider, shortFilmScriptReadyForProjectCreation, synchronizeShortFilmIntakeFields, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -226,8 +226,37 @@ function validationTargetForIssue(path: Array<string | number>) {
 }
 
 function ResultDetails({ value }: { value: string }) {
-  return <details className="result-details"><summary>Xem chi tiết kỹ thuật</summary><pre>{value}</pre></details>;
+  if (!value) return null;
+  if (value.startsWith("Không") || value.startsWith("Lỗi")) {
+    return <p className="operation-error" role="alert">{value}</p>;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    const result = parsed && typeof parsed === "object" ? parsed as { message?: string; error?: string } : {};
+    if (result.error || result.message) {
+      return <p className={result.error ? "operation-error" : "operation-success"}>{result.error ?? result.message}</p>;
+    }
+    return <p className="operation-success">Thao tác đã hoàn tất. Bước tiếp theo đã được mở.</p>;
+  } catch {
+    return <p className="operation-success">{value}</p>;
+  }
 }
+
+const providerLabels: Record<string, string> = {
+  OPENAI: "OpenAI",
+  RUNWAY: "Runway",
+  ELEVENLABS: "ElevenLabs",
+  SYNC: "Sync",
+  SYSTEM: "Hệ thống",
+};
+
+const accountStatusLabels: Record<string, string> = {
+  SUFFICIENT: "Đủ hạn mức",
+  INSUFFICIENT: "Không đủ hạn mức",
+  UNVERIFIED: "Cần xác nhận thủ công",
+  NOT_CONFIGURED: "Chưa kết nối",
+  ERROR: "Không kiểm tra được",
+};
 
 function accountAction(status: string) {
   if (status === "INSUFFICIENT") return "Nạp thêm credit hoặc giảm thời lượng/dịch vụ rồi kiểm tra lại.";
@@ -284,7 +313,6 @@ export function ProjectIntakeForm() {
   const [result, setResult] = useState<string>("");
   const [validationFeedback, setValidationFeedback] = useState<ValidationFeedback | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [validatedSubmission, setValidatedSubmission] = useState<ValidatedSubmission | null>(null);
   const [creating, setCreating] = useState(false);
   const [creationResult, setCreationResult] = useState<string>("");
   const [createdProject, setCreatedProject] = useState<CreatedProject | null>(null);
@@ -373,6 +401,10 @@ export function ProjectIntakeForm() {
       "10_MINUTES": 600,
       "15_MINUTES": 900,
     } as Record<string, number>)[durationTarget] ?? 300;
+    if (projectType === "SHORT_FILM") {
+      const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
+      setShortFilmWorkflow((current) => synchronizeShortFilmIntakeFields(current, { target_duration_minutes: durationMinutes }));
+    }
     setAccountPreflight(null);
     setManualBalanceConfirmed(false);
     setProviderBudget((current) => {
@@ -381,6 +413,14 @@ export function ProjectIntakeForm() {
       return { ...current, estimate, approval: { ...current.approval, decision: "PENDING", approved_limit: estimate.total, reviewed_at: undefined } };
     });
   }, [durationTarget, projectType, providerBudget.providers.script, providerBudget.providers.video, providerBudget.providers.voice, providerBudget.providers.lip_sync]);
+
+  useEffect(() => {
+    if (projectType !== "SHORT_FILM") return;
+    const scriptProvider = shortFilmScriptProvider(shortFilmWorkflow.script_source);
+    setProviderBudget((current) => current.providers.script === scriptProvider
+      ? current
+      : { ...current, providers: { ...current.providers, script: scriptProvider }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } });
+  }, [projectType, shortFilmWorkflow.script_source]);
 
   async function checkProjectProgress(projectIdOverride?: string) {
     const projectId = (projectIdOverride ?? progressProjectId).trim();
@@ -452,7 +492,6 @@ export function ProjectIntakeForm() {
   }
 
   function invalidateConfirmation() {
-    setValidatedSubmission(null);
     setCreationResult("");
   }
 
@@ -479,6 +518,16 @@ export function ProjectIntakeForm() {
     });
   }
 
+  function syncShortFilmUserField(target: EventTarget | null) {
+    if (projectType !== "SHORT_FILM" || !(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
+    if (target.name === "story_idea") {
+      setShortFilmWorkflow((current) => synchronizeShortFilmIntakeFields(current, { idea_brief: target.value }));
+    }
+    if (target.name === "language") {
+      setShortFilmWorkflow((current) => synchronizeShortFilmIntakeFields(current, { language: target.value }));
+    }
+  }
+
   function saveDraft(form: HTMLFormElement) {
     if (!projectStarted || createdProject) return;
     const draft: IntakeDraft = {
@@ -498,7 +547,6 @@ export function ProjectIntakeForm() {
   function startProject(type: FormProjectType) {
     setProjectType(type);
     setCreatedProject(null);
-    setValidatedSubmission(null);
     setCreationResult("");
     setAccountPreflight(null);
     setManualBalanceConfirmed(false);
@@ -510,7 +558,12 @@ export function ProjectIntakeForm() {
         if (draft.version === 1) {
           setReferenceSources(draft.reference_sources ?? []);
           const defaults = createInitialShortFilmWorkflow();
-          setShortFilmWorkflow(migrateShortFilmWorkflowDraft(draft.short_film_workflow, defaults));
+          const migratedWorkflow = migrateShortFilmWorkflowDraft(draft.short_film_workflow, defaults);
+          setShortFilmWorkflow({
+            ...migratedWorkflow,
+            idea_brief: draft.form_values?.story_idea?.[0] ?? migratedWorkflow.idea_brief,
+            dialogue: { ...migratedWorkflow.dialogue, language: draft.form_values?.language?.[0] ?? migratedWorkflow.dialogue.language },
+          });
           setCharacters(draft.characters ?? []);
           setProviderBudget(resetProviderBudgetApprovalForDraft(draft.provider_budget ?? initialProviderBudget));
           setDurationTarget(draft.duration_target ?? fallbackDuration);
@@ -698,7 +751,6 @@ export function ProjectIntakeForm() {
     const formElement = event.currentTarget;
     setSubmitting(true);
     setResult("");
-    setValidatedSubmission(null);
     setCreationResult("");
     setValidationFeedback({ kind: "checking", title: "Đang kiểm tra dữ liệu…", message: "Vui lòng giữ nguyên trang trong giây lát." });
 
@@ -793,7 +845,6 @@ export function ProjectIntakeForm() {
           submissionId: body.submission_id,
           payload,
         };
-        setValidatedSubmission(validated);
         setValidationFeedback({ kind: "success", title: "Dữ liệu đã đạt", message: "Kinh phí đã được duyệt. Hệ thống đang khởi tạo dự án TuhauAI." });
         await confirmCreation(validated);
       } else {
@@ -814,11 +865,7 @@ export function ProjectIntakeForm() {
     }
   }
 
-  async function confirmCreation(submission: ValidatedSubmission | null = validatedSubmission) {
-    if (!submission) {
-      return;
-    }
-
+  async function confirmCreation(submission: ValidatedSubmission) {
     setCreating(true);
     setCreationResult("");
     try {
@@ -837,7 +884,6 @@ export function ProjectIntakeForm() {
         body.project_id_created === true &&
         typeof body.project?.project_id === "string"
       ) {
-        setValidatedSubmission(null);
         setCreatedProject(body.project as CreatedProject);
         localStorage.removeItem(`${INTAKE_DRAFT_PREFIX}${projectType}`);
         setDraftSavedAt("");
@@ -897,7 +943,7 @@ export function ProjectIntakeForm() {
         setCreatedProject({ ...createdProject, next_action: body.next_action as CreatedProject["next_action"] });
       }
     } catch {
-      setShortFilmSaveResult("Không lưu được SHORT_FILM workflow. Không tự gửi lại để tránh ghi lặp approval.");
+      setShortFilmSaveResult("Không lưu được thay đổi. Hệ thống chưa tự gửi lại để tránh tạo thao tác trùng.");
     } finally {
       setSavingShortFilm(false);
     }
@@ -920,7 +966,7 @@ export function ProjectIntakeForm() {
       const body = await response.json();
       setShortFilmPilotPlanResult(JSON.stringify(body, null, 2));
     } catch {
-      setShortFilmPilotPlanResult("Không chuẩn bị được pilot plan. Chưa gọi provider và không tự gửi lại.");
+      setShortFilmPilotPlanResult("Không chuẩn bị được kế hoạch clip mẫu. Chưa phát sinh chi phí và hệ thống không tự gửi lại.");
     } finally {
       setPreparingShortFilmPilot(false);
     }
@@ -1062,9 +1108,9 @@ export function ProjectIntakeForm() {
         script_review: { decision: "PENDING", notes: "Bản nháp AI mới, chờ chủ dự án review.", reviewer: "PROJECT_OWNER" },
       });
       invalidateConfirmation();
-      setShortFilmSaveResult(`Đã nhận bản nháp từ ${body.provider}/${body.model}. SCRIPT_APPROVED vẫn đang khóa.`);
+      setShortFilmSaveResult("Đã tạo bản nháp kịch bản. Hãy đọc toàn bộ nội dung và bấm duyệt trước khi đi tiếp.");
     } catch {
-      setShortFilmSaveResult("Không kết nối được provider kịch bản. Chưa tạo hoặc lưu bản nháp.");
+      setShortFilmSaveResult("Không kết nối được dịch vụ tạo kịch bản. Chưa tạo hoặc lưu bản nháp.");
     } finally {
       setGeneratingScript(false);
     }
@@ -1157,7 +1203,7 @@ export function ProjectIntakeForm() {
       }
     } catch {
       setAssetPreparationResult(
-        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp manifest tài sản.",
+        "Không kết nối được kho dự án. Hệ thống chưa tự gửi lại để tránh tạo thao tác trùng.",
       );
     } finally {
       setPreparingAssets(false);
@@ -1221,10 +1267,10 @@ export function ProjectIntakeForm() {
   }
 
   return (
-    <form data-intake-form noValidate onBlur={rememberInput} onChange={(event) => { invalidateConfirmation(); saveDraft(event.currentTarget); }} onInput={(event) => saveDraft(event.currentTarget)} onSubmit={handleSubmit}>
+    <form data-intake-form noValidate onBlur={rememberInput} onChange={(event) => { syncShortFilmUserField(event.target); invalidateConfirmation(); saveDraft(event.currentTarget); }} onInput={(event) => { syncShortFilmUserField(event.target); saveDraft(event.currentTarget); }} onSubmit={handleSubmit}>
       {Object.entries(inputHistory).map(([name, values]) => <datalist id={`history-${name.replace(/[^a-zA-Z0-9_-]/g, "-")}`} key={name}>{values.map((value) => <option key={value} value={value} />)}</datalist>)}
       {!projectStarted && <section className="project-gateway">
-        <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chỉ chọn một loại. Dữ liệu nhánh ẩn không đi vào payload.</p></div></div>
+        <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chọn đúng loại nội dung bạn muốn thực hiện.</p></div></div>
         <div className="project-grid">
           {projectTypes.map((item) => (
             <button className={`project-card ${projectType === item.value ? "selected" : ""}`} key={item.value} onClick={() => startProject(item.value)} type="button">
@@ -1243,7 +1289,7 @@ export function ProjectIntakeForm() {
         {projectProgress && <div className="progress-result">
           <header><div><strong>{projectProgress.project_name}</strong><small>{projectProgress.project_id}</small></div><b>{projectProgress.percent_complete}%</b></header>
           <div className="progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={projectProgress.percent_complete}><span style={{ width: `${projectProgress.percent_complete}%` }} /></div>
-          <p>Giai đoạn: <strong>{projectProgress.current_stage}</strong> · Bước tiếp theo: <strong>{projectProgress.next_action}</strong></p>
+          <p>Bước hiện tại: <strong>{projectProgress.milestones.find((milestone) => milestone.status === "CURRENT")?.label ?? "Đã hoàn thành"}</strong></p>
           {canResumeContractApproval(projectProgress) && <button disabled={approvingProgressContract} type="button" onClick={() => void approveContractFromProgress()}>{approvingProgressContract ? "Đang duyệt hợp đồng…" : "Duyệt hợp đồng và tiếp tục dự án"}</button>}
           {canResumeShortFilmWorkflow(projectProgress) && <button disabled={resumingProject} type="button" onClick={() => void resumeShortFilmProject()}>{resumingProject ? "Đang mở dự án…" : "Mở dự án để tiếp tục review"}</button>}
           {progressActionMessage && <p className={progressActionMessage.startsWith("Đã duyệt") ? "operation-success" : "operation-error"}>{progressActionMessage}</p>}
@@ -1353,16 +1399,16 @@ export function ProjectIntakeForm() {
           <label><span>Nguồn nhạc phim</span><select value={providerBudget.internal_services.music_source} onChange={(event) => setProviderBudget((current) => ({ ...current, internal_services: { ...current.internal_services, music_source: event.target.value as ProviderBudgetPlan["internal_services"]["music_source"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="NOT_SELECTED">Chưa chọn</option><option value="PROJECT_OWNER_LICENSED">Chủ dự án cung cấp · đã có quyền</option><option value="LICENSED_LIBRARY">Thư viện nhạc đã cấp phép</option></select><small>Không sử dụng nhạc chưa xác nhận quyền.</small></label>
         </div>
         <div className="budget-estimate-grid">
-          {(["script", "video", "voice", "lip_sync", "contingency"] as const).map((key) => <div className="budget-line" key={key}><span>{({ script: "Kịch bản AI", video: "Tạo video", voice: "Giọng nói", lip_sync: "Khớp khẩu hình", contingency: "Dự phòng 20%" } as const)[key]}</span><strong>{providerBudget.estimate[key].toLocaleString("vi-VN")} USD</strong></div>)}
-          <div className="budget-total"><span>Kinh phí đề xuất</span><strong>{providerBudget.estimate.total.toLocaleString("vi-VN")} USD</strong><small>Ước tính cho {providerBudget.estimate.estimated_duration_seconds} giây · {providerBudget.estimate.basis_version}</small></div>
+          {(["script", "video", "voice", "lip_sync", "contingency"] as const).map((key) => <div className="budget-line" key={key}><span>{key === "script" && providerBudget.providers.script === "PROJECT_OWNER" ? "Kịch bản do bạn cung cấp" : ({ script: "Kịch bản AI", video: "Tạo video", voice: "Giọng nói", lip_sync: "Khớp khẩu hình", contingency: "Dự phòng 20%" } as const)[key]}</span><strong>{providerBudget.estimate[key].toLocaleString("vi-VN")} USD</strong></div>)}
+          <div className="budget-total"><span>Kinh phí đề xuất</span><strong>{providerBudget.estimate.total.toLocaleString("vi-VN")} USD</strong><small>Ước tính cho {providerBudget.estimate.estimated_duration_seconds} giây</small></div>
         </div>
         <div className={`budget-approval ${budgetApproved ? "approved" : "pending"}`}>
-          <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "CHỜ DUYỆT"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Provider media vẫn chờ các approval gate sản xuất.` : projectType === "SHORT_FILM" && shortFilmWorkflow.script_source !== "PROJECT_OWNER_PROVIDED" ? "Sau khi tài khoản đạt, nút tạo bản nháp AI sẽ duyệt hạn mức và chỉ gọi OpenAI. Dự án chỉ được khởi tạo sau khi bạn duyệt kịch bản." : "Nút cuối trang sẽ đồng thời duyệt kinh phí và khởi tạo dự án. Chưa gọi provider media và chưa trừ credit sản xuất."}</p></div>
+          <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "CHỜ DUYỆT"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Các bước sản xuất vẫn chờ bạn duyệt.` : projectType === "SHORT_FILM" && shortFilmWorkflow.script_source !== "PROJECT_OWNER_PROVIDED" ? "Sau khi tài khoản đạt, nút tạo bản nháp AI sẽ duyệt hạn mức và chỉ gọi OpenAI. Dự án chỉ được khởi tạo sau khi bạn duyệt kịch bản." : "Nút cuối trang sẽ đồng thời duyệt kinh phí và khởi tạo dự án. Chưa tạo hình ảnh, giọng nói hoặc video."}</p></div>
         </div>
         <div className={`account-preflight ${accountExecutionReady ? "approved" : "pending"}`}>
           <div><strong>KIỂM TRA TÀI KHOẢN TRƯỚC KHI CHẠY</strong><p>Chỉ đọc số dư/hạn mức. Không tạo ảnh, video, giọng hoặc trừ credit.</p></div>
-          <button disabled={checkingAccounts} type="button" onClick={() => void checkAccounts()}>{checkingAccounts ? "Đang kiểm tra…" : "Kiểm tra tài khoản"}</button>
-          {accountPreflight && <div className="account-check-results">{accountPreflight.providers.map((item) => <article key={item.provider}><strong>{item.provider} · {item.status}</strong><span>{item.message}</span>{item.required_units !== undefined && <small>Cần {item.required_units.toLocaleString("vi-VN")} {item.unit}{item.available_units !== undefined ? ` · Còn ${item.available_units.toLocaleString("vi-VN")} ${item.unit}` : ""}</small>}<small><b>Hành động:</b> {accountAction(item.status)}</small><ProviderAccountLinks provider={item.provider} status={item.status} /></article>)}</div>}
+          <button className={accountPreflight ? "action-completed" : "action-current"} disabled={checkingAccounts} type="button" onClick={() => void checkAccounts()}>{checkingAccounts ? "Đang kiểm tra…" : accountPreflight ? "✓ Đã kiểm tra · Kiểm tra lại" : "Kiểm tra tài khoản"}</button>
+          {accountPreflight && <div className="account-check-results">{accountPreflight.providers.map((item) => <article key={item.provider}><strong>{providerLabels[item.provider] ?? item.provider} · {accountStatusLabels[item.status] ?? item.status}</strong><span>{item.message}</span>{item.required_units !== undefined && <small>Cần {item.required_units.toLocaleString("vi-VN")} {item.unit}{item.available_units !== undefined ? ` · Còn ${item.available_units.toLocaleString("vi-VN")} ${item.unit}` : ""}</small>}<small><b>Cần làm:</b> {accountAction(item.status)}</small><ProviderAccountLinks provider={item.provider} status={item.status} /></article>)}</div>}
           {accountPreflight?.execution_gate === "MANUAL_CONFIRMATION_REQUIRED" && <label className="consent"><input checked={manualBalanceConfirmed} type="checkbox" onChange={(event) => setManualBalanceConfirmed(event.target.checked)} /> Tôi đã kiểm tra Billing của các nhà cung cấp không có API số dư và xác nhận đủ hạn mức.</label>}
           {accountPreflight?.execution_gate === "BLOCKED" && <p className="operation-error">ĐÃ KHÓA CHẠY: xem đúng trạng thái và “Hành động” của từng nhà cung cấp ở trên; không mặc định rằng mọi lỗi đều do thiếu tiền.</p>}
           {accountExecutionReady && <p className="operation-success">TÀI KHOẢN ĐÃ SẴN SÀNG CHO DỰ TOÁN HIỆN TẠI.</p>}
@@ -1434,35 +1480,17 @@ export function ProjectIntakeForm() {
         <div className="final-action-panel">
           <strong>{characters.length === 0 ? "Chưa có nhân vật trong dự án" : `Sẵn sàng kiểm tra ${characters.length} nhân vật`}</strong>
           <span>{characters.length === 0 ? "Quay lại phần nội dung để chọn nhân vật." : "Nhân vật đã được đồng bộ tự động; không cần chọn lại."}</span>
-          <button className="final-check-button" disabled={submitting || creating || Boolean(createdProject) || characters.length === 0 || !accountExecutionReady || !scriptReadyForCreation} type="submit">{createdProject ? `Dự án ${createdProject.project_id} đã được tạo` : submitting || creating ? "Đang kiểm tra và khởi tạo…" : characters.length === 0 ? "Chưa thể tạo — chưa có nhân vật" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tạo" : !scriptReadyForCreation ? "Hoàn thiện và duyệt kịch bản trước khi tạo" : `Duyệt ${providerBudget.estimate.total.toLocaleString("vi-VN")} USD & khởi tạo dự án`}</button>
+          <button className={`final-check-button${createdProject ? " action-completed" : ""}`} disabled={submitting || creating || Boolean(createdProject) || characters.length === 0 || !accountExecutionReady || !scriptReadyForCreation} type="submit">{createdProject ? `✓ Dự án ${createdProject.project_id} đã được tạo` : submitting || creating ? "Đang kiểm tra và khởi tạo…" : characters.length === 0 ? "Chưa thể tạo — chưa có nhân vật" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tạo" : !scriptReadyForCreation ? "Hoàn thiện và duyệt kịch bản trước khi tạo" : `Duyệt ${providerBudget.estimate.total.toLocaleString("vi-VN")} USD & khởi tạo dự án`}</button>
         </div>
       </section>
       </>}
       {result && <ResultDetails value={result} />}
-      {validatedSubmission && (
-        <section className="confirmation-panel">
-          <div>
-            <h2>Xác nhận tạo dự án chính thức</h2>
-            <p>
-              Hệ thống TuhauAI sẽ tạo mã dự án, cấu trúc Drive và
-              hợp đồng đầu vào trong bảng PROJECTS. Không đóng trang trong lúc xử lý.
-            </p>
-          </div>
-          <button disabled={creating} onClick={() => void confirmCreation()} type="button">
-            {creating ? "Đang tạo dự án…" : "Xác nhận tạo dự án TuhauAI"}
-          </button>
-        </section>
-      )}
       {creationResult && <ResultDetails value={creationResult} />}
       {createdProject?.next_action === "APPROVE_CONTRACT" && (
         <section className="confirmation-panel">
           <div>
             <h2>Duyệt hợp đồng dự án</h2>
-            <p>
-              Duyệt project_id <strong>{createdProject.project_id}</strong> và chuyển
-              dự án từ CONTRACT sang PRE_PRODUCTION. Mỗi project_id chỉ được ghi một
-              sự kiện CONTRACT_APPROVED.
-            </p>
+            <p>Dự án <strong>{createdProject.project_id}</strong> đã được tạo. Duyệt để mở phần chuẩn bị nội dung tiếp theo.</p>
           </div>
           <button disabled={approving} onClick={approveContract} type="button">
             {approving
@@ -1477,14 +1505,11 @@ export function ProjectIntakeForm() {
       {createdProject && projectType === "SHORT_FILM" && createdProject.next_action !== "APPROVE_CONTRACT" && (
         <section className="operations-panel">
           <div>
-            <h2>SHORT_FILM workflow — {createdProject.next_action}</h2>
-            <p className="library-status">
-              Lưu toàn bộ review và QC vào contract JSON versioned trong PROJECTS. Không gọi provider;
-              Shot Plan, pilot, toàn phim và xuất bản chỉ mở theo approval gate ở trên.
-            </p>
+            <h2>Tiếp tục hoàn thiện phim ngắn</h2>
+            <p className="library-status">Lưu các quyết định duyệt hiện tại để mở đúng bước tiếp theo. Thao tác này chưa sản xuất hình ảnh hoặc video.</p>
           </div>
           <button disabled={savingShortFilm} onClick={saveShortFilmWorkflow} type="button">
-            {savingShortFilm ? "Đang lưu workflow…" : "Lưu SHORT_FILM workflow và approval gates"}
+            {savingShortFilm ? "Đang lưu…" : "Lưu thay đổi và tiếp tục"}
           </button>
           {shortFilmSaveResult && <ResultDetails value={shortFilmSaveResult} />}
         </section>
@@ -1492,20 +1517,20 @@ export function ProjectIntakeForm() {
       {createdProject?.next_action === "PREPARE_SHORT_FILM_PILOT" && (
         <section className="confirmation-panel">
           <div>
-            <h2>Chuẩn bị Pilot Execution Plan</h2>
-            <p>Kiểm tra tài khoản cho đúng đợt {shortFilmWorkflow.pilot_sampling.sample_count} clip mẫu × {shortFilmWorkflow.pilot_sampling.clip_duration_seconds} giây, rồi khóa Character/Voice Master, người nói, keyframe, retry, heartbeat và hạn mức. Chưa gọi Runway, ElevenLabs hoặc Sync.</p>
+            <h2>Chuẩn bị kế hoạch clip mẫu</h2>
+            <p>Chuẩn bị {shortFilmWorkflow.pilot_sampling.sample_count} clip mẫu × {shortFilmWorkflow.pilot_sampling.clip_duration_seconds} giây để chủ dự án đánh giá trước khi sản xuất toàn phim. Bước này chưa tạo clip.</p>
             <label className="consent"><input checked={pilotSyncBalanceConfirmed} type="checkbox" onChange={(event) => setPilotSyncBalanceConfirmed(event.target.checked)} /> Tôi đã mở Sync Billing và xác nhận đủ hạn mức cho đợt clip mẫu này.</label>
           </div>
           <button disabled={!budgetApproved || !pilotSyncBalanceConfirmed || preparingShortFilmPilot} onClick={() => void prepareShortFilmPilot()} type="button">
-            {preparingShortFilmPilot ? "Đang chuẩn bị…" : "Chuẩn bị pilot plan — chưa gọi provider"}
+            {preparingShortFilmPilot ? "Đang chuẩn bị…" : "Chuẩn bị kế hoạch clip mẫu"}
           </button>
           {shortFilmPilotPlanResult && <ResultDetails value={shortFilmPilotPlanResult} />}
           {shortFilmPilotPlanResult && <div className="approval-gate">
             <strong>Duyệt chi phí chạy thật đợt clip mẫu</strong>
             <p>Đề xuất tối đa: {Math.ceil(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 12 * 1.2).toLocaleString("vi-VN")} Runway credits · {Math.ceil(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 15 * 1.2).toLocaleString("vi-VN")} ElevenLabs characters · {(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 0.05 * 1.2).toFixed(2)} USD Sync.</p>
             <label className="consent"><input checked={pilotExecutionApproved} type="checkbox" onChange={(event) => setPilotExecutionApproved(event.target.checked)} /> Tôi duyệt đúng hạn mức trên cho đợt clip mẫu; không duyệt sản xuất toàn phim.</label>
-            <button disabled={!pilotExecutionApproved || runningPilotExecution} onClick={() => void executeShortFilmPilot()} type="button">{runningPilotExecution ? "Đang submit…" : "Chạy đợt clip mẫu"}</button>
-            <button className="secondary-button" onClick={() => void refreshShortFilmPilotStatus()} type="button">Cập nhật trạng thái/heartbeat</button>
+            <button disabled={!pilotExecutionApproved || runningPilotExecution} onClick={() => void executeShortFilmPilot()} type="button">{runningPilotExecution ? "Đang bắt đầu…" : "Chạy đợt clip mẫu"}</button>
+            <button className="secondary-button" onClick={() => void refreshShortFilmPilotStatus()} type="button">Cập nhật tiến độ</button>
             {pilotExecutionResult && <ResultDetails value={pilotExecutionResult} />}
           </div>}
         </section>
@@ -1513,12 +1538,8 @@ export function ProjectIntakeForm() {
       {createdProject?.next_action === "PREPARE_MV_PRODUCTION" && (
         <section className="confirmation-panel">
           <div>
-            <h2>Lập kế hoạch PRE_PRODUCTION</h2>
-            <p>
-              Tạo manifest MV cho <strong>{createdProject.project_id}</strong>, khóa
-              người thật và ORIGINAL_FACE_COMPOSITE, rồi đưa kế hoạch vào trạng thái
-              chờ duyệt. Bước này không render và không gọi nhà cung cấp.
-            </p>
+            <h2>Lập kế hoạch sản xuất MV</h2>
+            <p>Chuẩn bị kế hoạch cho dự án <strong>{createdProject.project_id}</strong> và đưa vào trạng thái chờ bạn duyệt. Bước này chưa tạo video.</p>
           </div>
           <button disabled={preparing} onClick={prepareMvProduction} type="button">
             {preparing ? "Đang lập kế hoạch…" : "Lập kế hoạch MV để duyệt"}
@@ -1529,13 +1550,13 @@ export function ProjectIntakeForm() {
         const caps = proposedFullFilmCaps();
         return <section className="confirmation-panel">
           <div>
-            <h2>Sản xuất toàn phim sau khi pilot đã duyệt</h2>
-            <p>Hệ thống xử lý tuần tự từng shot, tái sử dụng shot pilot đã duyệt và lưu heartbeat sau mỗi bước. Đây là hạn mức tối đa; số thực tế có thể thấp hơn nhờ tái sử dụng.</p>
+            <h2>Sản xuất toàn phim sau khi clip mẫu đã duyệt</h2>
+            <p>Hệ thống xử lý lần lượt từng cảnh và tái sử dụng các clip mẫu đã duyệt. Đây là hạn mức tối đa; chi phí thực tế có thể thấp hơn.</p>
             <p><strong>Đề xuất tối đa:</strong> {caps.runway_credits.toLocaleString("vi-VN")} Runway credits · {caps.elevenlabs_characters.toLocaleString("vi-VN")} ElevenLabs characters · {caps.sync_usd.toFixed(2)} USD Sync.</p>
             <label className="consent"><input checked={fullFilmExecutionApproved} type="checkbox" onChange={(event) => setFullFilmExecutionApproved(event.target.checked)} /> Tôi duyệt đúng hạn mức trên để sản xuất toàn phim.</label>
           </div>
           <button disabled={!fullFilmExecutionApproved || runningFullFilmExecution} onClick={() => void executeShortFilmFullFilm()} type="button">{runningFullFilmExecution ? "Đang khởi tạo…" : "Bắt đầu sản xuất toàn phim"}</button>
-          <button className="secondary-button" onClick={() => void refreshShortFilmFullFilmStatus()} type="button">Xử lý bước tiếp theo / cập nhật heartbeat</button>
+          <button className="secondary-button" onClick={() => void refreshShortFilmFullFilmStatus()} type="button">Xử lý bước tiếp theo / cập nhật tiến độ</button>
           {fullFilmExecutionResult && <ResultDetails value={fullFilmExecutionResult} />}
         </section>;
       })()}
@@ -1543,11 +1564,8 @@ export function ProjectIntakeForm() {
       {createdProject?.next_action === "APPROVE_MV_PRODUCTION_PLAN" && (
         <section className="confirmation-panel">
           <div>
-            <h2>Kế hoạch PRE_PRODUCTION đang chờ duyệt</h2>
-            <p>
-              Manifest đã được lập cho <strong>{createdProject.project_id}</strong>.
-              Chưa có render hoặc lệnh gọi nhà cung cấp nào được phép chạy.
-            </p>
+            <h2>Kế hoạch sản xuất đang chờ duyệt</h2>
+            <p>Kế hoạch đã được chuẩn bị cho <strong>{createdProject.project_id}</strong>. Chưa tạo hình ảnh hoặc video.</p>
           </div>
           <button disabled={approvingPlan} onClick={approveMvProductionPlan} type="button">
             {approvingPlan ? "Đang duyệt kế hoạch…" : "Duyệt kế hoạch sản xuất MV"}
@@ -1558,14 +1576,10 @@ export function ProjectIntakeForm() {
       {createdProject?.next_action === "PREPARE_MV_ASSETS" && (
         <section className="confirmation-panel">
           <div>
-            <h2>Chuẩn bị tài sản MV đã khóa nguồn</h2>
-            <p>
-              Nhập Drive ID hoặc link beat/instrumental master. Hệ thống chỉ kiểm tra
-              beat, lyrics và video gốc rồi tạo manifest chờ duyệt; không sao chép file,
-              không render và không gọi nhà cung cấp.
-            </p>
+            <h2>Chuẩn bị nhạc và tài liệu MV</h2>
+            <p>Nhập link Google Drive của beat hoặc nhạc nền chính. Hệ thống chỉ kiểm tra nguồn và chờ bạn duyệt, chưa tạo video.</p>
             <label>
-              <span>Drive ID / link beat master *</span>
+              <span>Link Google Drive của beat/nhạc nền *</span>
               <input
                 onChange={(event) => setInstrumentalMasterFileId(event.target.value)}
                 placeholder="1k9sgXZfFwo42XY0Y0NoWKXUQ-CuA63M5"
@@ -1588,12 +1602,7 @@ export function ProjectIntakeForm() {
         <section className="confirmation-panel">
           <div>
             <h2>Tài sản MV đang chờ duyệt</h2>
-            <p>
-              Beat, lyrics và video ORIGINAL_FACE_COMPOSITE đã được kiểm tra cho
-              <strong> {createdProject.project_id}</strong>. Khi duyệt, hệ thống buộc
-              nguồn Tường Vy ở trạng thái tạm thời và khóa cận mặt. Render và provider
-              vẫn bị khóa.
-            </p>
+            <p>Nhạc, lời và video nguồn của dự án <strong>{createdProject.project_id}</strong> đã được kiểm tra. Duyệt để mở bước lập kế hoạch cảnh; chưa tạo video.</p>
           </div>
           <button disabled={approvingAssets} onClick={approveMvAssets} type="button">
             {approvingAssets ? "Đang duyệt tài sản…" : "Duyệt tài sản MV"}
@@ -1605,10 +1614,7 @@ export function ProjectIntakeForm() {
         <section className="confirmation-panel">
           <div>
             <h2>Tài sản MV đã được duyệt an toàn</h2>
-            <p>
-              Tài sản của <strong>{createdProject.project_id}</strong> đã khóa nguồn tạm
-              Tường Vy và sẵn sàng lập shot plan. Chưa render và chưa gọi nhà cung cấp.
-            </p>
+            <p>Tài sản của <strong>{createdProject.project_id}</strong> đã sẵn sàng để lập kế hoạch cảnh. Chưa tạo video.</p>
           </div>
           <button disabled={preparingShotPlan} onClick={prepareMvShotPlan} type="button">
             {preparingShotPlan ? "Đang lập shot plan…" : "Lập shot plan MV để duyệt"}
@@ -1619,12 +1625,8 @@ export function ProjectIntakeForm() {
       {createdProject?.next_action === "APPROVE_MV_SHOT_PLAN" && (
         <section className="confirmation-panel">
           <div>
-            <h2>Shot plan MV đang chờ duyệt</h2>
-            <p>
-              Shot plan của <strong>{createdProject.project_id}</strong> đã bám lyrics
-              master và giữ khóa cận mặt Tường Vy. Timecode vẫn chờ căn theo beat;
-              chưa render và chưa gọi nhà cung cấp.
-            </p>
+            <h2>Kế hoạch cảnh MV đang chờ duyệt</h2>
+            <p>Kế hoạch cảnh của <strong>{createdProject.project_id}</strong> đã bám theo lời và nhạc. Chưa tạo video.</p>
           </div>
         </section>
       )}
