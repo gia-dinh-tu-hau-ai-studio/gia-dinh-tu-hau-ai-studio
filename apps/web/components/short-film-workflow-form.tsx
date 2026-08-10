@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createShortFilmShotPlan, matchShortFilmShotActor, selectShortFilmPilotSamples, shortFilmNextAction, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { calculateShortFilmPilotBudget, createShortFilmShotPlan, matchShortFilmShotActor, selectShortFilmPilotSamples, shortFilmNextAction, shortFilmPilotBudgetApprovalIsSufficient, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
@@ -301,7 +301,10 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     } });
   }
 
-  const persistedPilotBudgetApproved = Boolean(value.pilot_budget_approval);
+  const persistedPilotBudgetApproved = value.shot_plan?.execution_shots.length
+    ? shortFilmPilotBudgetApprovalIsSufficient(value)
+    : false;
+  const pilotBudget = value.shot_plan?.execution_shots.length ? calculateShortFilmPilotBudget(value) : undefined;
   const pilotSamples = value.shot_plan?.execution_shots.length ? selectShortFilmPilotSamples(value) : [];
   const pilotShotIds = [...new Set(pilotSamples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id)))];
   const readinessBlockers = value.production_readiness
@@ -443,7 +446,8 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             <small>Chỉ áp dụng cho đợt pilot; không duyệt sản xuất toàn phim.</small>
           </div>
           <button className={persistedPilotBudgetApproved ? "action-completed" : "action-current"} disabled={persistedPilotBudgetApproved} type="button" onClick={() => {
-            patch({ pilot_budget_approval: { sample_count: 3, clip_duration_seconds: 15, runway_credits_cap: 700, elevenlabs_credits_cap: 1_000, sync_usd_cap: 3, decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() } });
+            if (!pilotBudget) return;
+            patch({ pilot_budget_approval: { sample_count: value.pilot_sampling.sample_count, clip_duration_seconds: value.pilot_sampling.clip_duration_seconds, runway_credits_cap: pilotBudget.proposed_caps.runway_credits, elevenlabs_credits_cap: pilotBudget.proposed_caps.elevenlabs_characters, sync_usd_cap: pilotBudget.proposed_caps.sync_usd, decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() } });
             onApprovePilotBudget?.();
           }}>
             {persistedPilotBudgetApproved ? "✓ Đã duyệt ngân sách pilot" : "Duyệt ngân sách 3 clip pilot"}

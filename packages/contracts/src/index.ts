@@ -509,11 +509,11 @@ export const ShortFilmWorkflowSchema = z
       required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
     }),
     pilot_budget_approval: z.object({
-      sample_count: z.literal(3),
-      clip_duration_seconds: z.literal(15),
-      runway_credits_cap: z.literal(700),
-      elevenlabs_credits_cap: z.literal(1_000),
-      sync_usd_cap: z.literal(3),
+      sample_count: z.number().int().min(1).max(10),
+      clip_duration_seconds: z.number().int().min(5).max(20),
+      runway_credits_cap: z.number().int().positive().max(100_000),
+      elevenlabs_credits_cap: z.number().int().positive().max(100_000),
+      sync_usd_cap: z.number().positive().max(1_000),
       decision: z.literal("APPROVE"),
       reviewer: z.literal("PROJECT_OWNER"),
       reviewed_at: z.string().datetime(),
@@ -821,6 +821,51 @@ export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
       expected_duration_seconds: duration,
     };
   });
+}
+
+/** Calculate caps from the unique provider shots, not only assembled output duration. */
+export function calculateShortFilmPilotBudget(workflow: ShortFilmWorkflow, contingency = 1.2) {
+  const samples = selectShortFilmPilotSamples(workflow);
+  const uniqueShots = [...new Map(
+    samples.flatMap((sample) => sample.shots.map((shot) => [shot.shot_id, shot] as const)),
+  ).values()];
+  const dialogueByShot = new Map(
+    (workflow.production_readiness?.dialogue_line_approvals ?? []).map((line) => [line.shot_id, line]),
+  );
+  const uniqueShotSeconds = uniqueShots.reduce((sum, shot) => sum + shot.duration_seconds, 0);
+  const dialogueCharacters = uniqueShots.reduce(
+    (sum, shot) => sum + (dialogueByShot.get(shot.shot_id)?.dialogue_text.length ?? 0), 0,
+  );
+  const dialogueSeconds = uniqueShots.reduce(
+    (sum, shot) => sum + (dialogueByShot.has(shot.shot_id) ? shot.duration_seconds : 0), 0,
+  );
+  const estimatedSyncSeconds = dialogueByShot.size > 0 ? dialogueSeconds : uniqueShotSeconds;
+  return {
+    samples,
+    unique_shot_count: uniqueShots.length,
+    unique_shot_seconds: uniqueShotSeconds,
+    dialogue_characters: dialogueCharacters,
+    required: {
+      runway_credits: uniqueShotSeconds * 12,
+      elevenlabs_characters: dialogueCharacters,
+      sync_usd: Number((dialogueSeconds * 0.05).toFixed(2)),
+    },
+    proposed_caps: {
+      runway_credits: Math.ceil(uniqueShotSeconds * 12 * contingency),
+      elevenlabs_characters: Math.ceil(Math.max(dialogueCharacters, uniqueShotSeconds * 15) * contingency),
+      sync_usd: Number((estimatedSyncSeconds * 0.05 * contingency).toFixed(2)),
+    },
+  };
+}
+
+export function shortFilmPilotBudgetApprovalIsSufficient(workflow: ShortFilmWorkflow) {
+  const approval = workflow.pilot_budget_approval;
+  if (!approval) return false;
+  if (!workflow.shot_plan?.execution_shots.length) return false;
+  const budget = calculateShortFilmPilotBudget(workflow);
+  return approval.runway_credits_cap >= budget.required.runway_credits &&
+    approval.elevenlabs_credits_cap >= budget.required.elevenlabs_characters &&
+    approval.sync_usd_cap >= budget.required.sync_usd;
 }
 
 export const ShortFilmPilotAccountCheckSchema = z.object({

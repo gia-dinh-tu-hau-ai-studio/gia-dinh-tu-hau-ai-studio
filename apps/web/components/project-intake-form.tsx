@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
-import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptProvider, shortFilmScriptReadyForProjectCreation, synchronizeShortFilmIntakeFields, type ProviderBudgetPlan, type ShortFilmResumeSnapshot, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { approveProviderBudgetForProjectCreation, calculateShortFilmPilotBudget, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmPilotBudgetApprovalIsSufficient, shortFilmScriptProvider, shortFilmScriptReadyForProjectCreation, synchronizeShortFilmIntakeFields, type ProviderBudgetPlan, type ShortFilmResumeSnapshot, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -238,9 +238,9 @@ function ResultDetails({ value }: { value: string }) {
   }
   try {
     const parsed: unknown = JSON.parse(value);
-    const result = parsed && typeof parsed === "object" ? parsed as { message?: string; error?: string } : {};
-    if (result.error || result.message) {
-      return <p className={result.error ? "operation-error" : "operation-success"}>{result.error ?? result.message}</p>;
+    const result = parsed && typeof parsed === "object" ? parsed as { message?: string; error?: string; code?: string } : {};
+    if (result.error || result.message || result.code) {
+      return <p className={result.error || result.code ? "operation-error" : "operation-success"}>{result.error ?? result.message ?? result.code}</p>;
     }
     return <p className="operation-success">Thao tác đã hoàn tất. Bước tiếp theo đã được mở.</p>;
   } catch {
@@ -992,16 +992,19 @@ export function ProjectIntakeForm() {
   }
 
   async function executeShortFilmPilot() {
-    if (!createdProject || !shortFilmWorkflow.pilot_budget_approval) return;
-    const totalSeconds = shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds;
+    if (!createdProject || !shortFilmWorkflow.pilot_budget_approval || !shortFilmPilotBudgetApprovalIsSufficient(shortFilmWorkflow)) {
+      setPilotExecutionResult("Cần duyệt lại hạn mức pilot theo số shot thực tế trước khi chạy.");
+      return;
+    }
+    const approval = shortFilmWorkflow.pilot_budget_approval;
     setRunningPilotExecution(true);
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/execute`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ execution_approved: true, caps: {
-          runway_credits: Math.ceil(totalSeconds * 12 * 1.2),
-          elevenlabs_characters: Math.ceil(totalSeconds * 15 * 1.2),
-          sync_usd: Number((totalSeconds * 0.05 * 1.2).toFixed(2)),
+          runway_credits: approval.runway_credits_cap,
+          elevenlabs_characters: approval.elevenlabs_credits_cap,
+          sync_usd: approval.sync_usd_cap,
         } }),
       });
       const body = await response.json();
@@ -1012,14 +1015,15 @@ export function ProjectIntakeForm() {
   }
 
   async function approveShortFilmPilotBudget() {
+    const proposal = calculateShortFilmPilotBudget(shortFilmWorkflow).proposed_caps;
     const workflow = {
       ...shortFilmWorkflow,
       pilot_budget_approval: {
-        sample_count: 3 as const,
-        clip_duration_seconds: 15 as const,
-        runway_credits_cap: 700 as const,
-        elevenlabs_credits_cap: 1_000 as const,
-        sync_usd_cap: 3 as const,
+        sample_count: shortFilmWorkflow.pilot_sampling.sample_count,
+        clip_duration_seconds: shortFilmWorkflow.pilot_sampling.clip_duration_seconds,
+        runway_credits_cap: proposal.runway_credits,
+        elevenlabs_credits_cap: proposal.elevenlabs_characters,
+        sync_usd_cap: proposal.sync_usd,
         decision: "APPROVE" as const,
         reviewer: "PROJECT_OWNER" as const,
         reviewed_at: new Date().toISOString(),
@@ -1420,8 +1424,15 @@ export function ProjectIntakeForm() {
               scriptBudgetSummary={`Kịch bản AI tối đa ${providerBudget.estimate.script.toLocaleString("vi-VN")} ${providerBudget.estimate.currency} · Tổng dự toán ${providerBudget.estimate.total.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}`}
               scriptAccountSummary={openAiAccountCheck ? `OpenAI: ${openAiAccountCheck.status} · ${openAiAccountCheck.message}` : "OpenAI chưa được kiểm tra."}
               providerStatus={shortFilmProviderStatus}
-              pilotBudgetApproved={Boolean(shortFilmWorkflow.pilot_budget_approval)}
-              pilotBudgetSummary="3 clip × 15 giây · Runway tối đa 700 credits · ElevenLabs tối đa 1.000 credits · Sync tối đa 3 USD."
+              pilotBudgetApproved={shortFilmPilotBudgetApprovalIsSufficient(shortFilmWorkflow)}
+              pilotBudgetSummary={shortFilmWorkflow.shot_plan?.execution_shots.length ? (() => {
+                const budget = calculateShortFilmPilotBudget(shortFilmWorkflow);
+                const approval = shortFilmWorkflow.pilot_budget_approval;
+                if (approval && shortFilmPilotBudgetApprovalIsSufficient(shortFilmWorkflow)) {
+                  return `${budget.unique_shot_count} shot/${budget.unique_shot_seconds} giây provider · Cần ${budget.required.runway_credits} Runway credits, ${budget.required.elevenlabs_characters.toLocaleString("vi-VN")} ElevenLabs characters, ${budget.required.sync_usd.toLocaleString("vi-VN")} USD Sync · Đã duyệt tối đa ${approval.runway_credits_cap}/${approval.elevenlabs_credits_cap.toLocaleString("vi-VN")}/${approval.sync_usd_cap.toLocaleString("vi-VN")}.`;
+                }
+                return `${shortFilmWorkflow.pilot_sampling.sample_count} clip × ${shortFilmWorkflow.pilot_sampling.clip_duration_seconds} giây · ${budget.unique_shot_count} shot thực tế/${budget.unique_shot_seconds} giây provider · Runway tối đa ${budget.proposed_caps.runway_credits} credits · ElevenLabs tối đa ${budget.proposed_caps.elevenlabs_characters.toLocaleString("vi-VN")} credits · Sync tối đa ${budget.proposed_caps.sync_usd.toLocaleString("vi-VN")} USD.`;
+              })() : undefined}
               onApprovePilotBudget={() => void approveShortFilmPilotBudget()}
               onChange={(workflow) => {
                 invalidateConfirmation();
@@ -1585,9 +1596,9 @@ export function ProjectIntakeForm() {
           {shortFilmPilotPlanResult && <ResultDetails value={shortFilmPilotPlanResult} />}
           {shortFilmPilotPlanResult && <div className="approval-gate">
             <strong>Duyệt chi phí chạy thật đợt clip mẫu</strong>
-            <p>Đề xuất tối đa: {Math.ceil(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 12 * 1.2).toLocaleString("vi-VN")} Runway credits · {Math.ceil(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 15 * 1.2).toLocaleString("vi-VN")} ElevenLabs characters · {(shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds * 0.05 * 1.2).toFixed(2)} USD Sync.</p>
+            <p>Hạn mức đã duyệt: {shortFilmWorkflow.pilot_budget_approval?.runway_credits_cap.toLocaleString("vi-VN")} Runway credits · {shortFilmWorkflow.pilot_budget_approval?.elevenlabs_credits_cap.toLocaleString("vi-VN")} ElevenLabs characters · {shortFilmWorkflow.pilot_budget_approval?.sync_usd_cap.toLocaleString("vi-VN")} USD Sync.</p>
             <label className="consent"><input checked={pilotExecutionApproved} type="checkbox" onChange={(event) => setPilotExecutionApproved(event.target.checked)} /> Tôi duyệt đúng hạn mức trên cho đợt clip mẫu; không duyệt sản xuất toàn phim.</label>
-            <button disabled={!pilotExecutionApproved || runningPilotExecution} onClick={() => void executeShortFilmPilot()} type="button">{runningPilotExecution ? "Đang bắt đầu…" : "Chạy đợt clip mẫu"}</button>
+            <button disabled={!pilotExecutionApproved || !shortFilmPilotBudgetApprovalIsSufficient(shortFilmWorkflow) || runningPilotExecution} onClick={() => void executeShortFilmPilot()} type="button">{runningPilotExecution ? "Đang bắt đầu…" : "Chạy đợt clip mẫu"}</button>
             <button className="secondary-button" onClick={() => void refreshShortFilmPilotStatus()} type="button">Cập nhật tiến độ</button>
             {pilotExecutionResult && <ResultDetails value={pilotExecutionResult} />}
           </div>}

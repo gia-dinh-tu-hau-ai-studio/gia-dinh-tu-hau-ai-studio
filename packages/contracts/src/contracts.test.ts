@@ -4,6 +4,7 @@ import {
   approveProviderBudgetForProjectCreation,
   calculateSuggestedProviderBudget,
   calculateProjectProgress,
+  calculateShortFilmPilotBudget,
   canResumeContractApproval,
   canResumeShortFilmWorkflow,
   createShortFilmShotPlan,
@@ -19,6 +20,7 @@ import {
   prepareShortFilmPilotPlan,
   selectShortFilmPilotSamples,
   shortFilmMediaExecutionDecision,
+  shortFilmPilotBudgetApprovalIsSufficient,
   matchShortFilmShotActor,
   shortFilmNextAction,
   shortFilmScriptApprovalIsFresh,
@@ -767,6 +769,35 @@ test("ba pilot 15 giây từ Shot Plan 10 giây luôn giữ đúng tổng 45 gi�
   assert.deepEqual(samples.map((sample) => sample.expected_duration_seconds), [15, 15, 15]);
   assert.equal(samples.flatMap((sample) => sample.shots).reduce((sum, shot) => sum + shot.duration_seconds, 0), 45);
   assert.equal(new Set(samples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id))).size, 6);
+  const budget = calculateShortFilmPilotBudget(parsed);
+  assert.equal(budget.unique_shot_seconds, 45);
+  assert.deepEqual(budget.proposed_caps, {
+    runway_credits: 648,
+    elevenlabs_characters: 810,
+    sync_usd: 2.7,
+  });
+  const pilotShotIds = samples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id));
+  const withDialogue = ShortFilmWorkflowSchema.parse({
+    ...parsed,
+    pilot_budget_approval: {
+      sample_count: 3, clip_duration_seconds: 15, runway_credits_cap: 700,
+      elevenlabs_credits_cap: 1_000, sync_usd_cap: 3, decision: "APPROVE",
+      reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-11T00:00:00.000Z",
+    },
+    production_readiness: {
+      ...productionReadiness,
+      dialogue_line_approvals: pilotShotIds.map((shot_id, index) => ({
+        ...productionReadiness.dialogue_line_approvals[0],
+        line_id: `LINE-${index + 1}`,
+        shot_id,
+        dialogue_text: "Một câu thoại thử nghiệm điện ảnh miền Tây cần đủ độ dài để kiểm tra chính xác hạn mức ký tự của nhà cung cấp giọng nói trước khi chạy clip pilot thật.",
+      })),
+    },
+  });
+  const dialogueBudget = calculateShortFilmPilotBudget(withDialogue);
+  assert.ok(dialogueBudget.required.elevenlabs_characters > 810);
+  assert.ok(dialogueBudget.required.elevenlabs_characters <= 1_000);
+  assert.equal(shortFilmPilotBudgetApprovalIsSufficient(withDialogue), true);
 });
 
 test("cho phép lưu kịch bản đã sửa khi chủ dự án vừa duyệt lại", () => {
@@ -1021,6 +1052,7 @@ test("pilot budget approval is durable and cannot authorize a different sampling
   } as const;
   const parsed = ShortFilmWorkflowSchema.parse({ ...shortFilmWorkflow, pilot_budget_approval: approvedBudget });
   assert.equal(parsed.pilot_budget_approval?.runway_credits_cap, 700);
+  assert.equal(shortFilmPilotBudgetApprovalIsSufficient(parsed), false);
   assert.throws(() => ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     pilot_sampling: {
