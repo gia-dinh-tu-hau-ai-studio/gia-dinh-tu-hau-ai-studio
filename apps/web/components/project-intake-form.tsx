@@ -238,9 +238,15 @@ function ResultDetails({ value }: { value: string }) {
   }
   try {
     const parsed: unknown = JSON.parse(value);
-    const result = parsed && typeof parsed === "object" ? parsed as { message?: string; error?: string; code?: string } : {};
+    const result = parsed && typeof parsed === "object" ? parsed as { message?: unknown; error?: unknown; code?: unknown } : {};
     if (result.error || result.message || result.code) {
-      return <p className={result.error || result.code ? "operation-error" : "operation-success"}>{result.error ?? result.message ?? result.code}</p>;
+      const detail = result.error ?? result.message ?? result.code;
+      const text = typeof detail === "string"
+        ? detail
+        : detail && typeof detail === "object" && "message" in detail
+          ? `${"stage" in detail && typeof detail.stage === "string" ? `${detail.stage}: ` : ""}${String(detail.message)}`
+          : JSON.stringify(detail);
+      return <p className={result.error || result.code ? "operation-error" : "operation-success"}>{text}</p>;
     }
     return <p className="operation-success">Thao tác đã hoàn tất. Bước tiếp theo đã được mở.</p>;
   } catch {
