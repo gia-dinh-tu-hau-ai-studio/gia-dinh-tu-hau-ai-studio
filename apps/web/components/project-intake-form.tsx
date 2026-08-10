@@ -992,7 +992,7 @@ export function ProjectIntakeForm() {
   }
 
   async function executeShortFilmPilot() {
-    if (!createdProject || !pilotExecutionApproved) return;
+    if (!createdProject || !shortFilmWorkflow.pilot_budget_approval) return;
     const totalSeconds = shortFilmWorkflow.pilot_sampling.sample_count * shortFilmWorkflow.pilot_sampling.clip_duration_seconds;
     setRunningPilotExecution(true);
     try {
@@ -1009,6 +1009,42 @@ export function ProjectIntakeForm() {
       if (response.ok && !["AWAITING_PILOT_QC", "FAILED"].includes(body.status)) setMonitoringPilotExecution(true);
     } catch { setPilotExecutionResult("Không submit được pilot batch; hệ thống không tự gửi lại để tránh tính phí trùng."); }
     finally { setRunningPilotExecution(false); }
+  }
+
+  async function approveShortFilmPilotBudget() {
+    const workflow = {
+      ...shortFilmWorkflow,
+      pilot_budget_approval: {
+        sample_count: 3 as const,
+        clip_duration_seconds: 15 as const,
+        runway_credits_cap: 700 as const,
+        elevenlabs_credits_cap: 1_000 as const,
+        sync_usd_cap: 3 as const,
+        decision: "APPROVE" as const,
+        reviewer: "PROJECT_OWNER" as const,
+        reviewed_at: new Date().toISOString(),
+      },
+    };
+    setShortFilmWorkflow(workflow);
+    setPilotExecutionApproved(true);
+    if (!createdProject) return;
+    setSavingShortFilm(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/workflow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workflow }),
+      });
+      const body = await response.json();
+      setShortFilmSaveResult(JSON.stringify(body, null, 2));
+      if (response.ok && typeof body.next_action === "string") {
+        setCreatedProject({ ...createdProject, next_action: body.next_action as CreatedProject["next_action"] });
+      }
+    } catch {
+      setShortFilmSaveResult("Không lưu được phê duyệt ngân sách pilot. Chưa gọi nhà cung cấp và chưa phát sinh chi phí.");
+    } finally {
+      setSavingShortFilm(false);
+    }
   }
 
   async function refreshShortFilmPilotStatus() {
@@ -1384,9 +1420,9 @@ export function ProjectIntakeForm() {
               scriptBudgetSummary={`Kịch bản AI tối đa ${providerBudget.estimate.script.toLocaleString("vi-VN")} ${providerBudget.estimate.currency} · Tổng dự toán ${providerBudget.estimate.total.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}`}
               scriptAccountSummary={openAiAccountCheck ? `OpenAI: ${openAiAccountCheck.status} · ${openAiAccountCheck.message}` : "OpenAI chưa được kiểm tra."}
               providerStatus={shortFilmProviderStatus}
-              pilotBudgetApproved={pilotExecutionApproved}
+              pilotBudgetApproved={Boolean(shortFilmWorkflow.pilot_budget_approval)}
               pilotBudgetSummary="3 clip × 15 giây · Runway tối đa 700 credits · ElevenLabs tối đa 1.000 credits · Sync tối đa 3 USD."
-              onApprovePilotBudget={() => setPilotExecutionApproved(true)}
+              onApprovePilotBudget={() => void approveShortFilmPilotBudget()}
               onChange={(workflow) => {
                 invalidateConfirmation();
                 setShortFilmWorkflow(workflow);
