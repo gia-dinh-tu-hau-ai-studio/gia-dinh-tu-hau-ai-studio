@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
-import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, canResumeContractApproval, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptReadyForProjectCreation, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { approveProviderBudgetForProjectCreation, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmScriptReadyForProjectCreation, type ProviderBudgetPlan, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
@@ -104,7 +104,7 @@ const initialProviderBudget: ProviderBudgetPlan = {
 
 type CreatedProject = {
   project_id: string;
-  current_stage: "CONTRACT" | "PRE_PRODUCTION";
+  current_stage: string;
   next_action:
     | "APPROVE_CONTRACT"
     | "PREPARE_MV_PRODUCTION"
@@ -311,6 +311,7 @@ export function ProjectIntakeForm() {
   const [checkingProgress, setCheckingProgress] = useState(false);
   const [approvingProgressContract, setApprovingProgressContract] = useState(false);
   const [progressActionMessage, setProgressActionMessage] = useState("");
+  const [resumingProject, setResumingProject] = useState(false);
   const [draftFormValues, setDraftFormValues] = useState<Record<string, string[]> | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState("");
   const [inputHistory, setInputHistory] = useState<Record<string, string[]>>({});
@@ -419,6 +420,29 @@ export function ProjectIntakeForm() {
       setProgressActionMessage("Không kết nối được kho dự án. Hệ thống không tự gửi lại để tránh ghi lặp sự kiện duyệt.");
     } finally {
       setApprovingProgressContract(false);
+    }
+  }
+
+  async function resumeShortFilmProject() {
+    if (!projectProgress || !canResumeShortFilmWorkflow(projectProgress)) return;
+    setResumingProject(true);
+    setProgressActionMessage("");
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectProgress.project_id)}/short-film/workflow`);
+      const body = await response.json();
+      if (!response.ok || !body.workflow || typeof body.next_action !== "string") {
+        setProgressActionMessage(body.message ?? body.code ?? "Không mở lại được workflow phim ngắn.");
+        return;
+      }
+      setProjectType("SHORT_FILM");
+      setShortFilmWorkflow(body.workflow as ShortFilmWorkflow);
+      setCreatedProject({ project_id: projectProgress.project_id, current_stage: projectProgress.current_stage, next_action: body.next_action });
+      setProjectStarted(true);
+      setTimeout(() => document.getElementById("intake-frame-5")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    } catch {
+      setProgressActionMessage("Không kết nối được kho dự án TuhauAI.");
+    } finally {
+      setResumingProject(false);
     }
   }
 
@@ -1216,6 +1240,7 @@ export function ProjectIntakeForm() {
           <div className="progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={projectProgress.percent_complete}><span style={{ width: `${projectProgress.percent_complete}%` }} /></div>
           <p>Giai đoạn: <strong>{projectProgress.current_stage}</strong> · Bước tiếp theo: <strong>{projectProgress.next_action}</strong></p>
           {canResumeContractApproval(projectProgress) && <button disabled={approvingProgressContract} type="button" onClick={() => void approveContractFromProgress()}>{approvingProgressContract ? "Đang duyệt hợp đồng…" : "Duyệt hợp đồng và tiếp tục dự án"}</button>}
+          {canResumeShortFilmWorkflow(projectProgress) && <button disabled={resumingProject} type="button" onClick={() => void resumeShortFilmProject()}>{resumingProject ? "Đang mở dự án…" : "Mở dự án để tiếp tục review"}</button>}
           {progressActionMessage && <p className={progressActionMessage.startsWith("Đã duyệt") ? "operation-success" : "operation-error"}>{progressActionMessage}</p>}
           <ol>{projectProgress.milestones.map((milestone) => <li className={milestone.status.toLowerCase()} key={milestone.action}><span>{milestone.status === "COMPLETED" ? "✓" : milestone.status === "CURRENT" ? "●" : "○"}</span><div><strong>{milestone.label}</strong><small>{milestone.status === "CURRENT" ? "Đang thực hiện/chờ duyệt" : milestone.status === "COMPLETED" ? "Đã hoàn thành" : "Chưa bắt đầu"}</small></div></li>)}</ol>
         </div>}
