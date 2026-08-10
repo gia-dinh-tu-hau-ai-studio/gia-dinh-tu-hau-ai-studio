@@ -4,6 +4,7 @@ import {
   createShortFilmResumeSnapshot,
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
+  shortFilmScriptApprovalIsFresh,
   ShortFilmWorkflowSchema,
   type NormalizedProjectIntake,
   type ShortFilmWorkflow,
@@ -2761,8 +2762,7 @@ export class ProjectRegistryConnector {
         : undefined;
       if (
         existing?.script_review.decision === "APPROVE" &&
-        existing.full_script !== workflow.full_script &&
-        workflow.script_review.decision === "APPROVE"
+        !shortFilmScriptApprovalIsFresh(existing, workflow)
       ) {
         throw new ProjectRegistryInvalidStateError("Kịch bản đã thay đổi phải được review lại trước khi giữ SCRIPT_APPROVED");
       }
