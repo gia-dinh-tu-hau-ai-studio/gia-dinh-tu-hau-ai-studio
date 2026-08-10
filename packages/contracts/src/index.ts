@@ -708,6 +708,28 @@ export function shortFilmScriptReadyForProjectCreation(workflow: {
     workflow.script_review.decision === "APPROVE";
 }
 
+export function shortFilmScriptProvider(source: ShortFilmWorkflow["script_source"]): ProviderBudgetPlan["providers"]["script"] {
+  return source === "PROJECT_OWNER_PROVIDED" ? "PROJECT_OWNER" : "OPENAI_RESPONSES";
+}
+
+export function synchronizeShortFilmIntakeFields(
+  workflow: ShortFilmWorkflow,
+  input: { idea_brief?: string; target_duration_minutes?: number; language?: string },
+): ShortFilmWorkflow {
+  const ideaBrief = input.idea_brief ?? workflow.idea_brief;
+  const targetDurationMinutes = input.target_duration_minutes ?? workflow.target_duration_minutes;
+  const language = input.language ?? workflow.dialogue.language;
+  const changed = ideaBrief !== workflow.idea_brief || targetDurationMinutes !== workflow.target_duration_minutes || language !== workflow.dialogue.language;
+  if (!changed) return workflow;
+  return {
+    ...workflow,
+    idea_brief: ideaBrief,
+    target_duration_minutes: targetDurationMinutes,
+    dialogue: { ...workflow.dialogue, language },
+    script_review: { ...workflow.script_review, decision: "PENDING", reviewed_at: undefined },
+  };
+}
+
 export function shortFilmSourceActorsNeedSync(
   filmCharacters: ReadonlyArray<ShortFilmWorkflow["film_characters"][number]>,
   sourceActors: ReadonlyArray<ShortFilmWorkflow["source_actors"][number]>,

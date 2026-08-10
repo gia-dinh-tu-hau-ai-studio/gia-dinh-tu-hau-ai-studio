@@ -241,6 +241,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     ? approvalSequence.length
     : Math.max(0, approvalSequence.findIndex(([action]) => action === normalizedNextAction));
   const scriptDraftCreated = Boolean(value.script_generation || value.full_script.trim());
+  const scriptInputsReady = value.idea_brief.trim().length >= 20 && value.script_title.trim().length > 0 && value.script_synopsis.trim().length > 0 && value.full_script.trim().length > 0;
 
   return (
     <div className="short-film-workflow">
@@ -293,8 +294,6 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
       <fieldset>
         <legend>Kịch bản và duyệt kịch bản</legend>
         <label data-validation-path="script_source"><span>Nguồn kịch bản *</span><select required value={value.script_source} onChange={(event) => patch({ script_source: event.target.value as ShortFilmWorkflow["script_source"] })}><option value="AI_GENERATED">AI tạo</option><option value="PROJECT_OWNER_PROVIDED">Chủ dự án cung cấp</option><option value="AI_DEVELOPED_FROM_IDEA">AI phát triển từ ý tưởng</option></select></label>
-        <label data-validation-path="target_duration_minutes"><span>Thời lượng mục tiêu (phút) *</span><input required min={1} max={60} type="number" value={value.target_duration_minutes} onChange={(event) => patch({ target_duration_minutes: Number(event.target.value) })} /></label>
-        <label className="wide-field" data-validation-path="idea_brief"><span>Ý tưởng để AI phát triển *</span><textarea required minLength={20} placeholder="Nhập xung đột chính, thông điệp, bối cảnh và hướng kết thúc (tối thiểu 20 ký tự)." rows={6} value={value.idea_brief} onChange={(event) => patch({ idea_brief: event.target.value, script_review: { ...value.script_review, decision: "PENDING" } })} /></label>
         {value.script_source !== "PROJECT_OWNER_PROVIDED" && onGenerateScript && <div className={`script-generation-controls${scriptGenerationReady ? " ready" : ""}`}>
           <div className="script-generation-summary">
             <strong>Tạo bản nháp kịch bản AI</strong>
@@ -313,6 +312,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
           <div className="script-approval-actions" role="group" aria-label="Quyết định kịch bản">
             <button
               className={value.script_review.decision === "APPROVE" ? "approval-action decision-approve selected" : "approval-action decision-approve"}
+              disabled={!scriptInputsReady}
               onClick={() => patch({ script_review: { ...value.script_review, decision: "APPROVE", reviewed_at: new Date().toISOString() } })}
               type="button"
             >Duyệt và mở bước tiếp theo</button>
@@ -328,7 +328,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             >Từ chối</button>
           </div>
           <p className={`script-review-status ${scriptApproved ? "approved" : ""}`} aria-live="polite">
-            {scriptApproved ? "Đã duyệt — phần tiếp theo đã được mở." : value.script_review.decision === "REQUEST_CHANGES" ? "Đang yêu cầu sửa kịch bản." : value.script_review.decision === "REJECT" ? "Kịch bản đã bị từ chối." : "Đang chờ chủ dự án duyệt."}
+            {scriptApproved ? "Đã duyệt — phần tiếp theo đã được mở." : !scriptInputsReady ? "Hoàn thiện tên, tóm tắt và toàn bộ kịch bản trước khi duyệt." : value.script_review.decision === "REQUEST_CHANGES" ? "Đang yêu cầu sửa kịch bản." : value.script_review.decision === "REJECT" ? "Kịch bản đã bị từ chối." : "Đang chờ chủ dự án duyệt."}
           </p>
           <textarea placeholder="Ghi rõ điểm cần sửa hoặc lý do duyệt/từ chối" value={value.script_review.notes} onChange={(event) => patch({ script_review: { ...value.script_review, notes: event.target.value } })} />
         </div>
@@ -336,26 +336,25 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 
       <fieldset>
         <legend>Thoại, ngôn ngữ và cảnh hát</legend>
-        <label data-validation-path="dialogue.language"><span>Ngôn ngữ</span><input value={value.dialogue.language} onChange={(event) => patch({ dialogue: { ...value.dialogue, language: event.target.value } })} /></label>
         <label data-validation-path="dialogue.dialogue_mode"><span>Cấu hình thoại</span><select value={value.dialogue.dialogue_mode} onChange={(event) => patch({ dialogue: { ...value.dialogue, dialogue_mode: event.target.value as ShortFilmWorkflow["dialogue"]["dialogue_mode"] } })}><option value="DIALOGUE">Đối thoại</option><option value="VOICE_OVER">Voice-over</option><option value="MIXED">Kết hợp</option></select></label>
         <label><input checked={value.dialogue.singing_scene} type="checkbox" onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene: event.target.checked } })} /> Có cảnh hát</label>
         {value.dialogue.singing_scene && <label data-validation-path="dialogue.singing_scene_notes"><span>Mô tả/nguồn cảnh hát</span><textarea value={value.dialogue.singing_scene_notes} onChange={(event) => patch({ dialogue: { ...value.dialogue, singing_scene_notes: event.target.value } })} /></label>}
       </fieldset>
 
       <fieldset disabled={!scriptApproved} className={!scriptApproved ? "locked-stage" : ""}>
-        <legend>Shot Plan — tạo từ kịch bản đã duyệt</legend>
+        <legend>Kế hoạch cảnh — tạo từ kịch bản đã duyệt</legend>
         {!value.shot_plan && <>
           <p className="gate-note">Hệ thống tạo kế hoạch cảnh cục bộ từ kịch bản đã duyệt, không gọi nhà cung cấp và không phát sinh credit.</p>
-          <button type="button" onClick={() => patch({ shot_plan: createShortFilmShotPlan(value) })}>Tự tạo Shot Plan để review</button>
+          <button type="button" onClick={() => patch({ shot_plan: createShortFilmShotPlan(value) })}>Tạo kế hoạch cảnh để duyệt</button>
         </>}
         {value.shot_plan && <>
           <p><strong>{value.shot_plan.summary}</strong></p>
           <ol className="shot-plan-review-list">
-            {value.shot_plan.execution_shots.map((shot) => <li key={shot.shot_id}><strong>{shot.shot_id} · {shot.duration_seconds} giây</strong><span>{shot.summary}</span><small>{shot.runway_prompt}</small></li>)}
+            {value.shot_plan.execution_shots.map((shot, index) => <li key={shot.shot_id}><strong>Cảnh {index + 1} · {shot.duration_seconds} giây</strong><span>{shot.summary}</span></li>)}
           </ol>
-          <ReviewGate label="Cổng duyệt Shot Plan" review={value.shot_plan.review} onChange={(review) => patch({ shot_plan: { ...value.shot_plan!, review } })} />
-          <button className="secondary-button" type="button" onClick={() => patch({ shot_plan: createShortFilmShotPlan(value), production_readiness: undefined })}>Tạo lại Shot Plan từ kịch bản</button>
-          <p className="gate-note">Chỉ SHOT_PLAN_APPROVED mới mở bước khóa Character Master, Voice Master, người nói và keyframe.</p>
+          <ReviewGate label="Duyệt kế hoạch cảnh" review={value.shot_plan.review} onChange={(review) => patch({ shot_plan: { ...value.shot_plan!, review } })} />
+          <button className="secondary-button" type="button" onClick={() => patch({ shot_plan: createShortFilmShotPlan(value), production_readiness: undefined })}>Tạo lại kế hoạch cảnh từ kịch bản</button>
+          <p className="gate-note">Sau khi duyệt, hệ thống mới mở bước kiểm tra nhân vật, giọng nói và hình ảnh cho từng cảnh.</p>
         </>}
       </fieldset>
 
@@ -492,9 +491,11 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         </>}
       </fieldset>
 
+      </div>
+
       <fieldset disabled={!scriptApproved || !value.shot_plan || !productionReady} className={!scriptApproved || !value.shot_plan || !productionReady ? "locked-stage" : ""}>
-        <legend>Pilot 10–20 giây và QC</legend>
-        <p className="gate-note">TuhauAI chỉ tạo đợt clip mẫu đại diện trước. Toàn bộ clip còn lại và bước ghép phim bị khóa cho đến khi từng mẫu và cổng duyệt tổng đều APPROVE.</p>
+        <legend>Clip mẫu 10–20 giây và kiểm tra chất lượng</legend>
+        <p className="gate-note">TuhauAI chỉ tạo các clip mẫu đại diện trước. Toàn bộ phim vẫn khóa cho đến khi từng clip mẫu và kết quả tổng được duyệt.</p>
         <label><span>Số clip mẫu cần xem</span><select value={value.pilot_sampling.sample_count} onChange={(event) => patch({ pilot_sampling: { ...value.pilot_sampling, sample_count: Number(event.target.value) } })}><option value={2}>2 clip</option><option value={3}>3 clip — khuyến nghị</option><option value={4}>4 clip</option><option value={5}>5 clip</option></select></label>
         <label><span>Thời lượng mỗi clip</span><select value={value.pilot_sampling.clip_duration_seconds} onChange={(event) => patch({ pilot_sampling: { ...value.pilot_sampling, clip_duration_seconds: Number(event.target.value) } })}><option value={10}>10 giây</option><option value={15}>15 giây — khuyến nghị</option><option value={20}>20 giây</option></select></label>
         <p className="gate-note">Mẫu bắt buộc phủ nhận dạng + thoại, diễn xuất chuyển động và nhiều nhân vật/continuity. Shot Plan ưu tiên thêm cảnh rủi ro cao khi chọn 4–5 mẫu.</p>
@@ -506,7 +507,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         </article>)}
         {value.pilot_batch && <ReviewGate label="Duyệt toàn bộ đợt clip mẫu" review={value.pilot_batch.batch_review} onChange={(batch_review) => patch({ pilot_batch: { samples: value.pilot_batch!.samples, batch_review } })} />}
         {!value.pilot_batch && <p className="gate-note">Chưa tạo clip mẫu — sản xuất toàn phim đang khóa.</p>}
-        <details><summary>Tương thích pilot đơn cũ</summary>
+        <details className="system-only"><summary>Dữ liệu tương thích cũ</summary>
         <label><span>Player URL</span><input type="url" value={value.pilot?.video_url ?? ""} onChange={(event) => patch({ pilot: { duration_seconds: value.pilot?.duration_seconds ?? 15, video_url: event.target.value, qc: value.pilot?.qc ?? { ...emptyQc }, review: value.pilot?.review ?? { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } } })} /></label>
         <label><span>Thời lượng</span><input min={10} max={20} type="number" value={value.pilot?.duration_seconds ?? 15} onChange={(event) => value.pilot && patch({ pilot: { ...value.pilot, duration_seconds: Number(event.target.value) } })} /></label>
         {value.pilot?.video_url && <video controls src={value.pilot.video_url} />}
@@ -516,14 +517,13 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
       </fieldset>
 
       <fieldset disabled={!pilotApproved} className={!pilotApproved ? "locked-stage" : ""}>
-        <legend>Sản xuất toàn phim — chỉ mở sau PILOT_APPROVED</legend>
+        <legend>Sản xuất toàn phim — chỉ mở sau khi clip mẫu được duyệt</legend>
         <label><span>Player phim hoàn chỉnh</span><input type="url" value={value.full_film?.video_url ?? ""} onChange={(event) => patch({ full_film: { video_url: event.target.value, qc: value.full_film?.qc ?? { ...emptyQc }, review: value.full_film?.review ?? { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } } })} /></label>
         {value.full_film?.video_url && <video controls src={value.full_film.video_url} />}
         <QcChecklist qc={value.full_film?.qc ?? emptyQc} onChange={(qc) => value.full_film && patch({ full_film: { ...value.full_film, qc } })} />
-        <ReviewGate label="Final film gate" review={value.full_film?.review} onChange={(review) => value.full_film && patch({ full_film: { ...value.full_film, review } })} />
-        <p className="gate-note">{finalApproved ? "FULL_FILM_APPROVED — sẵn sàng xuất bản." : "Chưa thể xuất bản khi QC và cổng duyệt phim hoàn chỉnh chưa APPROVE."}</p>
+        <ReviewGate label="Duyệt phim hoàn chỉnh" review={value.full_film?.review} onChange={(review) => value.full_film && patch({ full_film: { ...value.full_film, review } })} />
+        <p className="gate-note">{finalApproved ? "Phim đã được duyệt và sẵn sàng xuất bản." : "Chưa thể xuất bản khi kiểm tra chất lượng và duyệt phim chưa hoàn tất."}</p>
       </fieldset>
-      </div>
       <section className="post-intake-note">
         <strong>Sau khi tạo dự án</strong>
         <p>Hệ thống sẽ tự lập Shot Plan từ kịch bản đã duyệt. Khi kế hoạch sẵn sàng, bạn chỉ cần chọn <b>Duyệt</b> hoặc <b>Yêu cầu sửa</b>; không phải nhập danh sách cảnh hay thông số kỹ thuật tại form này.</p>
@@ -533,7 +533,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 }
 
 function QcChecklist({ qc, onChange }: { qc: typeof emptyQc; onChange: (qc: typeof emptyQc) => void }) {
-  const labels: Record<keyof typeof emptyQc, string> = { identity: "Identity", motion: "Chuyển động", lip_sync: "Khẩu hình", voice: "Giọng", background: "Bối cảnh", lighting: "Ánh sáng", continuity: "Continuity" };
+  const labels: Record<keyof typeof emptyQc, string> = { identity: "Đúng nhân vật", motion: "Chuyển động", lip_sync: "Khẩu hình", voice: "Giọng nói", background: "Bối cảnh", lighting: "Ánh sáng", continuity: "Liền mạch giữa các cảnh" };
   return <div className="qc-grid">{Object.entries(labels).map(([key, label]) => <label key={key}><input checked={qc[key as keyof typeof qc]} type="checkbox" onChange={(event) => onChange({ ...qc, [key]: event.target.checked })} /> {label}</label>)}</div>;
 }
 
