@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { shortFilmProductionReadinessBlockers, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
@@ -123,7 +123,8 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     const libraryActorIds = new Set(libraryActors.map((actor) => actor.source_actor_id));
     const needsLibraryMigration = value.source_actors.some(
       (actor) => actor.master_identity_status !== "APPROVED_LOCKED",
-    ) || value.film_characters.some((character) => !libraryActorIds.has(character.source_actor_id));
+    ) || value.film_characters.some((character) => !libraryActorIds.has(character.source_actor_id)) ||
+      shortFilmSourceActorsNeedSync(value.film_characters, value.source_actors);
     if (!needsLibraryMigration) return;
 
     const filmCharacters = value.film_characters.map((character, index) => ({
@@ -132,11 +133,10 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         ? character.source_actor_id
         : libraryActors[index % libraryActors.length].source_actor_id,
     }));
-    const selectedActorIds = new Set(filmCharacters.map((character) => character.source_actor_id));
     onChange({
       ...value,
       film_characters: filmCharacters,
-      source_actors: libraryActors.filter((actor) => selectedActorIds.has(actor.source_actor_id)),
+      source_actors: syncShortFilmSourceActors(filmCharacters, libraryActors, value.source_actors),
     });
   }, [eligibleCharacters, value, onChange]);
 
