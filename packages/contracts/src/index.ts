@@ -1189,6 +1189,24 @@ export function createShortFilmResumeSnapshot(input: unknown): ShortFilmResumeSn
   };
 }
 
+export function matchShortFilmShotActor(
+  summary: string,
+  filmCharacters: ReadonlyArray<Pick<ShortFilmWorkflow["film_characters"][number], "source_actor_id" | "film_character_name">>,
+  sourceActors: ReadonlyArray<Pick<ShortFilmWorkflow["source_actors"][number], "source_actor_id" | "source_actor_name">>,
+) {
+  const normalizedSummary = summary.toLocaleLowerCase("vi");
+  const sourceNames = new Map(sourceActors.map((actor) => [actor.source_actor_id, actor.source_actor_name]));
+  const matches = filmCharacters.flatMap((character, order) => {
+    const names = [character.film_character_name, sourceNames.get(character.source_actor_id) ?? ""]
+      .map((name) => name.trim().toLocaleLowerCase("vi"))
+      .filter((name) => name.length >= 2 && !/^nhân vật\s+[a-z0-9]+$/iu.test(name));
+    const positions = names.map((name) => normalizedSummary.indexOf(name)).filter((position) => position >= 0);
+    return positions.length ? [{ source_actor_id: character.source_actor_id, position: Math.min(...positions), order }] : [];
+  });
+  matches.sort((left, right) => left.position - right.position || left.order - right.order);
+  return matches[0]?.source_actor_id ?? filmCharacters[0]?.source_actor_id;
+}
+
 export function shortFilmScriptApprovalIsFresh(
   existing: Pick<ShortFilmWorkflow, "full_script" | "script_review">,
   incoming: Pick<ShortFilmWorkflow, "full_script" | "script_review">,

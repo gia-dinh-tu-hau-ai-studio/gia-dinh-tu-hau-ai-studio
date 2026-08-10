@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createShortFilmShotPlan, selectShortFilmPilotSamples, shortFilmNextAction, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { createShortFilmShotPlan, matchShortFilmShotActor, selectShortFilmPilotSamples, shortFilmNextAction, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
@@ -237,7 +237,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     if (!value.shot_plan) return;
     const usedActorIds = new Set(value.film_characters.map((character) => character.source_actor_id));
     const usedActors = libraryActors.filter((actor) => usedActorIds.has(actor.source_actor_id));
-    const firstActor = usedActors[0];
+    const actorById = new Map(usedActors.map((actor) => [actor.source_actor_id, actor]));
     patch({
       production_readiness: {
         identity_masters: usedActors
@@ -270,13 +270,17 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         dialogue_shot_ids: value.dialogue.dialogue_mode === "DIALOGUE"
           ? value.shot_plan.shots.map((_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`)
           : [],
-        speaker_locks: value.dialogue.dialogue_mode === "DIALOGUE" ? value.shot_plan.shots.map((_, index) => ({
-          shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
-          speaker_source_actor_id: firstActor?.source_actor_id ?? "",
-          voice_master_id: firstActor?.voice_master_id ?? "",
-          visible_face_count: 1,
-          selection_mode: "SINGLE_VISIBLE_FACE" as const,
-        })) : [],
+        speaker_locks: value.dialogue.dialogue_mode === "DIALOGUE" ? value.shot_plan.shots.map((summary, index) => {
+          const actorId = matchShortFilmShotActor(summary, value.film_characters, value.source_actors);
+          const actor = actorId ? actorById.get(actorId) : undefined;
+          return {
+            shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+            speaker_source_actor_id: actor?.source_actor_id ?? "",
+            voice_master_id: actor?.voice_master_id ?? "",
+            visible_face_count: 1,
+            selection_mode: "SINGLE_VISIBLE_FACE" as const,
+          };
+        }) : [],
         dialogue_line_approvals: [],
         review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
       },
