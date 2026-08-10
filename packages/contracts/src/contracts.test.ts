@@ -903,6 +903,75 @@ test("media providers unlock only after all production readiness gates pass", ()
   assert.equal(shortFilmNextAction(parsed), "PREPARE_SHORT_FILM_PILOT");
 });
 
+test("pilot readiness requires only selected pilot shots while full-film readiness remains locked", () => {
+  const executionShots = Array.from({ length: 5 }, (_, index) => ({
+    shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+    summary: `Pilot scope shot ${index + 1}`,
+    runway_prompt: `Cinematic approved identity shot ${index + 1}`,
+    duration_seconds: 5,
+    risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 2 ? ["MOTION_PERFORMANCE"] : [],
+  }));
+  const pilotShotIds = executionShots.slice(0, 4).map((shot) => shot.shot_id);
+  const scopedReadiness = {
+    ...productionReadiness,
+    keyframes: pilotShotIds.map((shot_id) => ({ ...productionReadiness.keyframes[0], shot_id })),
+    dialogue_shot_ids: executionShots.map((shot) => shot.shot_id),
+    speaker_locks: pilotShotIds.map((shot_id) => ({ ...productionReadiness.speaker_locks[0], shot_id })),
+    dialogue_line_approvals: pilotShotIds.map((shot_id, index) => ({
+      ...productionReadiness.dialogue_line_approvals[0],
+      line_id: `LINE-${String(index + 1).padStart(3, "0")}`,
+      shot_id,
+    })),
+  };
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    pilot_sampling: {
+      sample_count: 2,
+      clip_duration_seconds: 10,
+      selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
+      required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE"],
+    },
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: {
+      summary: "Five shots",
+      shots: executionShots.map((shot) => shot.summary),
+      execution_shots: executionShots,
+      review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    },
+    production_readiness: scopedReadiness,
+  });
+
+  assert.deepEqual(shortFilmMediaExecutionDecision(parsed, "PILOT"), { provider_execution_allowed: true, blockers: [] });
+  assert.match(shortFilmProductionReadinessBlockers(parsed, "FULL").join(","), /KEYFRAME_IDENTITY_APPROVAL_INCOMPLETE/);
+  assert.equal(shortFilmMediaExecutionDecision(parsed, "FULL").provider_execution_allowed, false);
+  assert.equal(shortFilmNextAction(parsed), "PREPARE_SHORT_FILM_PILOT");
+});
+
+test("pilot budget approval is durable and cannot authorize a different sampling plan", () => {
+  const approvedBudget = {
+    sample_count: 3,
+    clip_duration_seconds: 15,
+    runway_credits_cap: 700,
+    elevenlabs_credits_cap: 1_000,
+    sync_usd_cap: 3,
+    decision: "APPROVE",
+    reviewer: "PROJECT_OWNER",
+    reviewed_at: "2026-08-11T00:00:00.000Z",
+  } as const;
+  const parsed = ShortFilmWorkflowSchema.parse({ ...shortFilmWorkflow, pilot_budget_approval: approvedBudget });
+  assert.equal(parsed.pilot_budget_approval?.runway_credits_cap, 700);
+  assert.throws(() => ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    pilot_sampling: {
+      sample_count: 2,
+      clip_duration_seconds: 10,
+      selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
+      required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE"],
+    },
+    pilot_budget_approval: approvedBudget,
+  }), /PILOT_BUDGET_APPROVAL_MUST_MATCH_SAMPLING/);
+});
+
 test("legacy voice records remain parseable but media stays locked until voice audition gates pass", () => {
   const legacy = {
     ...productionReadiness,

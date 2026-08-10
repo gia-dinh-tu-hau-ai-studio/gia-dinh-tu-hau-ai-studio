@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createShortFilmShotPlan, shortFilmNextAction, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { createShortFilmShotPlan, selectShortFilmPilotSamples, shortFilmNextAction, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
@@ -136,7 +136,7 @@ function readinessBlockerLabel(blocker: string) {
   return blocker;
 }
 
-export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, checkingScriptAccount = false, scriptGenerationReady = false, scriptBudgetSummary, scriptAccountSummary, pilotBudgetApproved = false, pilotBudgetSummary, onApprovePilotBudget }: Props) {
+export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onGenerateScript, onRequestBudgetApproval, generatingScript = false, checkingScriptAccount = false, scriptGenerationReady = false, scriptBudgetSummary, scriptAccountSummary, pilotBudgetSummary, onApprovePilotBudget }: Props) {
   const [shotPlanError, setShotPlanError] = useState("");
   const libraryActors = eligibleCharacters
     .filter((actor) => actor.readiness?.master_identity === "APPROVED_LOCKED")
@@ -290,8 +290,11 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     } });
   }
 
+  const persistedPilotBudgetApproved = Boolean(value.pilot_budget_approval);
+  const pilotSamples = value.shot_plan?.execution_shots.length ? selectShortFilmPilotSamples(value) : [];
+  const pilotShotIds = [...new Set(pilotSamples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id)))];
   const readinessBlockers = value.production_readiness
-    ? shortFilmProductionReadinessBlockers(value)
+    ? shortFilmProductionReadinessBlockers(value, pilotApproved ? "FULL" : "PILOT")
     : ["PRODUCTION_READINESS_MISSING"];
   const productionReady = readinessBlockers.length === 0;
   const nextAction = shortFilmNextAction(value);
@@ -422,14 +425,17 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
       <fieldset disabled={value.shot_plan?.review.decision !== "APPROVE"} className={value.shot_plan?.review.decision !== "APPROVE" ? "locked-stage" : ""}>
         <legend>Khóa nhân vật, giọng và keyframe</legend>
         <p className="gate-note">Hệ thống kiểm tra Character Master, Voice Master, người nói và keyframe trước khi cho phép tạo clip mẫu.</p>
-        <div className={`budget-approval ${pilotBudgetApproved ? "approved" : "pending"}`}>
+        <div className={`budget-approval ${persistedPilotBudgetApproved ? "approved" : "pending"}`}>
           <div>
-            <strong>{pilotBudgetApproved ? "NGÂN SÁCH 3 CLIP ĐÃ DUYỆT" : "DUYỆT NGÂN SÁCH 3 CLIP PILOT"}</strong>
+            <strong>{persistedPilotBudgetApproved ? "NGÂN SÁCH 3 CLIP ĐÃ DUYỆT" : "DUYỆT NGÂN SÁCH 3 CLIP PILOT"}</strong>
             <p>{pilotBudgetSummary ?? "3 clip × 15 giây · Runway tối đa 700 credits · ElevenLabs tối đa 1.000 credits · Sync tối đa 3 USD."}</p>
             <small>Chỉ áp dụng cho đợt pilot; không duyệt sản xuất toàn phim.</small>
           </div>
-          <button className={pilotBudgetApproved ? "action-completed" : "action-current"} disabled={pilotBudgetApproved} type="button" onClick={onApprovePilotBudget}>
-            {pilotBudgetApproved ? "✓ Đã duyệt ngân sách pilot" : "Duyệt ngân sách 3 clip pilot"}
+          <button className={persistedPilotBudgetApproved ? "action-completed" : "action-current"} disabled={persistedPilotBudgetApproved} type="button" onClick={() => {
+            patch({ pilot_budget_approval: { sample_count: 3, clip_duration_seconds: 15, runway_credits_cap: 700, elevenlabs_credits_cap: 1_000, sync_usd_cap: 3, decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() } });
+            onApprovePilotBudget?.();
+          }}>
+            {persistedPilotBudgetApproved ? "✓ Đã duyệt ngân sách pilot" : "Duyệt ngân sách 3 clip pilot"}
           </button>
         </div>
         {!value.production_readiness && <button type="button" onClick={initializeProductionReadiness}>Chuẩn bị danh sách kiểm tra</button>}
@@ -437,8 +443,52 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
           <div className="provider-grid">
             <span>Character Master: <strong>{value.production_readiness.identity_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</strong></span>
             <span>Voice Master: <strong>{value.production_readiness.voice_masters.length}/{new Set(value.film_characters.map((character) => character.source_actor_id)).size}</strong></span>
-            <span>Keyframe đã duyệt: <strong>{value.production_readiness.keyframes.length}/{value.shot_plan?.shots.length ?? 0}</strong></span>
-            <span>Cảnh thoại đã khóa: <strong>{value.production_readiness.dialogue_line_approvals.length}/{value.production_readiness.dialogue_shot_ids.length}</strong></span>
+            <span>Keyframe pilot đã duyệt: <strong>{value.production_readiness.keyframes.filter((item) => pilotShotIds.includes(item.shot_id)).length}/{pilotShotIds.length}</strong></span>
+            <span>Cảnh pilot có thoại đã khóa: <strong>{value.production_readiness.dialogue_line_approvals.filter((item) => pilotShotIds.includes(item.shot_id)).length}/{pilotShotIds.length}</strong></span>
+          </div>
+          <p className="gate-note">Giai đoạn này chỉ kiểm tra các cảnh thuộc 3 clip pilot: {pilotShotIds.join(", ")}. Các cảnh còn lại chỉ bị khóa sau khi bạn duyệt pilot và quyết định sản xuất toàn phim.</p>
+          <div className="pilot-readiness-list">
+            {pilotShotIds.map((shotId) => {
+              const shot = value.shot_plan?.execution_shots.find((item) => item.shot_id === shotId);
+              const speaker = value.production_readiness?.speaker_locks.find((item) => item.shot_id === shotId);
+              const speakerActor = availableActors.find((actor) => actor.source_actor_id === speaker?.speaker_source_actor_id) ?? availableActors[0];
+              const masterReferenceUrl = speakerActor && "body_reference_url" in speakerActor
+                ? speakerActor.body_reference_url ?? speakerActor.face_reference_url
+                : undefined;
+              const keyframe = value.production_readiness?.keyframes.find((item) => item.shot_id === shotId);
+              const line = value.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === shotId);
+              return <article className="workflow-card" key={`pilot-${shotId}`}>
+                <h4>{shotId} · {shot?.summary}</h4>
+                <label><span>Nhân vật nói *</span><select value={speaker?.speaker_source_actor_id ?? speakerActor?.source_actor_id ?? ""} onChange={(event) => {
+                  if (!value.production_readiness) return;
+                  const voice = value.production_readiness.voice_masters.find((item) => item.source_actor_id === event.target.value);
+                  const speaker_locks = value.production_readiness.speaker_locks.map((item) => item.shot_id === shotId ? { ...item, speaker_source_actor_id: event.target.value, voice_master_id: voice?.voice_master_id ?? "" } : item);
+                  const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.filter((item) => item.shot_id !== shotId);
+                  patch({ production_readiness: { ...value.production_readiness, speaker_locks, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                }}>{value.film_characters.map((character) => <option key={character.source_actor_id} value={character.source_actor_id}>{character.film_character_name}</option>)}</select></label>
+                <div className="approval-gate compact-approval">
+                  <strong>Ảnh Master dùng làm keyframe</strong>
+                  {masterReferenceUrl ? <a href={masterReferenceUrl} rel="noreferrer" target="_blank">Mở ảnh nhân vật đã duyệt để xem</a> : <p className="operation-error">Nhân vật chưa có ảnh Master hợp lệ.</p>}
+                  <button className={keyframe ? "action-completed" : "action-current"} disabled={!masterReferenceUrl || Boolean(keyframe)} type="button" onClick={() => {
+                    if (!value.production_readiness || !masterReferenceUrl) return;
+                    const keyframes = value.production_readiness.keyframes.filter((item) => item.shot_id !== shotId);
+                    keyframes.push({ shot_id: shotId, approved_image_url: masterReferenceUrl, identity_decision: "APPROVE", continuity_decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() });
+                    patch({ production_readiness: { ...value.production_readiness, keyframes, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                  }}>{keyframe ? "✓ Đã duyệt ảnh" : "Duyệt ảnh Master cho cảnh này"}</button>
+                </div>
+                <label><span>Câu thoại dùng trong clip *</span><textarea placeholder="Ví dụ: Con sẽ kiểm tra công ty trước, không chuyển tiền giữ chỗ đâu má." value={line?.dialogue_text ?? ""} onChange={(event) => {
+                  if (!value.production_readiness || !speaker) return;
+                  const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.filter((item) => item.shot_id !== shotId);
+                  if (event.target.value.trim()) dialogue_line_approvals.push({ line_id: `LINE-${shotId.slice(-3)}`, shot_id: shotId, speaker_source_actor_id: speaker.speaker_source_actor_id, voice_master_id: speaker.voice_master_id, dialogue_text: event.target.value, target_duration_ms: Math.min(10_000, Math.max(1_500, event.target.value.trim().length * 90)), pronunciation_decision: "PENDING", age_casting_decision: "PENDING", timing_decision: "PENDING", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() });
+                  patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                }} /></label>
+                <button className={line?.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "action-completed" : "action-current"} disabled={!line?.dialogue_text.trim()} type="button" onClick={() => {
+                  if (!value.production_readiness) return;
+                  const dialogue_line_approvals = value.production_readiness.dialogue_line_approvals.map((item) => item.shot_id === shotId ? { ...item, pronunciation_decision: "APPROVE" as const, age_casting_decision: "APPROVE" as const, timing_decision: "APPROVE" as const, reviewed_at: new Date().toISOString() } : item);
+                  patch({ production_readiness: { ...value.production_readiness, dialogue_line_approvals, review: { ...value.production_readiness.review, decision: "PENDING" } } });
+                }}>{line?.pronunciation_decision === "APPROVE" && line.age_casting_decision === "APPROVE" && line.timing_decision === "APPROVE" ? "✓ Đã duyệt thoại, giọng và khẩu hình" : "Duyệt thoại, độ tuổi giọng và khẩu hình"}</button>
+              </article>;
+            })}
           </div>
           {readinessBlockers.length > 0 && <div className="operation-error" role="status">
             <strong>Còn điều kiện cần hoàn tất</strong>

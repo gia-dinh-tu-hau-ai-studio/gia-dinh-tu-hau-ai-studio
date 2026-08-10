@@ -60,7 +60,7 @@ export class ShortFilmPilotExecutionService {
     const context = await this.registry.getShortFilmExecutionContext(projectId);
     const existing = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
     if (existing && existing.value.status !== "FAILED") return { ...existing.value, idempotent_replay: true };
-    const media = shortFilmMediaExecutionDecision(context.workflow);
+    const media = shortFilmMediaExecutionDecision(context.workflow, "PILOT");
     if (!media.provider_execution_allowed) throw new Error(`PRODUCTION_READINESS_BLOCKED:${media.blockers.join(",")}`);
     const samples = selectShortFilmPilotSamples(context.workflow);
     const uniqueShots = [...new Map(samples.flatMap((sample) => sample.shots.map((shot) => [shot.shot_id, shot]))).values()];

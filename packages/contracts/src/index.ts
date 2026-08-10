@@ -508,6 +508,16 @@ export const ShortFilmWorkflowSchema = z
       selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
       required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
     }),
+    pilot_budget_approval: z.object({
+      sample_count: z.literal(3),
+      clip_duration_seconds: z.literal(15),
+      runway_credits_cap: z.literal(700),
+      elevenlabs_credits_cap: z.literal(1_000),
+      sync_usd_cap: z.literal(3),
+      decision: z.literal("APPROVE"),
+      reviewer: z.literal("PROJECT_OWNER"),
+      reviewed_at: z.string().datetime(),
+    }).optional(),
     shot_plan: z
       .object({
         summary: z.string().trim().min(1),
@@ -588,6 +598,12 @@ export const ShortFilmWorkflowSchema = z
     }
     if (workflow.pilot_batch && workflow.pilot_batch.samples.length !== workflow.pilot_sampling.sample_count) {
       context.addIssue({ code: "custom", message: "Số clip pilot phải khớp cấu hình sampling", path: ["pilot_batch", "samples"] });
+    }
+    if (workflow.pilot_budget_approval && (
+      workflow.pilot_sampling.sample_count !== workflow.pilot_budget_approval.sample_count ||
+      workflow.pilot_sampling.clip_duration_seconds !== workflow.pilot_budget_approval.clip_duration_seconds
+    )) {
+      context.addIssue({ code: "custom", message: "PILOT_BUDGET_APPROVAL_MUST_MATCH_SAMPLING", path: ["pilot_budget_approval"] });
     }
     const legacyPilotApproved = workflow.pilot?.review.decision === "APPROVE" && shortFilmQcPassed(workflow.pilot.qc);
     const batchPilotApproved = workflow.pilot_batch?.batch_review.decision === "APPROVE";
@@ -823,7 +839,7 @@ export const ShortFilmPilotPreparationRequestSchema = z.object({
   if (!request.workflow.shot_plan) {
     context.addIssue({ code: "custom", message: "Shot Plan là bắt buộc trước khi chuẩn bị pilot", path: ["workflow", "shot_plan"] });
   }
-  const mediaDecision = shortFilmMediaExecutionDecision(request.workflow);
+  const mediaDecision = shortFilmMediaExecutionDecision(request.workflow, "PILOT");
   for (const blocker of mediaDecision.blockers) {
     context.addIssue({ code: "custom", message: blocker, path: ["workflow", "production_readiness"] });
   }
@@ -905,6 +921,7 @@ export function shortFilmProductionReadinessBlockers(
     z.infer<typeof ShortFilmWorkflowSchema>,
     "source_actors" | "film_characters" | "dialogue" | "shot_plan" | "production_readiness"
   >,
+  scope: "PILOT" | "FULL" = "FULL",
 ) {
   const readiness = workflow.production_readiness;
   const blockers: string[] = [];
@@ -934,10 +951,18 @@ export function shortFilmProductionReadinessBlockers(
     }
   }
 
-  const expectedKeyframes = workflow.shot_plan?.shots.length ?? 0;
-  const expectedShotIds = new Set(Array.from({ length: expectedKeyframes }, (_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`));
+  const allShotIds = new Set(
+    workflow.shot_plan?.execution_shots.length
+      ? workflow.shot_plan.execution_shots.map((shot) => shot.shot_id)
+      : (workflow.shot_plan?.shots ?? []).map((_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`),
+  );
+  const pilotShotIds = workflow.shot_plan?.execution_shots.length
+    ? selectShortFilmPilotSamples(workflow as ShortFilmWorkflow).flatMap((sample) => sample.shots.map((shot) => shot.shot_id))
+    : [...allShotIds].slice(0, Math.max(1, Math.min(allShotIds.size, (workflow as ShortFilmWorkflow).pilot_sampling?.sample_count ?? 3)));
+  const expectedShotIds = scope === "PILOT" ? new Set(pilotShotIds) : allShotIds;
+  const expectedKeyframes = expectedShotIds.size;
   const approvedShotIds = new Set(readiness.keyframes.map((keyframe) => keyframe.shot_id));
-  if (expectedKeyframes === 0 || approvedShotIds.size !== expectedKeyframes || [...approvedShotIds].some((shotId) => !expectedShotIds.has(shotId))) {
+  if (expectedKeyframes === 0 || [...expectedShotIds].some((shotId) => !approvedShotIds.has(shotId))) {
     blockers.push("KEYFRAME_IDENTITY_APPROVAL_INCOMPLETE");
   }
 
@@ -946,9 +971,12 @@ export function shortFilmProductionReadinessBlockers(
     : workflow.dialogue.dialogue_mode === "VOICE_OVER"
       ? new Set<string>()
       : new Set(readiness.dialogue_shot_ids);
-  const speakerShotIds = new Set(readiness.speaker_locks.map((lock) => lock.shot_id));
+  const relevantSpeakerLocks = scope === "PILOT"
+    ? readiness.speaker_locks.filter((lock) => expectedDialogueShotIds.has(lock.shot_id))
+    : readiness.speaker_locks;
+  const speakerShotIds = new Set(relevantSpeakerLocks.map((lock) => lock.shot_id));
   const lineApprovalsByShot = new Map(readiness.dialogue_line_approvals.map((line) => [line.shot_id, line]));
-  for (const lock of readiness.speaker_locks) {
+  for (const lock of relevantSpeakerLocks) {
     if (!usedActorIds.has(lock.speaker_source_actor_id)) {
       blockers.push(`SPEAKER_NOT_IN_CAST:${lock.shot_id}`);
     }
@@ -971,7 +999,7 @@ export function shortFilmProductionReadinessBlockers(
   if (
     expectedDialogueShotIds.size !== speakerShotIds.size ||
     [...expectedDialogueShotIds].some((shotId) => !speakerShotIds.has(shotId)) ||
-    [...speakerShotIds].some((shotId) => !expectedDialogueShotIds.has(shotId))
+    (scope === "FULL" && [...speakerShotIds].some((shotId) => !expectedDialogueShotIds.has(shotId)))
   ) {
     blockers.push("SPEAKER_FACE_LOCKS_INCOMPLETE");
   }
@@ -979,8 +1007,8 @@ export function shortFilmProductionReadinessBlockers(
   return blockers;
 }
 
-export function shortFilmMediaExecutionDecision(workflow: ShortFilmWorkflow) {
-  const blockers = shortFilmProductionReadinessBlockers(workflow);
+export function shortFilmMediaExecutionDecision(workflow: ShortFilmWorkflow, scope: "PILOT" | "FULL" = "FULL") {
+  const blockers = shortFilmProductionReadinessBlockers(workflow, scope);
   return {
     provider_execution_allowed: blockers.length === 0,
     blockers,
@@ -992,7 +1020,11 @@ export function shortFilmNextAction(workflow: ShortFilmWorkflow) {
   if (workflow.script_review.decision !== "APPROVE") return "REVIEW_SHORT_FILM_SCRIPT" as const;
   if (!workflow.shot_plan) return "PREPARE_SHORT_FILM_SHOT_PLAN" as const;
   if (workflow.shot_plan.review.decision !== "APPROVE") return "REVIEW_SHORT_FILM_SHOT_PLAN" as const;
-  if (shortFilmProductionReadinessBlockers(workflow).length > 0) {
+  const pilotApproved = Boolean(
+    (workflow.pilot && workflow.pilot.review.decision === "APPROVE" && shortFilmQcPassed(workflow.pilot.qc)) ||
+    workflow.pilot_batch?.batch_review.decision === "APPROVE"
+  );
+  if (shortFilmProductionReadinessBlockers(workflow, pilotApproved ? "FULL" : "PILOT").length > 0) {
     return "LOCK_SHORT_FILM_PRODUCTION_READINESS" as const;
   }
   if (!workflow.pilot && !workflow.pilot_batch) return "PREPARE_SHORT_FILM_PILOT" as const;
