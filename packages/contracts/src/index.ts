@@ -397,6 +397,10 @@ export function providerBudgetApproved(plan: ProviderBudgetPlan) {
     plan.approval.approved_limit >= plan.estimate.total;
 }
 
+export function canResumeContractApproval(progress: { current_stage: string; next_action: string }) {
+  return progress.current_stage === "CONTRACT" && progress.next_action === "APPROVE_CONTRACT";
+}
+
 const ShortFilmProgressActions = [
   ["APPROVE_CONTRACT", "Khởi tạo và duyệt hợp đồng"],
   ["REVIEW_SHORT_FILM_SCRIPT", "Duyệt kịch bản"],
