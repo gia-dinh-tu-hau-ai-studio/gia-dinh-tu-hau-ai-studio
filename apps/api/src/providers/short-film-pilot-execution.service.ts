@@ -87,6 +87,16 @@ type PilotExecutionManifest = {
   outputs?: Array<{ sample_id: string; drive_file_id: string; video_url: string; width: 1920; height: 1080 }>;
 };
 
+export function rejectPilotForRestart(manifest: PilotExecutionManifest, rejectedAt: string) {
+  if (manifest.status !== "AWAITING_PILOT_QC") throw new Error("PILOT_NOT_AWAITING_QC_REJECTION");
+  const archiveName = `SHORT_FILM_PILOT_REJECTED_${rejectedAt.replace(/[:.]/g, "-")}_${manifest.execution_id}.json`;
+  return {
+    archiveName,
+    archived: { ...manifest, qc_rejection: { decision: "REJECT" as const, reviewer: "PROJECT_OWNER" as const, rejected_at: rejectedAt } },
+    failed: { ...manifest, status: "FAILED" as const, heartbeat_at: rejectedAt, error: { stage: "PILOT_QC", message: "PILOT_REJECTED_BY_PROJECT_OWNER_FOR_RESTART" } },
+  };
+}
+
 @Injectable()
 export class ShortFilmPilotExecutionService {
   constructor(
@@ -154,21 +164,49 @@ export class ShortFilmPilotExecutionService {
     return { ...manifest, idempotent_replay: false };
   }
 
+  async rejectAndRestartForDialogueAudio(projectId: string, caps: PilotExecutionManifest["caps"]) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const existing = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
+    if (!existing) throw new Error("PILOT_EXECUTION_NOT_FOUND");
+    const rejectedAt = new Date().toISOString();
+    const rejected = rejectPilotForRestart(existing.value, rejectedAt);
+    await this.drive.writePilotJson(context.project_folder_id, rejected.archiveName, rejected.archived);
+    await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, rejected.failed);
+
+    const media = shortFilmMediaExecutionDecision(context.workflow, "PILOT");
+    if (!media.provider_execution_allowed) throw new Error(`PRODUCTION_READINESS_BLOCKED:${media.blockers.join(",")}`);
+    const approval = context.workflow.pilot_budget_approval;
+    if (!approval) throw new Error("PILOT_BUDGET_APPROVAL_REQUIRED");
+    if (caps.runway_credits > approval.runway_credits_cap || caps.elevenlabs_characters > approval.elevenlabs_credits_cap || caps.sync_usd > approval.sync_usd_cap) throw new Error("EXECUTION_CAP_EXCEEDS_APPROVED_BUDGET");
+    const samples = selectShortFilmPilotSamples(context.workflow);
+    const dialogueByShot = new Map(context.workflow.production_readiness!.dialogue_line_approvals.map((line) => [line.shot_id, line]));
+    const keyframeByShot = new Map(context.workflow.production_readiness!.keyframes.map((keyframe) => [keyframe.shot_id, keyframe.approved_image_url]));
+    const required = calculateShortFilmPilotBudget(context.workflow).required;
+    if (caps.runway_credits < required.runway_credits || caps.elevenlabs_characters < required.elevenlabs_characters || caps.sync_usd < required.sync_usd) throw new Error(`EXECUTION_CAP_TOO_LOW:RUNWAY=${required.runway_credits},ELEVENLABS=${required.elevenlabs_characters},SYNC=${required.sync_usd.toFixed(2)}`);
+    const tasks = samples.flatMap((sample) => sample.shots.map((shot) => {
+      if (!keyframeByShot.has(shot.shot_id)) throw new Error(`APPROVED_KEYFRAME_MISSING:${shot.shot_id}`);
+      return { sample_id: sample.sample_id, shot_id: shot.shot_id, runway_status: "PENDING_SUBMIT", dialogue_line_id: dialogueByShot.get(shot.shot_id)?.line_id };
+    }));
+    const now = new Date().toISOString();
+    const manifest: PilotExecutionManifest = { schema_version: "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1", execution_id: randomUUID(), project_id: projectId, status: "PREPARING_DIALOGUE_AUDIO", samples, tasks, caps, provider_calls_made: false, heartbeat_at: now, started_at: now };
+    await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
+    return { ...manifest, previous_execution_id: existing.value.execution_id, archived_manifest_name: rejected.archiveName };
+  }
+
   async status(projectId: string) {
     const context = await this.registry.getShortFilmExecutionContext(projectId);
     const stored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
     if (!stored) throw new Error("PILOT_EXECUTION_NOT_FOUND");
     const manifest = stored.value;
     if (["AWAITING_DIALOGUE_AUDIO_APPROVAL", "AWAITING_PILOT_QC", "FAILED"].includes(manifest.status)) return manifest;
-    const secrets = this.secrets();
-    const runway = new RunwayPilotProvider(secrets.runway);
-    const eleven = new ElevenLabsPilotProvider(secrets.eleven);
-    const sync = new SyncPilotProvider(secrets.sync);
     try {
     const dialogueByShot = new Map(context.workflow.production_readiness!.dialogue_line_approvals.map((line) => [line.shot_id, line]));
     const keyframeByShot = new Map(context.workflow.production_readiness!.keyframes.map((keyframe) => [keyframe.shot_id, keyframe.approved_image_url]));
     const shotsById = new Map(manifest.samples.flatMap((sample) => sample.shots.map((shot) => [shot.shot_id, shot])));
     if (manifest.status === "PREPARING_DIALOGUE_AUDIO") {
+      const elevenKey = process.env.ELEVENLABS_API_KEY?.trim();
+      if (!elevenKey) throw new Error("ELEVENLABS_API_KEY_NOT_CONFIGURED");
+      const eleven = new ElevenLabsPilotProvider(elevenKey);
       const pendingAudio = manifest.tasks.find((task) => task.dialogue_line_id && !task.audio_drive_file_id);
       if (pendingAudio) {
         const line = dialogueByShot.get(pendingAudio.shot_id);
@@ -194,6 +232,10 @@ export class ShortFilmPilotExecutionService {
       await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
       return manifest;
     }
+    const secrets = this.secrets();
+    const runway = new RunwayPilotProvider(secrets.runway);
+    const eleven = new ElevenLabsPilotProvider(secrets.eleven);
+    const sync = new SyncPilotProvider(secrets.sync);
     if (manifest.tasks.some((task) => task.dialogue_line_id && task.audio_review_decision !== "APPROVE")) throw new Error("RUNWAY_BLOCKED_DIALOGUE_AUDIO_NOT_APPROVED");
     const activeRunway = manifest.tasks.find((task) => !["PENDING_SUBMIT", "SUCCEEDED", "FAILED", "CANCELLED"].includes(task.runway_status));
     const pendingRunway = manifest.tasks.find((task) => task.runway_status === "PENDING_SUBMIT");
