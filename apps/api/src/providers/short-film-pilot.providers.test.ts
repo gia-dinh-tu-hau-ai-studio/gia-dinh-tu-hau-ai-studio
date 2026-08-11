@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
+import { verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -15,20 +16,29 @@ test("Runway submit uses current version and never accepts a shot over ten secon
   await assert.rejects(() => provider.submit({ imageUrl: "https://example.com/ref.jpg", prompt: "motion", durationSeconds: 11, ratio: "1280:720" }), /2-10/);
 });
 
-test("ElevenLabs returns audio and billing metadata without exposing the key", async () => {
+test("ElevenLabs uses a Vietnamese-capable model and returns billing metadata", async () => {
   let requestedUrl = "";
-  const provider = new ElevenLabsPilotProvider("secret", (async (url) => {
-    requestedUrl = String(url);
-    return new Response(new Uint8Array([1, 2, 3]), {
-      status: 200, headers: { "request-id": "req-1", "character-cost": "12" },
-    });
+  let request: RequestInit | undefined;
+  const provider = new ElevenLabsPilotProvider("secret", (async (url, init) => {
+    requestedUrl = String(url); request = init;
+    return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "request-id": "req-1", "character-cost": "12" } });
   }) as typeof fetch);
-  const output = await provider.synthesize({ voiceId: "voice-1", text: "Xin chào" });
+  const output = await provider.synthesize({ voiceId: "voice-1", text: "Xin chào", languageCode: "vi" });
   assert.equal(output.audio.length, 3);
   assert.equal(output.requestId, "req-1");
   assert.equal(output.characterCost, 12);
   assert.match(requestedUrl, /output_format=mp3_44100_128$/);
-  assert.doesNotMatch(requestedUrl, /mp3_44100_192/);
+  const body = JSON.parse(String(request?.body));
+  assert.equal(body.model_id, "eleven_v3");
+  assert.equal(body.language_code, "vi");
+});
+
+test("Vietnamese transcript gate rejects foreign or mismatched speech", () => {
+  const expected = "Chỗ tuyển dụng đàng hoàng không ai bắt đóng tiền giữ việc.";
+  assert.equal(verifyVietnameseTranscript(expected, { text: expected, languageCode: "vie", languageProbability: 0.99 }).passed, true);
+  assert.equal(verifyVietnameseTranscript(expected, { text: "This job requires payment.", languageCode: "en", languageProbability: 0.99 }).passed, false);
+  assert.equal(verifyVietnameseTranscript(expected, { text: "Xin chào", languageCode: "vi", languageProbability: 0.99 }).passed, false);
+  assert.equal(verifyVietnameseTranscript(expected, { text: expected, languageCode: "vi", languageProbability: 0.4 }).passed, false);
 });
 
 test("private Drive keyframes use a Runway ephemeral upload instead of exposing a protected URL", async () => {
