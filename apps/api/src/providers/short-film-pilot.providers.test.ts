@@ -3,7 +3,7 @@ import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
-import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -124,6 +124,15 @@ test("owner cannot approve a technically valid reel when any acting QC item is m
   const rejected = reviewEvaluationReelGate({ ...manifest }, { decision: "REJECT", qc: { ...completeQc, cinematic_setting: false } }, "now");
   assert.equal(rejected.status, "REJECTED");
   assert.equal(rejected.error?.message, "EVALUATION_REEL_REJECTED_BY_PROJECT_OWNER");
+});
+
+test("rejected evaluation reel is archived before a new paid execution can replace it", () => {
+  const manifest = { execution_id: "old-execution", status: "AWAITING_REEL_QC", heartbeat_at: "before" } as Parameters<typeof rejectEvaluationReelForRestart>[0];
+  const rejected = rejectEvaluationReelForRestart(manifest, "2026-08-11T17:00:00.000Z");
+  assert.match(rejected.archiveName, /old-execution\.json$/);
+  assert.equal(rejected.archived.status, "REJECTED");
+  assert.equal(rejected.archived.error.message, "EVALUATION_REEL_REJECTED_BY_PROJECT_OWNER_FOR_RESTART");
+  assert.throws(() => rejectEvaluationReelForRestart({ ...manifest, status: "PROCESSING_RUNWAY" }, "now"), /NOT_AWAITING_QC_RESTART/);
 });
 
 test("failed reel resumes from first unfinished shot and preserves completed paid work", () => {
