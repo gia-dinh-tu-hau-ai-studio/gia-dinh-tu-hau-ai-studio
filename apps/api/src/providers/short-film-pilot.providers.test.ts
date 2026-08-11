@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
+import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, selectLockedCharacterPerformanceImage, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
@@ -83,6 +84,12 @@ test("Act-Two identity input uses the clear face reference, never the distant fu
   assert.equal(selectLockedCharacterPerformanceImage(character), character.face_reference_url);
   assert.notEqual(selectLockedCharacterPerformanceImage(character), character.body_reference_url);
   assert.throws(() => selectLockedCharacterPerformanceImage({ ...character, face_reference_url: "" }), /FACE_REFERENCE_MISSING/);
+});
+
+test("full-body-only Character Masters use a deterministic upper-body face derivative", () => {
+  assert.match(LOCKED_FACE_CROP_FILTER, /ih\/2/);
+  assert.match(LOCKED_FACE_CROP_FILTER, /scale=1024:1024/);
+  assert.match(LOCKED_FACE_CROP_FILTER, /lanczos/);
 });
 
 test("Runway Character Performance uses locked image for identity and video only for acting", async () => {
