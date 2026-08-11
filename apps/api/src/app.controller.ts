@@ -118,6 +118,33 @@ export class AppController {
     return new StreamableFile(await this.pilotExecution.output(projectId, fileId), { type: "video/mp4", disposition: "inline" });
   }
 
+  @Post("projects/:projectId/short-film/pilot/performance-variant/execute")
+  executeShortFilmPilotPerformanceVariant(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const request = z.object({
+      execution_approved: z.literal(true),
+      shot_id: z.string().min(1),
+      duration_seconds: z.literal(10),
+      caps: z.object({ runway_credits: z.literal(120), sync_usd: z.literal(0.5) }),
+    }).parse(body);
+    return this.pilotExecution.startPerformanceVariant(projectId, request);
+  }
+
+  @Get("projects/:projectId/short-film/pilot/performance-variant/status")
+  shortFilmPilotPerformanceVariantStatus(@Param("projectId") projectId: string) {
+    return this.pilotExecution.performanceVariantStatus(projectId);
+  }
+
+  @Post("projects/:projectId/short-film/pilot/performance-variant/review")
+  reviewShortFilmPilotPerformanceVariant(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const request = z.object({ decision: z.enum(["APPROVE", "REJECT"]) }).parse(body);
+    return this.pilotExecution.reviewPerformanceVariant(projectId, request.decision);
+  }
+
+  @Get("projects/:projectId/short-film/pilot/performance-variant/outputs/:fileId")
+  async shortFilmPilotPerformanceVariantOutput(@Param("projectId") projectId: string, @Param("fileId") fileId: string) {
+    return new StreamableFile(await this.pilotExecution.performanceVariantOutput(projectId, fileId), { type: "video/mp4", disposition: "inline" });
+  }
+
   @Post("projects/:projectId/short-film/full-film/execute")
   executeShortFilmFullFilm(@Param("projectId") projectId: string, @Body() body: unknown) {
     const request = z.object({

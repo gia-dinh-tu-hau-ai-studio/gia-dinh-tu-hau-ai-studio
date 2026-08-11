@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
-import { rejectPilotForRestart, reviewDialogueAudioGate, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, rejectPilotForRestart, reviewDialogueAudioGate, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -58,6 +58,26 @@ test("rejected pilot is archived before a new dialogue-audio execution can start
   assert.equal(result.archived.qc_rejection.decision, "REJECT");
   assert.equal(result.failed.status, "FAILED");
   assert.throws(() => rejectPilotForRestart({ ...manifest, status: "PROCESSING_RUNWAY" } as Parameters<typeof rejectPilotForRestart>[0], "2026-08-11T02:00:00.000Z"), /NOT_AWAITING_QC_REJECTION/);
+});
+
+test("performance variant is limited to one approved ten-second shot and exact provider caps", () => {
+  const task = { sample_id: "S3", shot_id: "SHOT-005", runway_status: "SUCCEEDED", dialogue_line_id: "LINE-005", audio_drive_file_id: "audio-5", transcript_verified: true, audio_review_decision: "APPROVE" as const, final_drive_file_id: "old-final" };
+  const pilot = { status: "AWAITING_PILOT_QC" as const, execution_id: "pilot-1", tasks: [task] };
+  assert.equal(validatePilotPerformanceVariant({ pilot, shotId: "SHOT-005", durationSeconds: 10, caps: { runway_credits: 120, sync_usd: 0.5 } }), task);
+  assert.throws(() => validatePilotPerformanceVariant({ pilot, shotId: "SHOT-005", durationSeconds: 5, caps: { runway_credits: 120, sync_usd: 0.5 } }), /DURATION_MUST_BE_10/);
+  assert.throws(() => validatePilotPerformanceVariant({ pilot, shotId: "SHOT-006", durationSeconds: 10, caps: { runway_credits: 120, sync_usd: 0.5 } }), /ONLY_APPROVED_FOR_SHOT_005/);
+  assert.throws(() => validatePilotPerformanceVariant({ pilot, shotId: "SHOT-005", durationSeconds: 10, caps: { runway_credits: 121, sync_usd: 0.5 } }), /CAP_MISMATCH/);
+  assert.throws(() => validatePilotPerformanceVariant({ pilot: { ...pilot, tasks: [{ ...task, audio_review_decision: "PENDING" }] }, shotId: "SHOT-005", durationSeconds: 10, caps: { runway_credits: 120, sync_usd: 0.5 } }), /SOURCE_EVIDENCE_INCOMPLETE/);
+});
+
+test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
+  const target = { sample_id: "S3", shot_id: "SHOT-005", runway_status: "SUCCEEDED", final_drive_file_id: "old-final" };
+  const untouched = { sample_id: "S3", shot_id: "SHOT-006", runway_status: "SUCCEEDED", final_drive_file_id: "other-final" };
+  const pilot = { status: "AWAITING_PILOT_QC" as const, tasks: [target, untouched] };
+  approvePilotPerformanceVariant({ variant: { status: "AWAITING_VARIANT_QC", shot_id: "SHOT-005", final_drive_file_id: "variant-final" }, pilot });
+  assert.equal(target.final_drive_file_id, "variant-final");
+  assert.equal(untouched.final_drive_file_id, "other-final");
+  assert.throws(() => approvePilotPerformanceVariant({ variant: { status: "PROCESSING_SYNC", shot_id: "SHOT-005", final_drive_file_id: "unsafe" }, pilot }), /NOT_AWAITING_QC/);
 });
 
 test("private Drive keyframes use a Runway ephemeral upload instead of exposing a protected URL", async () => {

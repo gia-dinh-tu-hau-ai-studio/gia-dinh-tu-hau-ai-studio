@@ -10,6 +10,7 @@ import { assembleVideoBuffers } from "../media/short-film-pilot-assembler";
 import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const MANIFEST_NAME = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
+const VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1.json";
 
 type PilotTask = {
   sample_id: string;
@@ -86,6 +87,61 @@ type PilotExecutionManifest = {
   runway_assets?: RunwayAssetCache;
   outputs?: Array<{ sample_id: string; drive_file_id: string; video_url: string; width: 1920; height: 1080 }>;
 };
+
+type PilotPerformanceVariantManifest = {
+  schema_version: "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1";
+  execution_id: string;
+  project_id: string;
+  source_execution_id: string;
+  shot_id: string;
+  duration_seconds: 10;
+  status: "PROCESSING_RUNWAY" | "PROCESSING_SYNC" | "AWAITING_VARIANT_QC" | "APPROVED" | "FAILED";
+  caps: { runway_credits: 120; sync_usd: 0.5 };
+  performance_prompt: string;
+  source_audio_drive_file_id: string;
+  runway_task_id?: string;
+  runway_status?: string;
+  runway_output_url?: string;
+  sync_generation_id?: string;
+  sync_status?: string;
+  sync_output_url?: string;
+  final_drive_file_id?: string;
+  video_url?: string;
+  heartbeat_at: string;
+  started_at: string;
+  reviewed_at?: string;
+  error?: { stage: string; message: string };
+  runway_assets?: RunwayAssetCache;
+};
+
+export function validatePilotPerformanceVariant(input: {
+  pilot: Pick<PilotExecutionManifest, "status" | "execution_id" | "tasks">;
+  shotId: string;
+  durationSeconds: number;
+  caps: { runway_credits: number; sync_usd: number };
+}) {
+  if (input.pilot.status !== "AWAITING_PILOT_QC") throw new Error("PILOT_VARIANT_REQUIRES_AWAITING_QC");
+  if (input.shotId !== "SHOT-005") throw new Error("PILOT_VARIANT_ONLY_APPROVED_FOR_SHOT_005");
+  if (input.durationSeconds !== 10) throw new Error("PILOT_VARIANT_DURATION_MUST_BE_10_SECONDS");
+  if (input.caps.runway_credits !== 120 || input.caps.sync_usd !== 0.5) throw new Error("PILOT_VARIANT_CAP_MISMATCH");
+  const sourceTask = input.pilot.tasks.find((task) => task.shot_id === input.shotId);
+  if (!sourceTask?.final_drive_file_id || !sourceTask.audio_drive_file_id || !sourceTask.transcript_verified || sourceTask.audio_review_decision !== "APPROVE") {
+    throw new Error("PILOT_VARIANT_SOURCE_EVIDENCE_INCOMPLETE");
+  }
+  return sourceTask;
+}
+
+export function approvePilotPerformanceVariant(input: {
+  variant: Pick<PilotPerformanceVariantManifest, "status" | "shot_id" | "final_drive_file_id">;
+  pilot: Pick<PilotExecutionManifest, "status" | "tasks">;
+}) {
+  if (input.variant.status !== "AWAITING_VARIANT_QC" || !input.variant.final_drive_file_id) throw new Error("PILOT_VARIANT_NOT_AWAITING_QC");
+  if (input.pilot.status !== "AWAITING_PILOT_QC") throw new Error("PILOT_NOT_AWAITING_QC");
+  const target = input.pilot.tasks.find((task) => task.shot_id === input.variant.shot_id);
+  if (!target) throw new Error("PILOT_VARIANT_TARGET_NOT_FOUND");
+  target.final_drive_file_id = input.variant.final_drive_file_id;
+  return target;
+}
 
 export function rejectPilotForRestart(manifest: PilotExecutionManifest, rejectedAt: string) {
   if (manifest.status !== "AWAITING_PILOT_QC") throw new Error("PILOT_NOT_AWAITING_QC_REJECTION");
@@ -345,6 +401,128 @@ export class ShortFilmPilotExecutionService {
     manifest.heartbeat_at = reviewedAt;
     await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
     return manifest;
+  }
+
+  async startPerformanceVariant(projectId: string, request: { shot_id: string; duration_seconds: number; caps: { runway_credits: number; sync_usd: number } }) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const pilotStored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
+    if (!pilotStored) throw new Error("PILOT_EXECUTION_NOT_FOUND");
+    const existing = await this.drive.readPilotJson<PilotPerformanceVariantManifest>(context.project_folder_id, VARIANT_MANIFEST_NAME);
+    if (existing && existing.value.status !== "FAILED") return { ...existing.value, idempotent_replay: true };
+    const sourceTask = validatePilotPerformanceVariant({ pilot: pilotStored.value, shotId: request.shot_id, durationSeconds: request.duration_seconds, caps: request.caps });
+    const shot = pilotStored.value.samples.flatMap((sample) => sample.shots).find((item) => item.shot_id === request.shot_id);
+    const keyframe = context.workflow.production_readiness?.keyframes.find((item) => item.shot_id === request.shot_id);
+    const dialogue = context.workflow.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === request.shot_id);
+    if (!shot || !keyframe?.approved_image_url || !dialogue) throw new Error("PILOT_VARIANT_LOCKED_SOURCE_MISSING");
+    const account = await checkProviderAccounts({
+      project_type: "SHORT_FILM",
+      duration_seconds: 10,
+      providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "PROJECT_OWNER", lip_sync: "SYNC" },
+    }, process.env);
+    if (account.providers.some((provider) => ["INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED"].includes(provider.status))) {
+      throw new Error(`PROVIDER_ACCOUNT_BLOCKED:${account.providers.map((provider) => `${provider.provider}:${provider.status}`).join(",")}`);
+    }
+    const performancePrompt = [
+      shot.runway_prompt,
+      `Exact approved Vietnamese dialogue meaning: ${dialogue.dialogue_text}`,
+      "Tường Vy holds her phone naturally; her finger pauses immediately before confirming a money transfer.",
+      "Her shoulders and face show believable tension; on the words about two million dong she looks toward Phương An for reassurance.",
+      "When explaining the promised refund on the first workday, she draws the phone back toward her body and hesitates.",
+      "Natural Vietnamese television drama acting, restrained hand motion, correct eyeline and conversational timing; no random gestures, no dancing, no identity change.",
+      "Preserve the exact approved Character Master face, body proportions, wardrobe, room continuity and camera axis. No text, subtitles or foreign-language mouth movement.",
+    ].join(" ");
+    const now = new Date().toISOString();
+    const manifest: PilotPerformanceVariantManifest = {
+      schema_version: "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1",
+      execution_id: randomUUID(), project_id: projectId, source_execution_id: pilotStored.value.execution_id,
+      shot_id: request.shot_id, duration_seconds: 10, status: "PROCESSING_RUNWAY", caps: { runway_credits: 120, sync_usd: 0.5 },
+      performance_prompt: performancePrompt, source_audio_drive_file_id: sourceTask.audio_drive_file_id as string,
+      heartbeat_at: now, started_at: now,
+    };
+    await this.drive.writePilotJson(context.project_folder_id, VARIANT_MANIFEST_NAME, manifest);
+    return { ...manifest, idempotent_replay: false };
+  }
+
+  async performanceVariantStatus(projectId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<PilotPerformanceVariantManifest>(context.project_folder_id, VARIANT_MANIFEST_NAME);
+    if (!stored) throw new Error("PILOT_VARIANT_NOT_FOUND");
+    const manifest = stored.value;
+    if (["AWAITING_VARIANT_QC", "APPROVED", "FAILED"].includes(manifest.status)) return manifest;
+    try {
+      const runwayKey = process.env.RUNWAYML_API_SECRET?.trim(), syncKey = process.env.SYNC_API_KEY?.trim();
+      if (!runwayKey || !syncKey) throw new Error("PILOT_VARIANT_PROVIDER_SECRET_NOT_CONFIGURED");
+      const runway = new RunwayPilotProvider(runwayKey), sync = new SyncPilotProvider(syncKey);
+      if (manifest.status === "PROCESSING_RUNWAY") {
+        if (!manifest.runway_task_id) {
+          const keyframe = context.workflow.production_readiness?.keyframes.find((item) => item.shot_id === manifest.shot_id)?.approved_image_url;
+          if (!keyframe) throw new Error("PILOT_VARIANT_APPROVED_KEYFRAME_MISSING");
+          manifest.runway_assets ??= {};
+          const imageUri = await preparePrivateRunwayKeyframe({ referenceUrl: keyframe, cache: manifest.runway_assets, drive: this.drive, runway });
+          const submitted = await runway.submit({ imageUrl: imageUri, prompt: manifest.performance_prompt, durationSeconds: 10, ratio: "1280:720" });
+          manifest.runway_task_id = submitted.taskId; manifest.runway_status = "PENDING";
+        } else {
+          const state = await runway.status(manifest.runway_task_id);
+          manifest.runway_status = state.status; manifest.runway_output_url = state.outputUrl;
+          if (["FAILED", "CANCELLED"].includes(state.status)) throw new Error(`PILOT_VARIANT_RUNWAY_FAILED:${state.errorCode ?? state.error ?? state.status}`);
+          if (state.status === "SUCCEEDED") manifest.status = "PROCESSING_SYNC";
+        }
+      } else if (manifest.status === "PROCESSING_SYNC") {
+        if (!manifest.sync_generation_id) {
+          const audio = await this.drive.downloadBuffer(manifest.source_audio_drive_file_id);
+          const generation = await sync.submit({ videoUrl: manifest.runway_output_url as string, audio, fileName: `${manifest.shot_id}_PERFORMANCE_VARIANT.mp3` });
+          manifest.sync_generation_id = generation.generationId; manifest.sync_status = "PENDING";
+        } else {
+          const state = await sync.status(manifest.sync_generation_id);
+          manifest.sync_status = state.status; manifest.sync_output_url = state.outputUrl;
+          if (["FAILED", "REJECTED"].includes(state.status ?? "")) throw new Error(`PILOT_VARIANT_SYNC_FAILED:${state.errorCode ?? state.error ?? state.status}`);
+          if (state.status === "COMPLETED") {
+            const response = await fetch(state.outputUrl as string, { signal: AbortSignal.timeout(60_000) });
+            if (!response.ok) throw new Error(`PILOT_VARIANT_OUTPUT_HTTP_${response.status}`);
+            const normalized = await assembleVideoBuffers([Buffer.from(await response.arrayBuffer())]);
+            const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, `${manifest.shot_id}_PERFORMANCE_VARIANT_10S_1920x1080.mp4`, "video/mp4", normalized);
+            manifest.final_drive_file_id = uploaded.id as string;
+            manifest.video_url = uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`;
+            manifest.status = "AWAITING_VARIANT_QC";
+          }
+        }
+      }
+      manifest.heartbeat_at = new Date().toISOString();
+      await this.drive.writePilotJson(context.project_folder_id, VARIANT_MANIFEST_NAME, manifest);
+      return manifest;
+    } catch (error) {
+      manifest.status = "FAILED";
+      manifest.error = { stage: "PILOT_PERFORMANCE_VARIANT", message: error instanceof Error ? error.message : String(error) };
+      manifest.heartbeat_at = new Date().toISOString();
+      await this.drive.writePilotJson(context.project_folder_id, VARIANT_MANIFEST_NAME, manifest);
+      return manifest;
+    }
+  }
+
+  async reviewPerformanceVariant(projectId: string, decision: "APPROVE" | "REJECT") {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const variantStored = await this.drive.readPilotJson<PilotPerformanceVariantManifest>(context.project_folder_id, VARIANT_MANIFEST_NAME);
+    const pilotStored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
+    if (!variantStored || !pilotStored) throw new Error("PILOT_VARIANT_NOT_FOUND");
+    const variant = variantStored.value, reviewedAt = new Date().toISOString();
+    if (decision === "APPROVE") {
+      approvePilotPerformanceVariant({ variant, pilot: pilotStored.value });
+      await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, pilotStored.value);
+      variant.status = "APPROVED";
+    } else {
+      if (variant.status !== "AWAITING_VARIANT_QC") throw new Error("PILOT_VARIANT_NOT_AWAITING_QC");
+      variant.status = "FAILED"; variant.error = { stage: "PILOT_VARIANT_QC", message: "PILOT_PERFORMANCE_VARIANT_REJECTED" };
+    }
+    variant.reviewed_at = reviewedAt; variant.heartbeat_at = reviewedAt;
+    await this.drive.writePilotJson(context.project_folder_id, VARIANT_MANIFEST_NAME, variant);
+    return variant;
+  }
+
+  async performanceVariantOutput(projectId: string, fileId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<PilotPerformanceVariantManifest>(context.project_folder_id, VARIANT_MANIFEST_NAME);
+    if (stored?.value.final_drive_file_id !== fileId) throw new Error("PILOT_VARIANT_OUTPUT_NOT_FOUND");
+    return this.drive.downloadBuffer(fileId);
   }
 
   async audio(projectId: string, fileId: string) {
