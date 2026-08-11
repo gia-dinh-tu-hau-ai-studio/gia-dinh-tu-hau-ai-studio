@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
-import { reviewDialogueAudioGate, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { rejectPilotForRestart, reviewDialogueAudioGate, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -48,6 +48,16 @@ test("dialogue audio approval gate blocks Runway until every verified audio is o
   assert.deepEqual(reviewDialogueAudioGate(manifest, "APPROVE", "2026-08-11T00:00:00Z"), { status: "PROCESSING_RUNWAY" });
   assert.equal(manifest.tasks[0].audio_review_decision, "APPROVE");
   assert.throws(() => reviewDialogueAudioGate({ status: "AWAITING_DIALOGUE_AUDIO_APPROVAL", tasks: [{ sample_id: "S1", shot_id: "SHOT-001", runway_status: "PENDING_SUBMIT", dialogue_line_id: "LINE-001", transcript_verified: false }] }, "APPROVE", "2026-08-11T00:00:00Z"), /EVIDENCE_INCOMPLETE/);
+});
+
+test("rejected pilot is archived before a new dialogue-audio execution can start", () => {
+  const manifest = { schema_version: "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1", execution_id: "exec-old", project_id: "project-1", status: "AWAITING_PILOT_QC", samples: [], tasks: [], caps: { runway_credits: 1, elevenlabs_characters: 1, sync_usd: 1 }, provider_calls_made: true, heartbeat_at: "before", started_at: "before" } as Parameters<typeof rejectPilotForRestart>[0];
+  const result = rejectPilotForRestart(manifest, "2026-08-11T02:00:00.000Z");
+  assert.match(result.archiveName, /SHORT_FILM_PILOT_REJECTED_.*exec-old\.json/);
+  assert.equal(result.archived.status, "AWAITING_PILOT_QC");
+  assert.equal(result.archived.qc_rejection.decision, "REJECT");
+  assert.equal(result.failed.status, "FAILED");
+  assert.throws(() => rejectPilotForRestart({ ...manifest, status: "PROCESSING_RUNWAY" } as Parameters<typeof rejectPilotForRestart>[0], "2026-08-11T02:00:00.000Z"), /NOT_AWAITING_QC_REJECTION/);
 });
 
 test("private Drive keyframes use a Runway ephemeral upload instead of exposing a protected URL", async () => {

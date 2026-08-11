@@ -93,6 +93,15 @@ export class AppController {
     return this.pilotExecution.status(projectId);
   }
 
+  @Post("projects/:projectId/short-film/pilot/reject-and-restart")
+  rejectAndRestartShortFilmPilot(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const request = z.object({
+      rejection_confirmed: z.literal(true),
+      caps: z.object({ runway_credits: z.number().int().positive(), elevenlabs_characters: z.number().int().nonnegative(), sync_usd: z.number().nonnegative() }),
+    }).parse(body);
+    return this.pilotExecution.rejectAndRestartForDialogueAudio(projectId, request.caps);
+  }
+
   @Post("projects/:projectId/short-film/pilot/dialogue-audio/review")
   reviewShortFilmPilotDialogueAudio(@Param("projectId") projectId: string, @Body() body: unknown) {
     const request = z.object({ decision: z.enum(["APPROVE", "REJECT"]) }).parse(body);
