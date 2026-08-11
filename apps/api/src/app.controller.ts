@@ -124,7 +124,7 @@ export class AppController {
       execution_approved: z.literal(true),
       shot_id: z.string().min(1),
       duration_seconds: z.literal(10),
-      caps: z.object({ runway_credits: z.literal(120), sync_usd: z.literal(0.5) }),
+      caps: z.object({ runway_credits: z.literal(50), sync_usd: z.literal(0.5) }),
     }).parse(body);
     return this.pilotExecution.startPerformanceVariant(projectId, request);
   }

@@ -10,7 +10,8 @@ import { assembleVideoBuffers } from "../media/short-film-pilot-assembler";
 import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const MANIFEST_NAME = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
-const VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1.json";
+const LEGACY_VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1.json";
+const VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_IDENTITY_LOCKED_V2.json";
 
 type PilotTask = {
   sample_id: string;
@@ -89,16 +90,21 @@ type PilotExecutionManifest = {
 };
 
 type PilotPerformanceVariantManifest = {
-  schema_version: "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1";
+  schema_version: "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_IDENTITY_LOCKED_V2";
   execution_id: string;
   project_id: string;
   source_execution_id: string;
   shot_id: string;
   duration_seconds: 10;
   status: "PROCESSING_RUNWAY" | "PROCESSING_SYNC" | "AWAITING_VARIANT_QC" | "APPROVED" | "FAILED";
-  caps: { runway_credits: 120; sync_usd: 0.5 };
+  caps: { runway_credits: 50; sync_usd: 0.5 };
   performance_prompt: string;
   source_audio_drive_file_id: string;
+  performance_reference_drive_file_id: string;
+  locked_character_id: string;
+  locked_master_identity_id: string;
+  locked_master_identity_version?: string;
+  locked_character_image_url: string;
   runway_task_id?: string;
   runway_status?: string;
   runway_output_url?: string;
@@ -123,12 +129,32 @@ export function validatePilotPerformanceVariant(input: {
   if (input.pilot.status !== "AWAITING_PILOT_QC") throw new Error("PILOT_VARIANT_REQUIRES_AWAITING_QC");
   if (input.shotId !== "SHOT-005") throw new Error("PILOT_VARIANT_ONLY_APPROVED_FOR_SHOT_005");
   if (input.durationSeconds !== 10) throw new Error("PILOT_VARIANT_DURATION_MUST_BE_10_SECONDS");
-  if (input.caps.runway_credits !== 120 || input.caps.sync_usd !== 0.5) throw new Error("PILOT_VARIANT_CAP_MISMATCH");
+  if (input.caps.runway_credits !== 50 || input.caps.sync_usd !== 0.5) throw new Error("PILOT_VARIANT_CAP_MISMATCH");
   const sourceTask = input.pilot.tasks.find((task) => task.shot_id === input.shotId);
   if (!sourceTask?.final_drive_file_id || !sourceTask.audio_drive_file_id || !sourceTask.transcript_verified || sourceTask.audio_review_decision !== "APPROVE") {
     throw new Error("PILOT_VARIANT_SOURCE_EVIDENCE_INCOMPLETE");
   }
   return sourceTask;
+}
+
+export function validateLockedCharacterPerformanceSource(input: {
+  dialogue: { speaker_source_actor_id: string };
+  keyframe: { approved_image_url: string };
+  character?: {
+    character_id: string;
+    body_reference_url: string;
+    face_reference_url: string;
+    master_identity_id?: string;
+    master_identity_version?: string;
+    readiness: { master_identity: string };
+  };
+}) {
+  const character = input.character;
+  if (!character || character.character_id !== input.dialogue.speaker_source_actor_id) throw new Error("LOCKED_CHARACTER_ASSIGNMENT_MISMATCH");
+  if (character.readiness.master_identity !== "APPROVED_LOCKED" || !character.master_identity_id) throw new Error("CHARACTER_MASTER_NOT_APPROVED_LOCKED");
+  if (!character.face_reference_url || !character.body_reference_url) throw new Error("CHARACTER_MASTER_REFERENCE_SET_INCOMPLETE");
+  if (input.keyframe.approved_image_url !== character.body_reference_url) throw new Error("APPROVED_KEYFRAME_NOT_FROM_LOCKED_CHARACTER_MASTER");
+  return character;
 }
 
 export function approvePilotPerformanceVariant(input: {
@@ -421,11 +447,19 @@ export class ShortFilmPilotExecutionService {
     if (!pilotStored) throw new Error("PILOT_EXECUTION_NOT_FOUND");
     const existing = await this.drive.readPilotJson<PilotPerformanceVariantManifest>(context.project_folder_id, VARIANT_MANIFEST_NAME);
     if (existing && existing.value.status !== "FAILED") return { ...existing.value, idempotent_replay: true };
+    const legacy = await this.drive.readPilotJson<PilotPerformanceVariantManifest>(context.project_folder_id, LEGACY_VARIANT_MANIFEST_NAME);
+    if (!legacy?.value.final_drive_file_id || legacy.value.status !== "AWAITING_VARIANT_QC") throw new Error("IDENTITY_CORRECTION_REQUIRES_UNAPPROVED_PERFORMANCE_REFERENCE");
     const sourceTask = validatePilotPerformanceVariant({ pilot: pilotStored.value, shotId: request.shot_id, durationSeconds: request.duration_seconds, caps: request.caps });
     const shot = pilotStored.value.samples.flatMap((sample) => sample.shots).find((item) => item.shot_id === request.shot_id);
     const keyframe = context.workflow.production_readiness?.keyframes.find((item) => item.shot_id === request.shot_id);
     const dialogue = context.workflow.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === request.shot_id);
     if (!shot || !keyframe?.approved_image_url || !dialogue) throw new Error("PILOT_VARIANT_LOCKED_SOURCE_MISSING");
+    const library = await this.characters.listEligibleCharacters();
+    const lockedCharacter = validateLockedCharacterPerformanceSource({
+      dialogue,
+      keyframe,
+      character: library.find((character) => character.character_id === dialogue.speaker_source_actor_id),
+    });
     const account = await checkProviderAccounts({
       project_type: "SHORT_FILM",
       duration_seconds: 10,
@@ -437,10 +471,15 @@ export class ShortFilmPilotExecutionService {
     const performancePrompt = buildPilotPerformancePrompt(shot.runway_prompt, dialogue.dialogue_text);
     const now = new Date().toISOString();
     const manifest: PilotPerformanceVariantManifest = {
-      schema_version: "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1",
+      schema_version: "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_IDENTITY_LOCKED_V2",
       execution_id: randomUUID(), project_id: projectId, source_execution_id: pilotStored.value.execution_id,
-      shot_id: request.shot_id, duration_seconds: 10, status: "PROCESSING_RUNWAY", caps: { runway_credits: 120, sync_usd: 0.5 },
+      shot_id: request.shot_id, duration_seconds: 10, status: "PROCESSING_RUNWAY", caps: { runway_credits: 50, sync_usd: 0.5 },
       performance_prompt: performancePrompt, source_audio_drive_file_id: sourceTask.audio_drive_file_id as string,
+      performance_reference_drive_file_id: legacy.value.final_drive_file_id,
+      locked_character_id: lockedCharacter.character_id,
+      locked_master_identity_id: lockedCharacter.master_identity_id as string,
+      locked_master_identity_version: lockedCharacter.master_identity_version,
+      locked_character_image_url: lockedCharacter.body_reference_url,
       heartbeat_at: now, started_at: now,
     };
     await this.drive.writePilotJson(context.project_folder_id, VARIANT_MANIFEST_NAME, manifest);
@@ -459,11 +498,11 @@ export class ShortFilmPilotExecutionService {
       const runway = new RunwayPilotProvider(runwayKey), sync = new SyncPilotProvider(syncKey);
       if (manifest.status === "PROCESSING_RUNWAY") {
         if (!manifest.runway_task_id) {
-          const keyframe = context.workflow.production_readiness?.keyframes.find((item) => item.shot_id === manifest.shot_id)?.approved_image_url;
-          if (!keyframe) throw new Error("PILOT_VARIANT_APPROVED_KEYFRAME_MISSING");
           manifest.runway_assets ??= {};
-          const imageUri = await preparePrivateRunwayKeyframe({ referenceUrl: keyframe, cache: manifest.runway_assets, drive: this.drive, runway });
-          const submitted = await runway.submit({ imageUrl: imageUri, prompt: manifest.performance_prompt, durationSeconds: 10, ratio: "1280:720" });
+          const imageUri = await preparePrivateRunwayKeyframe({ referenceUrl: manifest.locked_character_image_url, cache: manifest.runway_assets, drive: this.drive, runway });
+          const referenceVideo = await this.drive.downloadBuffer(manifest.performance_reference_drive_file_id);
+          const referenceUri = await runway.uploadVideo({ content: referenceVideo, fileName: `${manifest.shot_id}_APPROVED_PERFORMANCE_REFERENCE.mp4`, mimeType: "video/mp4" });
+          const submitted = await runway.submitCharacterPerformance({ characterImageUrl: imageUri, referenceVideoUrl: referenceUri.uri, ratio: "1280:720" });
           manifest.runway_task_id = submitted.taskId; manifest.runway_status = "PENDING";
         } else {
           const state = await runway.status(manifest.runway_task_id);
