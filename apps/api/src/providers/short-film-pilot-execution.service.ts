@@ -29,6 +29,8 @@ type PilotTask = {
   transcript_language_probability?: number;
   transcript_similarity?: number;
   transcript_verified?: boolean;
+  audio_review_decision?: "PENDING" | "APPROVE" | "REJECT";
+  audio_reviewed_at?: string;
   sync_generation_id?: string;
   sync_status?: string;
   sync_output_url?: string;
@@ -59,11 +61,21 @@ export function verifyVietnameseTranscript(expected: string, evidence: { text: s
   return { passed: ["vi", "vie"].includes(evidence.languageCode.toLowerCase()) && evidence.languageProbability >= 0.8 && similarity >= 0.82, similarity };
 }
 
+export function reviewDialogueAudioGate(input: Pick<PilotExecutionManifest, "status" | "tasks">, decision: "APPROVE" | "REJECT", reviewedAt: string) {
+  if (input.status !== "AWAITING_DIALOGUE_AUDIO_APPROVAL") throw new Error("DIALOGUE_AUDIO_NOT_AWAITING_APPROVAL");
+  const dialogueTasks = input.tasks.filter((task) => task.dialogue_line_id);
+  if (!dialogueTasks.length || dialogueTasks.some((task) => !task.audio_drive_file_id || !task.transcript_verified)) throw new Error("DIALOGUE_AUDIO_EVIDENCE_INCOMPLETE");
+  for (const task of dialogueTasks) { task.audio_review_decision = decision; task.audio_reviewed_at = reviewedAt; }
+  return decision === "APPROVE"
+    ? { status: "PROCESSING_RUNWAY" as const }
+    : { status: "FAILED" as const, error: { stage: "DIALOGUE_AUDIO_APPROVAL", message: "DIALOGUE_AUDIO_REJECTED_BY_PROJECT_OWNER" } };
+}
+
 type PilotExecutionManifest = {
   schema_version: "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1";
   execution_id: string;
   project_id: string;
-  status: "SUBMITTING" | "PROCESSING_RUNWAY" | "PROCESSING_SYNC" | "READY_FOR_ASSEMBLY" | "AWAITING_PILOT_QC" | "FAILED";
+  status: "SUBMITTING" | "PREPARING_DIALOGUE_AUDIO" | "AWAITING_DIALOGUE_AUDIO_APPROVAL" | "PROCESSING_RUNWAY" | "PROCESSING_SYNC" | "READY_FOR_ASSEMBLY" | "AWAITING_PILOT_QC" | "FAILED";
   samples: ReturnType<typeof selectShortFilmPilotSamples>;
   tasks: PilotTask[];
   caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number };
@@ -136,7 +148,7 @@ export class ShortFilmPilotExecutionService {
     }));
     const manifest: PilotExecutionManifest = {
       schema_version: "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1", execution_id: randomUUID(), project_id: projectId,
-      status: "PROCESSING_RUNWAY", samples, tasks, caps, provider_calls_made: false, heartbeat_at: now, started_at: now,
+      status: "PREPARING_DIALOGUE_AUDIO", samples, tasks, caps, provider_calls_made: false, heartbeat_at: now, started_at: now,
     };
     await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
     return { ...manifest, idempotent_replay: false };
@@ -147,7 +159,7 @@ export class ShortFilmPilotExecutionService {
     const stored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
     if (!stored) throw new Error("PILOT_EXECUTION_NOT_FOUND");
     const manifest = stored.value;
-    if (["AWAITING_PILOT_QC", "FAILED"].includes(manifest.status)) return manifest;
+    if (["AWAITING_DIALOGUE_AUDIO_APPROVAL", "AWAITING_PILOT_QC", "FAILED"].includes(manifest.status)) return manifest;
     const secrets = this.secrets();
     const runway = new RunwayPilotProvider(secrets.runway);
     const eleven = new ElevenLabsPilotProvider(secrets.eleven);
@@ -156,6 +168,33 @@ export class ShortFilmPilotExecutionService {
     const dialogueByShot = new Map(context.workflow.production_readiness!.dialogue_line_approvals.map((line) => [line.shot_id, line]));
     const keyframeByShot = new Map(context.workflow.production_readiness!.keyframes.map((keyframe) => [keyframe.shot_id, keyframe.approved_image_url]));
     const shotsById = new Map(manifest.samples.flatMap((sample) => sample.shots.map((shot) => [shot.shot_id, shot])));
+    if (manifest.status === "PREPARING_DIALOGUE_AUDIO") {
+      const pendingAudio = manifest.tasks.find((task) => task.dialogue_line_id && !task.audio_drive_file_id);
+      if (pendingAudio) {
+        const line = dialogueByShot.get(pendingAudio.shot_id);
+        if (!line) throw new Error(`APPROVED_DIALOGUE_MISSING:${pendingAudio.shot_id}`);
+        const library = await this.characters.listEligibleCharacters();
+        const voice = context.workflow.production_readiness!.voice_masters.find((item) => item.voice_master_id === line.voice_master_id);
+        const providerVoiceId = voice ? library.find((item) => item.character_id === voice.source_actor_id)?.elevenlabs_voice_id : undefined;
+        if (!providerVoiceId) throw new Error(`ELEVENLABS_VOICE_ID_MISSING:${line.voice_master_id}`);
+        if (context.workflow.dialogue.language !== "vi-VN-southwest" || voice?.locale !== "vi-VN-southwest") throw new Error(`VIETNAMESE_LANGUAGE_LOCK_MISSING:${line.line_id}`);
+        if (voice.source_actor_id !== line.speaker_source_actor_id || voice.voice_master_id !== line.voice_master_id) throw new Error(`VOICE_SPEAKER_LOCK_MISMATCH:${line.line_id}`);
+        const audio = await eleven.synthesize({ voiceId: providerVoiceId, text: line.dialogue_text, languageCode: "vi" });
+        const transcript = await eleven.transcribeVietnamese(audio.audio);
+        const verification = verifyVietnameseTranscript(line.dialogue_text, transcript);
+        Object.assign(pendingAudio, { voice_master_id: voice.voice_master_id, elevenlabs_voice_id: providerVoiceId, tts_model_id: audio.modelId, tts_language_code: audio.languageCode, transcript_text: transcript.text, transcript_language_code: transcript.languageCode, transcript_language_probability: transcript.languageProbability, transcript_similarity: verification.similarity, transcript_verified: verification.passed, audio_review_decision: "PENDING" });
+        if (!verification.passed) throw new Error(`VIETNAMESE_AUDIO_VERIFICATION_FAILED:${line.line_id}:LANG=${transcript.languageCode}:PROB=${transcript.languageProbability.toFixed(3)}:SIM=${verification.similarity.toFixed(3)}`);
+        const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, `${pendingAudio.sample_id}_${pendingAudio.shot_id}.mp3`, "audio/mpeg", audio.audio);
+        pendingAudio.audio_drive_file_id = uploaded.id as string;
+        pendingAudio.elevenlabs_request_id = audio.requestId;
+        manifest.provider_calls_made = true;
+      }
+      if (manifest.tasks.filter((task) => task.dialogue_line_id).every((task) => task.audio_drive_file_id && task.transcript_verified)) manifest.status = "AWAITING_DIALOGUE_AUDIO_APPROVAL";
+      manifest.heartbeat_at = new Date().toISOString();
+      await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
+      return manifest;
+    }
+    if (manifest.tasks.some((task) => task.dialogue_line_id && task.audio_review_decision !== "APPROVE")) throw new Error("RUNWAY_BLOCKED_DIALOGUE_AUDIO_NOT_APPROVED");
     const activeRunway = manifest.tasks.find((task) => !["PENDING_SUBMIT", "SUCCEEDED", "FAILED", "CANCELLED"].includes(task.runway_status));
     const pendingRunway = manifest.tasks.find((task) => task.runway_status === "PENDING_SUBMIT");
     if (!activeRunway && pendingRunway) {
@@ -250,6 +289,27 @@ export class ShortFilmPilotExecutionService {
       await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
       return manifest;
     }
+  }
+
+  async reviewDialogueAudio(projectId: string, decision: "APPROVE" | "REJECT") {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
+    if (!stored) throw new Error("DIALOGUE_AUDIO_NOT_AWAITING_APPROVAL");
+    const manifest = stored.value;
+    const reviewedAt = new Date().toISOString();
+    const transition = reviewDialogueAudioGate(manifest, decision, reviewedAt);
+    manifest.status = transition.status;
+    if ("error" in transition) manifest.error = transition.error;
+    manifest.heartbeat_at = reviewedAt;
+    await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
+    return manifest;
+  }
+
+  async audio(projectId: string, fileId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
+    if (!stored?.value.tasks.some((task) => task.audio_drive_file_id === fileId && task.transcript_verified)) throw new Error("PILOT_AUDIO_NOT_FOUND");
+    return this.drive.downloadBuffer(fileId);
   }
 
   async output(projectId: string, fileId: string) {

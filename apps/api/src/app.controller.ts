@@ -93,6 +93,17 @@ export class AppController {
     return this.pilotExecution.status(projectId);
   }
 
+  @Post("projects/:projectId/short-film/pilot/dialogue-audio/review")
+  reviewShortFilmPilotDialogueAudio(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const request = z.object({ decision: z.enum(["APPROVE", "REJECT"]) }).parse(body);
+    return this.pilotExecution.reviewDialogueAudio(projectId, request.decision);
+  }
+
+  @Get("projects/:projectId/short-film/pilot/dialogue-audio/:fileId")
+  async shortFilmPilotDialogueAudio(@Param("projectId") projectId: string, @Param("fileId") fileId: string) {
+    return new StreamableFile(await this.pilotExecution.audio(projectId, fileId), { type: "audio/mpeg", disposition: "inline" });
+  }
+
   @Get("projects/:projectId/short-film/pilot/outputs/:fileId")
   async shortFilmPilotOutput(@Param("projectId") projectId: string, @Param("fileId") fileId: string) {
     return new StreamableFile(await this.pilotExecution.output(projectId, fileId), { type: "video/mp4", disposition: "inline" });
