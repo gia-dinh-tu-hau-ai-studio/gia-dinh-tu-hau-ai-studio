@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
 import { approveProviderBudgetForProjectCreation, calculateShortFilmPilotBudget, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmPilotBudgetApprovalIsSufficient, shortFilmScriptProvider, shortFilmScriptReadyForProjectCreation, synchronizeShortFilmIntakeFields, type ProviderBudgetPlan, type ShortFilmResumeSnapshot, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
+import { EvaluationReelQcPanel } from "./evaluation-reel-qc-panel";
 
 type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
 type IdentityMode = "LIBRARY_MASTER" | "ORIGINAL_FACE_COMPOSITE";
@@ -1611,6 +1612,7 @@ export function ProjectIntakeForm() {
           {shortFilmSaveResult && <ResultDetails value={shortFilmSaveResult} />}
         </section>
       )}
+      {createdProject && projectType === "SHORT_FILM" && createdProject.next_action !== "APPROVE_CONTRACT" && <EvaluationReelQcPanel projectId={createdProject.project_id} />}
       {createdProject?.next_action === "PREPARE_SHORT_FILM_PILOT" && (
         <section className="confirmation-panel">
           <div>
