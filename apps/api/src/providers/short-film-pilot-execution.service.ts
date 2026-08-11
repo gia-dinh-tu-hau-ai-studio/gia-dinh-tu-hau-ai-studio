@@ -417,7 +417,7 @@ export class ShortFilmPilotExecutionService {
     const account = await checkProviderAccounts({
       project_type: "SHORT_FILM",
       duration_seconds: 10,
-      providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "PROJECT_OWNER", lip_sync: "SYNC" },
+      providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "APPROVED_VOICE_MASTER", lip_sync: "SYNC" },
     }, process.env);
     if (account.providers.some((provider) => ["INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED"].includes(provider.status))) {
       throw new Error(`PROVIDER_ACCOUNT_BLOCKED:${account.providers.map((provider) => `${provider.provider}:${provider.status}`).join(",")}`);
