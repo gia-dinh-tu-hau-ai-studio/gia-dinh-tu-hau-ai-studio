@@ -3,7 +3,7 @@ import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
-import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, selectLockedCharacterPerformanceImage, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -69,6 +69,14 @@ test("performance variant is limited to one approved ten-second shot and exact p
   assert.throws(() => validatePilotPerformanceVariant({ pilot, shotId: "SHOT-006", durationSeconds: 10, caps: { runway_credits: 50, sync_usd: 0.5 } }), /ONLY_APPROVED_FOR_SHOT_005/);
   assert.throws(() => validatePilotPerformanceVariant({ pilot, shotId: "SHOT-005", durationSeconds: 10, caps: { runway_credits: 121, sync_usd: 0.5 } }), /CAP_MISMATCH/);
   assert.throws(() => validatePilotPerformanceVariant({ pilot: { ...pilot, tasks: [{ ...task, audio_review_decision: "PENDING" }] }, shotId: "SHOT-005", durationSeconds: 10, caps: { runway_credits: 50, sync_usd: 0.5 } }), /SOURCE_EVIDENCE_INCOMPLETE/);
+});
+
+test("30-second evaluation reel requires the exact one-time approved provider caps", () => {
+  const caps = { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 };
+  assert.doesNotThrow(() => validateEvaluationReelRequest({ durationSeconds: 30, caps }));
+  assert.throws(() => validateEvaluationReelRequest({ durationSeconds: 20, caps }), /DURATION_MUST_BE_30/);
+  assert.throws(() => validateEvaluationReelRequest({ durationSeconds: 30, caps: { ...caps, runway_credits: 433 } }), /CAP_MISMATCH/);
+  assert.throws(() => validateEvaluationReelRequest({ durationSeconds: 30, caps: { ...caps, sync_usd: 1.81 } }), /CAP_MISMATCH/);
 });
 
 test("identity correction requires the shot keyframe to be the assigned approved and locked Character Master", () => {
