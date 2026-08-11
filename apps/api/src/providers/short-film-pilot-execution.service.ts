@@ -7,7 +7,7 @@ import { ProjectRegistryConnector } from "../connectors/google-sheets/project-re
 import { checkProviderAccounts } from "./provider-account-preflight";
 import { ElevenLabsPilotProvider, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { assembleVideoBuffers } from "../media/short-film-pilot-assembler";
-import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
+import { preparePrivateRunwayCharacterFace, preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const MANIFEST_NAME = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
 const LEGACY_VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1.json";
@@ -105,6 +105,7 @@ type PilotPerformanceVariantManifest = {
   locked_master_identity_id: string;
   locked_master_identity_version?: string;
   locked_character_image_url: string;
+  locked_character_body_url: string;
   runway_task_id?: string;
   runway_status?: string;
   runway_output_url?: string;
@@ -487,6 +488,7 @@ export class ShortFilmPilotExecutionService {
       // Act-Two must receive the clear face reference. The body reference remains
       // the approved keyframe/provenance gate and the reference video supplies motion.
       locked_character_image_url: selectLockedCharacterPerformanceImage(lockedCharacter),
+      locked_character_body_url: lockedCharacter.body_reference_url,
       heartbeat_at: now, started_at: now,
     };
     await this.drive.writePilotJson(context.project_folder_id, VARIANT_MANIFEST_NAME, manifest);
@@ -506,7 +508,7 @@ export class ShortFilmPilotExecutionService {
       if (manifest.status === "PROCESSING_RUNWAY") {
         if (!manifest.runway_task_id) {
           manifest.runway_assets ??= {};
-          const imageUri = await preparePrivateRunwayKeyframe({ referenceUrl: manifest.locked_character_image_url, cache: manifest.runway_assets, drive: this.drive, runway });
+          const imageUri = await preparePrivateRunwayCharacterFace({ faceReferenceUrl: manifest.locked_character_image_url, bodyReferenceUrl: manifest.locked_character_body_url, cache: manifest.runway_assets, drive: this.drive, runway });
           const referenceVideo = await this.drive.downloadBuffer(manifest.performance_reference_drive_file_id);
           const referenceUri = await runway.uploadVideo({ content: referenceVideo, fileName: `${manifest.shot_id}_APPROVED_PERFORMANCE_REFERENCE.mp4`, mimeType: "video/mp4" });
           const submitted = await runway.submitCharacterPerformance({ characterImageUrl: imageUri, referenceVideoUrl: referenceUri.uri, ratio: "1280:720" });
