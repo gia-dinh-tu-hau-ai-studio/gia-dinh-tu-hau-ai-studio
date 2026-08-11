@@ -6,12 +6,13 @@ import { CharacterLibraryConnector } from "../connectors/google-sheets/character
 import { ProjectRegistryConnector } from "../connectors/google-sheets/project-registry.connector";
 import { checkProviderAccounts } from "./provider-account-preflight";
 import { ElevenLabsPilotProvider, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
-import { assembleVideoBuffers } from "../media/short-film-pilot-assembler";
+import { assembleVideoBuffers, trimVideoBuffer } from "../media/short-film-pilot-assembler";
 import { preparePrivateRunwayCharacterFace, preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const MANIFEST_NAME = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
 const LEGACY_VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1.json";
 const VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_IDENTITY_LOCKED_V2.json";
+const EVALUATION_REEL_MANIFEST_NAME = "SHORT_FILM_PILOT_EVALUATION_REEL_30S_V1.json";
 
 type PilotTask = {
   sample_id: string;
@@ -120,6 +121,46 @@ type PilotPerformanceVariantManifest = {
   error?: { stage: string; message: string };
   runway_assets?: RunwayAssetCache;
 };
+
+type EvaluationReelTask = {
+  shot_id: string;
+  character_id: string;
+  master_identity_id: string;
+  face_reference_url: string;
+  body_reference_url: string;
+  source_video_drive_file_id: string;
+  audio_drive_file_id: string;
+  runway_task_id?: string;
+  runway_status?: string;
+  runway_output_url?: string;
+  sync_generation_id?: string;
+  sync_status?: string;
+  sync_output_url?: string;
+  completed_video?: string;
+  runway_assets?: RunwayAssetCache;
+};
+
+type EvaluationReelManifest = {
+  schema_version: "SHORT_FILM_PILOT_EVALUATION_REEL_30S_V1";
+  execution_id: string;
+  project_id: string;
+  source_execution_id: string;
+  duration_seconds: 30;
+  status: "PROCESSING_RUNWAY" | "PROCESSING_SYNC" | "ASSEMBLING" | "AWAITING_REEL_QC" | "FAILED";
+  caps: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8 };
+  tasks: EvaluationReelTask[];
+  current_task_index: number;
+  final_drive_file_id?: string;
+  video_url?: string;
+  heartbeat_at: string;
+  started_at: string;
+  error?: { stage: string; message: string };
+};
+
+export function validateEvaluationReelRequest(input: { durationSeconds: number; caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number } }) {
+  if (input.durationSeconds !== 30) throw new Error("EVALUATION_REEL_DURATION_MUST_BE_30_SECONDS");
+  if (input.caps.runway_credits !== 432 || input.caps.elevenlabs_characters !== 2000 || input.caps.sync_usd !== 1.8) throw new Error("EVALUATION_REEL_CAP_MISMATCH");
+}
 
 export function validatePilotPerformanceVariant(input: {
   pilot: Pick<PilotExecutionManifest, "status" | "execution_id" | "tasks">;
@@ -574,6 +615,98 @@ export class ShortFilmPilotExecutionService {
     const context = await this.registry.getShortFilmExecutionContext(projectId);
     const stored = await this.drive.readPilotJson<PilotPerformanceVariantManifest>(context.project_folder_id, VARIANT_MANIFEST_NAME);
     if (stored?.value.final_drive_file_id !== fileId) throw new Error("PILOT_VARIANT_OUTPUT_NOT_FOUND");
+    return this.drive.downloadBuffer(fileId);
+  }
+
+  async startEvaluationReel(projectId: string, request: { duration_seconds: number; caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number } }) {
+    validateEvaluationReelRequest({ durationSeconds: request.duration_seconds, caps: request.caps });
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const pilotStored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
+    if (!pilotStored || pilotStored.value.status !== "AWAITING_PILOT_QC") throw new Error("EVALUATION_REEL_REQUIRES_PILOT_AWAITING_QC");
+    const existing = await this.drive.readPilotJson<EvaluationReelManifest>(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME);
+    if (existing) return { ...existing.value, idempotent_replay: true };
+    const candidates = pilotStored.value.tasks.filter((task) => task.final_drive_file_id && task.audio_drive_file_id && task.transcript_verified && task.audio_review_decision === "APPROVE").slice(0, 3);
+    if (candidates.length !== 3) throw new Error("EVALUATION_REEL_REQUIRES_THREE_APPROVED_AUDIO_VIDEO_SHOTS");
+    const library = await this.characters.listEligibleCharacters();
+    const tasks = candidates.map((task): EvaluationReelTask => {
+      const keyframe = context.workflow.production_readiness?.keyframes.find((item) => item.shot_id === task.shot_id);
+      const dialogue = context.workflow.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === task.shot_id);
+      if (!keyframe?.approved_image_url || !dialogue) throw new Error(`EVALUATION_REEL_LOCKED_SOURCE_MISSING:${task.shot_id}`);
+      const character = validateLockedCharacterPerformanceSource({ dialogue, keyframe, character: library.find((item) => item.character_id === dialogue.speaker_source_actor_id) });
+      return { shot_id: task.shot_id, character_id: character.character_id, master_identity_id: character.master_identity_id as string, face_reference_url: character.face_reference_url, body_reference_url: character.body_reference_url, source_video_drive_file_id: task.final_drive_file_id as string, audio_drive_file_id: task.audio_drive_file_id as string };
+    });
+    const account = await checkProviderAccounts({ project_type: "SHORT_FILM", duration_seconds: 30, providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "APPROVED_VOICE_MASTER", lip_sync: "SYNC" } }, process.env);
+    if (account.providers.some((provider) => ["INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED"].includes(provider.status))) throw new Error(`PROVIDER_ACCOUNT_BLOCKED:${account.providers.map((provider) => `${provider.provider}:${provider.status}`).join(",")}`);
+    const now = new Date().toISOString();
+    const manifest: EvaluationReelManifest = { schema_version: "SHORT_FILM_PILOT_EVALUATION_REEL_30S_V1", execution_id: randomUUID(), project_id: projectId, source_execution_id: pilotStored.value.execution_id, duration_seconds: 30, status: "PROCESSING_RUNWAY", caps: { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 }, tasks, current_task_index: 0, heartbeat_at: now, started_at: now };
+    await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
+    return { ...manifest, idempotent_replay: false };
+  }
+
+  async evaluationReelStatus(projectId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<EvaluationReelManifest>(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME);
+    if (!stored) throw new Error("EVALUATION_REEL_NOT_FOUND");
+    const manifest = stored.value;
+    if (["AWAITING_REEL_QC", "FAILED"].includes(manifest.status)) return manifest;
+    try {
+      const runwayKey = process.env.RUNWAYML_API_SECRET?.trim(), syncKey = process.env.SYNC_API_KEY?.trim();
+      if (!runwayKey || !syncKey) throw new Error("EVALUATION_REEL_PROVIDER_SECRET_NOT_CONFIGURED");
+      const runway = new RunwayPilotProvider(runwayKey), sync = new SyncPilotProvider(syncKey);
+      const task = manifest.tasks[manifest.current_task_index];
+      if (task && manifest.status === "PROCESSING_RUNWAY") {
+        if (!task.runway_task_id) {
+          task.runway_assets ??= {};
+          const imageUri = await preparePrivateRunwayCharacterFace({ faceReferenceUrl: task.face_reference_url, bodyReferenceUrl: task.body_reference_url, cache: task.runway_assets, drive: this.drive, runway });
+          const source = await trimVideoBuffer(await this.drive.downloadBuffer(task.source_video_drive_file_id), 10);
+          const reference = await runway.uploadVideo({ content: source, fileName: `${task.shot_id}_LOCKED_10S_REFERENCE.mp4`, mimeType: "video/mp4" });
+          task.runway_task_id = (await runway.submitCharacterPerformance({ characterImageUrl: imageUri, referenceVideoUrl: reference.uri, ratio: "1280:720" })).taskId;
+          task.runway_status = "PENDING";
+        } else {
+          const state = await runway.status(task.runway_task_id); task.runway_status = state.status; task.runway_output_url = state.outputUrl;
+          if (["FAILED", "CANCELLED"].includes(state.status)) throw new Error(`EVALUATION_REEL_RUNWAY_FAILED:${task.shot_id}:${state.errorCode ?? state.error ?? state.status}`);
+          if (state.status === "SUCCEEDED") manifest.status = "PROCESSING_SYNC";
+        }
+      } else if (task && manifest.status === "PROCESSING_SYNC") {
+        if (!task.sync_generation_id) {
+          const audio = await this.drive.downloadBuffer(task.audio_drive_file_id);
+          const generation = await sync.submit({ videoUrl: task.runway_output_url as string, audio, fileName: `${task.shot_id}_APPROVED_VOICE.mp3` });
+          task.sync_generation_id = generation.generationId; task.sync_status = "PENDING";
+        } else {
+          const state = await sync.status(task.sync_generation_id); task.sync_status = state.status; task.sync_output_url = state.outputUrl;
+          if (["FAILED", "REJECTED"].includes(state.status ?? "")) throw new Error(`EVALUATION_REEL_SYNC_FAILED:${task.shot_id}:${state.errorCode ?? state.error ?? state.status}`);
+          if (state.status === "COMPLETED") {
+            task.completed_video = state.outputUrl;
+            manifest.current_task_index += 1;
+            manifest.status = manifest.current_task_index === manifest.tasks.length ? "ASSEMBLING" : "PROCESSING_RUNWAY";
+          }
+        }
+      }
+      if (manifest.status === "ASSEMBLING") {
+        const buffers: Buffer[] = [];
+        for (const completed of manifest.tasks) {
+          const response = await fetch(completed.completed_video as string, { signal: AbortSignal.timeout(60_000) });
+          if (!response.ok) throw new Error(`EVALUATION_REEL_OUTPUT_HTTP_${response.status}`);
+          buffers.push(await trimVideoBuffer(Buffer.from(await response.arrayBuffer()), 10));
+        }
+        const reel = await assembleVideoBuffers(buffers);
+        const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, "SHORT_FILM_EVALUATION_REEL_30S_1920x1080.mp4", "video/mp4", reel);
+        manifest.final_drive_file_id = uploaded.id as string; manifest.video_url = uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`; manifest.status = "AWAITING_REEL_QC";
+      }
+      manifest.heartbeat_at = new Date().toISOString();
+      await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
+      return manifest;
+    } catch (error) {
+      manifest.status = "FAILED"; manifest.error = { stage: "EVALUATION_REEL_30S", message: error instanceof Error ? error.message : String(error) }; manifest.heartbeat_at = new Date().toISOString();
+      await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
+      return manifest;
+    }
+  }
+
+  async evaluationReelOutput(projectId: string, fileId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<EvaluationReelManifest>(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME);
+    if (stored?.value.final_drive_file_id !== fileId) throw new Error("EVALUATION_REEL_OUTPUT_NOT_FOUND");
     return this.drive.downloadBuffer(fileId);
   }
 

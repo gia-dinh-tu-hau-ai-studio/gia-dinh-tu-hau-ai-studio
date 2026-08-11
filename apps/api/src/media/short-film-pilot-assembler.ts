@@ -52,6 +52,20 @@ export async function assembleVideoBuffers(inputs: Buffer[]) {
   }
 }
 
+export async function trimVideoBuffer(input: Buffer, durationSeconds: number) {
+  if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 30) throw new Error("VIDEO_TRIM_DURATION_INVALID");
+  const directory = await mkdtemp(join(tmpdir(), "tuhau-trim-"));
+  try {
+    const source = join(directory, "source.mp4");
+    const output = join(directory, "trimmed.mp4");
+    await writeFile(source, input);
+    await run("ffmpeg", ["-y", "-i", source, "-t", String(durationSeconds), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", output]);
+    return await readFile(output);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 export async function assemblePilotSample(urls: string[], fetcher: typeof fetch = fetch) {
   const inputs: Buffer[] = [];
   for (const url of urls) {
