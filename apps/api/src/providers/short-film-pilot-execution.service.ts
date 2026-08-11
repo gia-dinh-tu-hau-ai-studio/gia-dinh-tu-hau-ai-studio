@@ -137,6 +137,7 @@ type EvaluationReelTask = {
   sync_status?: string;
   sync_output_url?: string;
   completed_video?: string;
+  generation_mode?: "APPROVED_FACE_IMAGE_TO_VIDEO";
   runway_assets?: RunwayAssetCache;
 };
 
@@ -172,6 +173,17 @@ export function selectEvaluationReelSourceTasks(pilot: Pick<PilotExecutionManife
 export function validateProviderReadyFaceReference(input: { face_reference_url: string; body_reference_url: string }) {
   if (!input.face_reference_url || input.face_reference_url === input.body_reference_url) throw new Error("FACE_REFERENCE_REQUIRES_SEPARATE_APPROVED_CLOSEUP");
   return input.face_reference_url;
+}
+
+export function buildEvaluationReelFacePrompt(input: { scenePrompt: string; dialogueText: string }) {
+  return [
+    "Cinematic medium close-up of the exact approved and locked character identity from the input image.",
+    "Keep the full head, both eyes, nose, mouth and shoulders visible for the entire shot; never crop the face out of frame.",
+    "Natural Vietnamese television drama performance with purposeful head, eye, shoulder and hand movement matching the dialogue meaning.",
+    "Vietnamese speech performance only; no subtitles, text, identity change, face replacement, dancing or exaggerated random gestures.",
+    `Dialogue meaning: ${input.dialogueText}`,
+    `Scene: ${input.scenePrompt}`,
+  ].join(" ").slice(0, 1_000);
 }
 
 export function resumeEvaluationReelManifest(manifest: EvaluationReelManifest, refreshed: Map<string, { face_reference_url: string; body_reference_url: string; master_identity_id?: string }>) {
@@ -685,9 +697,12 @@ export class ShortFilmPilotExecutionService {
         if (!task.runway_task_id) {
           task.runway_assets ??= {};
           const imageUri = await preparePrivateRunwayCharacterFace({ faceReferenceUrl: task.face_reference_url, bodyReferenceUrl: task.body_reference_url, cache: task.runway_assets, drive: this.drive, runway });
-          const source = await trimVideoBuffer(await this.drive.downloadBuffer(task.source_video_drive_file_id), 10);
-          const reference = await runway.uploadVideo({ content: source, fileName: `${task.shot_id}_LOCKED_10S_REFERENCE.mp4`, mimeType: "video/mp4" });
-          task.runway_task_id = (await runway.submitCharacterPerformance({ characterImageUrl: imageUri, referenceVideoUrl: reference.uri, ratio: "1280:720" })).taskId;
+          const shot = context.workflow.shot_plan?.execution_shots.find((item) => item.shot_id === task.shot_id);
+          const dialogue = context.workflow.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === task.shot_id);
+          if (!shot || !dialogue) throw new Error(`EVALUATION_REEL_LOCKED_PROMPT_MISSING:${task.shot_id}`);
+          const prompt = buildEvaluationReelFacePrompt({ scenePrompt: shot.runway_prompt, dialogueText: dialogue.dialogue_text });
+          task.runway_task_id = (await runway.submit({ imageUrl: imageUri, prompt, durationSeconds: 10, ratio: "1280:720" })).taskId;
+          task.generation_mode = "APPROVED_FACE_IMAGE_TO_VIDEO";
           task.runway_status = "PENDING";
         } else {
           const state = await runway.status(task.runway_task_id); task.runway_status = state.status; task.runway_output_url = state.outputUrl;
