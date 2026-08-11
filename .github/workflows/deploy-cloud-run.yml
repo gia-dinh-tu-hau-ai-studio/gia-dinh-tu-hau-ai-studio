@@ -61,6 +61,8 @@ jobs:
             --min-instances=1 \
             --max-instances=1 \
             --no-cpu-throttling \
+            --no-iap \
+            --invoker-iam-check \
             --quiet
 
       - name: Build and push web image
@@ -81,7 +83,47 @@ jobs:
             --region="$GCP_REGION" \
             --image="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/$WEB_SERVICE:latest" \
             --update-env-vars="API_URL=$API_URL" \
+            --no-iap \
+            --no-invoker-iam-check \
             --quiet
+
+      - name: Authorize web service to invoke API
+        run: |
+          WEB_SERVICE_ACCOUNT="$(gcloud run services describe "$WEB_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format='value(spec.template.spec.serviceAccountName)')"
+          test -n "$WEB_SERVICE_ACCOUNT"
+          gcloud run services add-iam-policy-binding "$API_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --member="serviceAccount:$WEB_SERVICE_ACCOUNT" \
+            --role="roles/run.invoker" \
+            --quiet
+
+      - name: Verify production access policy
+        run: |
+          API_CONFIG="$(gcloud run services describe "$API_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format=json)"
+          WEB_CONFIG="$(gcloud run services describe "$WEB_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format=json)"
+
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/iap-enabled"] // "false"' <<<"$API_CONFIG")" = "false"
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"' <<<"$API_CONFIG")" = "false"
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/iap-enabled"] // "false"' <<<"$WEB_CONFIG")" = "false"
+          test "$(jq -r '.metadata.annotations["run.googleapis.com/invoker-iam-disabled"] // "false"' <<<"$WEB_CONFIG")" = "true"
+
+          WEB_SERVICE_ACCOUNT="$(jq -r '.spec.template.spec.serviceAccountName' <<<"$WEB_CONFIG")"
+          gcloud run services get-iam-policy "$API_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --flatten='bindings[].members' \
+            --filter="bindings.role=roles/run.invoker AND bindings.members=serviceAccount:$WEB_SERVICE_ACCOUNT" \
+            --format='value(bindings.members)' | grep -Fx "serviceAccount:$WEB_SERVICE_ACCOUNT"
 
       - name: Report deployed services
         run: |
