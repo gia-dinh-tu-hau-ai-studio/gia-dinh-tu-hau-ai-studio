@@ -162,6 +162,13 @@ export function validateEvaluationReelRequest(input: { durationSeconds: number; 
   if (input.caps.runway_credits !== 432 || input.caps.elevenlabs_characters !== 2000 || input.caps.sync_usd !== 1.8) throw new Error("EVALUATION_REEL_CAP_MISMATCH");
 }
 
+export function selectEvaluationReelSourceTasks(pilot: Pick<PilotExecutionManifest, "samples" | "tasks">) {
+  const tenSecondShotIds = new Set(pilot.samples.flatMap((sample) => sample.shots).filter((shot) => shot.duration_seconds === 10).map((shot) => shot.shot_id));
+  const candidates = pilot.tasks.filter((task) => tenSecondShotIds.has(task.shot_id) && task.final_drive_file_id && task.audio_drive_file_id && task.transcript_verified && task.audio_review_decision === "APPROVE").slice(0, 3);
+  if (candidates.length !== 3) throw new Error("EVALUATION_REEL_REQUIRES_THREE_APPROVED_TEN_SECOND_SHOTS");
+  return candidates;
+}
+
 export function validatePilotPerformanceVariant(input: {
   pilot: Pick<PilotExecutionManifest, "status" | "execution_id" | "tasks">;
   shotId: string;
@@ -625,8 +632,7 @@ export class ShortFilmPilotExecutionService {
     if (!pilotStored || pilotStored.value.status !== "AWAITING_PILOT_QC") throw new Error("EVALUATION_REEL_REQUIRES_PILOT_AWAITING_QC");
     const existing = await this.drive.readPilotJson<EvaluationReelManifest>(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME);
     if (existing) return { ...existing.value, idempotent_replay: true };
-    const candidates = pilotStored.value.tasks.filter((task) => task.final_drive_file_id && task.audio_drive_file_id && task.transcript_verified && task.audio_review_decision === "APPROVE").slice(0, 3);
-    if (candidates.length !== 3) throw new Error("EVALUATION_REEL_REQUIRES_THREE_APPROVED_AUDIO_VIDEO_SHOTS");
+    const candidates = selectEvaluationReelSourceTasks(pilotStored.value);
     const library = await this.characters.listEligibleCharacters();
     const tasks = candidates.map((task): EvaluationReelTask => {
       const keyframe = context.workflow.production_readiness?.keyframes.find((item) => item.shot_id === task.shot_id);
