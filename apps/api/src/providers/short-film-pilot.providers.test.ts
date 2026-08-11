@@ -3,7 +3,7 @@ import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
-import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -93,6 +93,15 @@ test("30-second evaluation reel selects exactly three approved ten-second shots"
 test("provider face gate rejects a full-body fallback before Runway is called", () => {
   assert.throws(() => validateProviderReadyFaceReference({ face_reference_url: "body", body_reference_url: "body" }), /SEPARATE_APPROVED_CLOSEUP/);
   assert.equal(validateProviderReadyFaceReference({ face_reference_url: "face", body_reference_url: "body" }), "face");
+});
+
+test("evaluation reel prompt keeps the approved face visible and binds acting to Vietnamese dialogue", () => {
+  const prompt = buildEvaluationReelFacePrompt({ scenePrompt: "Minh urges Vy to decide", dialogueText: "Em quyết định liền nha" });
+  assert.match(prompt, /exact approved and locked character identity/);
+  assert.match(prompt, /full head, both eyes, nose, mouth and shoulders visible/);
+  assert.match(prompt, /Vietnamese television drama performance/);
+  assert.match(prompt, /Em quyết định liền nha/);
+  assert.ok(prompt.length <= 1_000);
 });
 
 test("failed reel resumes from first unfinished shot and preserves completed paid work", () => {
