@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
-import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, selectLockedCharacterPerformanceImage, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -76,6 +76,13 @@ test("identity correction requires the shot keyframe to be the assigned approved
   assert.throws(() => validateLockedCharacterPerformanceSource({ dialogue: { speaker_source_actor_id: "GDTH-CHAR-002" }, keyframe: { approved_image_url: character.body_reference_url }, character }), /ASSIGNMENT_MISMATCH/);
   assert.throws(() => validateLockedCharacterPerformanceSource({ dialogue: { speaker_source_actor_id: "GDTH-CHAR-001" }, keyframe: { approved_image_url: "https://drive.google.com/file/d/wrong/view" }, character }), /KEYFRAME_NOT_FROM_LOCKED/);
   assert.throws(() => validateLockedCharacterPerformanceSource({ dialogue: { speaker_source_actor_id: "GDTH-CHAR-001" }, keyframe: { approved_image_url: character.body_reference_url }, character: { ...character, readiness: { master_identity: "NOT_READY" } } }), /NOT_APPROVED_LOCKED/);
+});
+
+test("Act-Two identity input uses the clear face reference, never the distant full-body keyframe", () => {
+  const character = { character_id: "GDTH-CHAR-001", body_reference_url: "https://drive.google.com/file/d/body/view", face_reference_url: "https://drive.google.com/file/d/clear-face/view", master_identity_id: "TUONG_VY_MASTER_IDENTITY_V1", master_identity_version: "V1", readiness: { master_identity: "APPROVED_LOCKED" } };
+  assert.equal(selectLockedCharacterPerformanceImage(character), character.face_reference_url);
+  assert.notEqual(selectLockedCharacterPerformanceImage(character), character.body_reference_url);
+  assert.throws(() => selectLockedCharacterPerformanceImage({ ...character, face_reference_url: "" }), /FACE_REFERENCE_MISSING/);
 });
 
 test("Runway Character Performance uses locked image for identity and video only for acting", async () => {

@@ -157,6 +157,11 @@ export function validateLockedCharacterPerformanceSource(input: {
   return character;
 }
 
+export function selectLockedCharacterPerformanceImage(character: ReturnType<typeof validateLockedCharacterPerformanceSource>) {
+  if (!character.face_reference_url) throw new Error("CHARACTER_MASTER_FACE_REFERENCE_MISSING");
+  return character.face_reference_url;
+}
+
 export function approvePilotPerformanceVariant(input: {
   variant: Pick<PilotPerformanceVariantManifest, "status" | "shot_id" | "final_drive_file_id">;
   pilot: Pick<PilotExecutionManifest, "status" | "tasks">;
@@ -479,7 +484,9 @@ export class ShortFilmPilotExecutionService {
       locked_character_id: lockedCharacter.character_id,
       locked_master_identity_id: lockedCharacter.master_identity_id as string,
       locked_master_identity_version: lockedCharacter.master_identity_version,
-      locked_character_image_url: lockedCharacter.body_reference_url,
+      // Act-Two must receive the clear face reference. The body reference remains
+      // the approved keyframe/provenance gate and the reference video supplies motion.
+      locked_character_image_url: selectLockedCharacterPerformanceImage(lockedCharacter),
       heartbeat_at: now, started_at: now,
     };
     await this.drive.writePilotJson(context.project_folder_id, VARIANT_MANIFEST_NAME, manifest);
