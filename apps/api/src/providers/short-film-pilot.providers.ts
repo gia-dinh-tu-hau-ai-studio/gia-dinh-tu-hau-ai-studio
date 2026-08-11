@@ -44,6 +44,54 @@ export class RunwayPilotProvider {
     return { uri: upload.runwayUri };
   }
 
+  async uploadVideo(input: { content: Buffer; fileName: string; mimeType: "video/mp4" }) {
+    if (input.content.length < 512 || input.content.length > 200 * 1024 * 1024) {
+      throw new PilotProviderError("RUNWAY", "INVALID_VIDEO_SIZE", `Runway video must be 512 bytes to 200 MB; received ${input.content.length}`, false);
+    }
+    const created = await providerResponse(await this.fetcher("https://api.dev.runwayml.com/v1/uploads", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.apiKey}`, "X-Runway-Version": "2024-11-06", "content-type": "application/json" },
+      body: JSON.stringify({ filename: input.fileName, type: "ephemeral" }),
+      signal: AbortSignal.timeout(20_000),
+    }), "RUNWAY");
+    const upload = await created.json() as { uploadUrl?: string; fields?: Record<string, string>; runwayUri?: string };
+    if (!upload.uploadUrl || !upload.fields || !upload.runwayUri?.startsWith("runway://")) {
+      throw new PilotProviderError("RUNWAY", "MALFORMED_UPLOAD_RESPONSE", "Runway did not return a valid ephemeral upload", false);
+    }
+    const form = new FormData();
+    for (const [key, value] of Object.entries(upload.fields)) form.set(key, value);
+    form.set("file", new Blob([Uint8Array.from(input.content)], { type: input.mimeType }), input.fileName);
+    const uploaded = await this.fetcher(upload.uploadUrl, { method: "POST", body: form, signal: AbortSignal.timeout(120_000) });
+    if (!uploaded.ok) throw new PilotProviderError("RUNWAY", `UPLOAD_HTTP_${uploaded.status}`, (await uploaded.text()).slice(0, 500), false);
+    return { uri: upload.runwayUri };
+  }
+
+  async submitCharacterPerformance(input: {
+    characterImageUrl: string;
+    referenceVideoUrl: string;
+    ratio: "1280:720" | "720:1280";
+  }) {
+    if (!input.characterImageUrl.startsWith("runway://") || !input.referenceVideoUrl.startsWith("runway://")) {
+      throw new PilotProviderError("RUNWAY", "PRIVATE_ASSET_REQUIRED", "Character Performance requires private Runway assets", false);
+    }
+    const response = await providerResponse(await this.fetcher("https://api.dev.runwayml.com/v1/character_performance", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.apiKey}`, "X-Runway-Version": "2024-11-06", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "act_two",
+        character: { type: "image", uri: input.characterImageUrl },
+        reference: { type: "video", uri: input.referenceVideoUrl },
+        ratio: input.ratio,
+        bodyControl: true,
+        expressionIntensity: 3,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    }), "RUNWAY");
+    const body = await response.json() as { id?: string };
+    if (!body.id) throw new PilotProviderError("RUNWAY", "MALFORMED_RESPONSE", "Runway did not return Character Performance task id", false);
+    return { taskId: body.id };
+  }
+
   async submit(input: { imageUrl: string; prompt: string; durationSeconds: number; ratio: "1280:720" | "720:1280" }) {
     if (!Number.isInteger(input.durationSeconds) || input.durationSeconds < 2 || input.durationSeconds > 10) {
       throw new PilotProviderError("RUNWAY", "INVALID_DURATION", "Runway shot duration must be 2-10 seconds", false);
