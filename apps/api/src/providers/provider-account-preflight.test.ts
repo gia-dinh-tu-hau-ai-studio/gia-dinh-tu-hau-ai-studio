@@ -36,3 +36,13 @@ test("khóa tạo kịch bản khi OpenAI chưa được cấu hình", async () 
   const result = await checkProviderAccounts({ ...request, providers: { script: "OPENAI_RESPONSES", video: "NONE", voice: "NONE", lip_sync: "NONE" } }, {});
   assert.equal(result.script_generation_gate, "BLOCKED");
 });
+
+test("pilot variant reuses an approved Voice Master without ElevenLabs", async () => {
+  const fetcher = async () => new Response(JSON.stringify({ creditBalance: 5000 }), { status: 200 });
+  const result = await checkProviderAccounts({
+    project_type: "SHORT_FILM", duration_seconds: 10,
+    providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "APPROVED_VOICE_MASTER", lip_sync: "SYNC" },
+  }, { RUNWAYML_API_SECRET: "rw", SYNC_API_KEY: "sync" }, fetcher as typeof fetch);
+  assert.equal(result.execution_gate, "MANUAL_CONFIRMATION_REQUIRED");
+  assert.deepEqual(result.providers.map((item) => item.provider), ["RUNWAY", "SYNC"]);
+});
