@@ -368,6 +368,8 @@ export function ProjectIntakeForm() {
   const [pilotExecutionResult, setPilotExecutionResult] = useState("");
   const [runningPilotExecution, setRunningPilotExecution] = useState(false);
   const [monitoringPilotExecution, setMonitoringPilotExecution] = useState(false);
+  const [pilotAudioTasks, setPilotAudioTasks] = useState<Array<{ shot_id: string; dialogue_line_id?: string; audio_drive_file_id: string; voice_master_id?: string; transcript_text?: string; transcript_language_probability?: number; transcript_similarity?: number }>>([]);
+  const [reviewingPilotAudio, setReviewingPilotAudio] = useState(false);
   const [fullFilmExecutionApproved, setFullFilmExecutionApproved] = useState(false);
   const [fullFilmExecutionResult, setFullFilmExecutionResult] = useState("");
   const [runningFullFilmExecution, setRunningFullFilmExecution] = useState(false);
@@ -1062,7 +1064,10 @@ export function ProjectIntakeForm() {
     const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/status`);
     const body = await response.json();
     setPilotExecutionResult(JSON.stringify(body, null, 2));
-    if (["AWAITING_PILOT_QC", "FAILED"].includes(body.status)) setMonitoringPilotExecution(false);
+    if (["AWAITING_DIALOGUE_AUDIO_APPROVAL", "AWAITING_PILOT_QC", "FAILED"].includes(body.status)) setMonitoringPilotExecution(false);
+    if (body.status === "AWAITING_DIALOGUE_AUDIO_APPROVAL" && Array.isArray(body.tasks)) {
+      setPilotAudioTasks(body.tasks.filter((task: { audio_drive_file_id?: string; transcript_verified?: boolean }) => task.audio_drive_file_id && task.transcript_verified));
+    }
     if (body.status === "AWAITING_PILOT_QC" && Array.isArray(body.outputs) && Array.isArray(body.samples)) {
       setShortFilmWorkflow((current) => ({ ...current, pilot_batch: {
         samples: body.outputs.map((output: { sample_id: string; video_url: string; drive_file_id: string }) => {
@@ -1080,6 +1085,23 @@ export function ProjectIntakeForm() {
         batch_review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
       } }));
     }
+  }
+
+  async function reviewPilotDialogueAudio(decision: "APPROVE" | "REJECT") {
+    if (!createdProject) return;
+    setReviewingPilotAudio(true);
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/dialogue-audio/review`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision }),
+      });
+      const body = await response.json();
+      setPilotExecutionResult(JSON.stringify(body, null, 2));
+      if (response.ok) {
+        setPilotAudioTasks([]);
+        if (decision === "APPROVE") setMonitoringPilotExecution(true);
+      }
+    } catch { setPilotExecutionResult("Không lưu được quyết định duyệt audio. Hệ thống chưa gọi Runway hoặc Sync."); }
+    finally { setReviewingPilotAudio(false); }
   }
 
   function proposedFullFilmCaps() {
@@ -1607,6 +1629,20 @@ export function ProjectIntakeForm() {
             <button disabled={!pilotExecutionApproved || !shortFilmPilotBudgetApprovalIsSufficient(shortFilmWorkflow) || runningPilotExecution} onClick={() => void executeShortFilmPilot()} type="button">{runningPilotExecution ? "Đang bắt đầu…" : "Chạy đợt clip mẫu"}</button>
             <button className="secondary-button" onClick={() => void refreshShortFilmPilotStatus()} type="button">Cập nhật tiến độ</button>
             {pilotExecutionResult && <ResultDetails value={pilotExecutionResult} />}
+            {pilotAudioTasks.length > 0 && <div className="approval-gate">
+              <strong>Nghe và duyệt giọng trước khi tạo video</strong>
+              <p>Hãy nghe toàn bộ câu thoại. Runway và Sync vẫn đang khóa cho đến khi bạn duyệt.</p>
+              {pilotAudioTasks.map((task) => <article className="account-check-results" key={task.shot_id}>
+                <strong>{task.shot_id} · {task.voice_master_id}</strong>
+                <audio controls preload="metadata" src={`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/pilot/dialogue-audio/${encodeURIComponent(task.audio_drive_file_id)}`} />
+                <span>{task.transcript_text}</span>
+                <small>Tiếng Việt: {Math.round((task.transcript_language_probability ?? 0) * 100)}% · Khớp thoại: {Math.round((task.transcript_similarity ?? 0) * 100)}%</small>
+              </article>)}
+              <div className="action-row">
+                <button disabled={reviewingPilotAudio} onClick={() => void reviewPilotDialogueAudio("APPROVE")} type="button">Duyệt toàn bộ audio và mở tạo video</button>
+                <button className="secondary-button" disabled={reviewingPilotAudio} onClick={() => void reviewPilotDialogueAudio("REJECT")} type="button">Từ chối audio và dừng</button>
+              </div>
+            </div>}
           </div>}
         </section>
       )}

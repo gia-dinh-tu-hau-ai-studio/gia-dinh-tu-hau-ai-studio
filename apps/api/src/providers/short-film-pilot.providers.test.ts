@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
-import { verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { reviewDialogueAudioGate, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -39,6 +39,15 @@ test("Vietnamese transcript gate rejects foreign or mismatched speech", () => {
   assert.equal(verifyVietnameseTranscript(expected, { text: "This job requires payment.", languageCode: "en", languageProbability: 0.99 }).passed, false);
   assert.equal(verifyVietnameseTranscript(expected, { text: "Xin chào", languageCode: "vi", languageProbability: 0.99 }).passed, false);
   assert.equal(verifyVietnameseTranscript(expected, { text: expected, languageCode: "vi", languageProbability: 0.4 }).passed, false);
+});
+
+test("dialogue audio approval gate blocks Runway until every verified audio is owner-approved", () => {
+  const manifest: Parameters<typeof reviewDialogueAudioGate>[0] = { status: "AWAITING_DIALOGUE_AUDIO_APPROVAL", tasks: [
+    { sample_id: "S1", shot_id: "SHOT-001", runway_status: "PENDING_SUBMIT", dialogue_line_id: "LINE-001", audio_drive_file_id: "audio-1", transcript_verified: true },
+  ] };
+  assert.deepEqual(reviewDialogueAudioGate(manifest, "APPROVE", "2026-08-11T00:00:00Z"), { status: "PROCESSING_RUNWAY" });
+  assert.equal(manifest.tasks[0].audio_review_decision, "APPROVE");
+  assert.throws(() => reviewDialogueAudioGate({ status: "AWAITING_DIALOGUE_AUDIO_APPROVAL", tasks: [{ sample_id: "S1", shot_id: "SHOT-001", runway_status: "PENDING_SUBMIT", dialogue_line_id: "LINE-001", transcript_verified: false }] }, "APPROVE", "2026-08-11T00:00:00Z"), /EVIDENCE_INCOMPLETE/);
 });
 
 test("private Drive keyframes use a Runway ephemeral upload instead of exposing a protected URL", async () => {
