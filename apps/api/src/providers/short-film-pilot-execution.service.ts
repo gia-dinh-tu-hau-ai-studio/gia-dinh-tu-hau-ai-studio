@@ -169,6 +169,27 @@ export function selectEvaluationReelSourceTasks(pilot: Pick<PilotExecutionManife
   return candidates;
 }
 
+export function validateProviderReadyFaceReference(input: { face_reference_url: string; body_reference_url: string }) {
+  if (!input.face_reference_url || input.face_reference_url === input.body_reference_url) throw new Error("FACE_REFERENCE_REQUIRES_SEPARATE_APPROVED_CLOSEUP");
+  return input.face_reference_url;
+}
+
+export function resumeEvaluationReelManifest(manifest: EvaluationReelManifest, refreshed: Map<string, { face_reference_url: string; body_reference_url: string; master_identity_id?: string }>) {
+  if (manifest.status !== "FAILED") throw new Error("EVALUATION_REEL_NOT_FAILED");
+  const completedCount = manifest.tasks.findIndex((task) => !task.completed_video);
+  manifest.current_task_index = completedCount < 0 ? manifest.tasks.length : completedCount;
+  if (manifest.current_task_index >= manifest.tasks.length) throw new Error("EVALUATION_REEL_ALREADY_COMPLETE");
+  for (let index = manifest.current_task_index; index < manifest.tasks.length; index += 1) {
+    const task = manifest.tasks[index], character = refreshed.get(task.character_id);
+    if (!character?.master_identity_id) throw new Error(`EVALUATION_REEL_CHARACTER_NOT_APPROVED_LOCKED:${task.character_id}`);
+    validateProviderReadyFaceReference(character);
+    task.face_reference_url = character.face_reference_url; task.body_reference_url = character.body_reference_url; task.master_identity_id = character.master_identity_id;
+    delete task.runway_task_id; delete task.runway_status; delete task.runway_output_url; delete task.sync_generation_id; delete task.sync_status; delete task.sync_output_url; delete task.completed_video; delete task.runway_assets;
+  }
+  manifest.status = "PROCESSING_RUNWAY"; delete manifest.error; manifest.heartbeat_at = new Date().toISOString();
+  return manifest;
+}
+
 export function validatePilotPerformanceVariant(input: {
   pilot: Pick<PilotExecutionManifest, "status" | "execution_id" | "tasks">;
   shotId: string;
@@ -707,6 +728,18 @@ export class ShortFilmPilotExecutionService {
       await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
       return manifest;
     }
+  }
+
+  async resumeEvaluationReel(projectId: string, request: { duration_seconds: number; caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number } }) {
+    validateEvaluationReelRequest({ durationSeconds: request.duration_seconds, caps: request.caps });
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<EvaluationReelManifest>(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME);
+    if (!stored) throw new Error("EVALUATION_REEL_NOT_FOUND");
+    const library = await this.characters.listEligibleCharacters();
+    const refreshed = new Map(library.map((character) => [character.character_id, character]));
+    const manifest = resumeEvaluationReelManifest(stored.value, refreshed);
+    await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
+    return { ...manifest, resumed: true, preserved_completed_shots: manifest.current_task_index };
   }
 
   async evaluationReelOutput(projectId: string, fileId: string) {

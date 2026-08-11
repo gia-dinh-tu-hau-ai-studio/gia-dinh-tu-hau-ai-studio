@@ -3,7 +3,7 @@ import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
-import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -88,6 +88,22 @@ test("30-second evaluation reel selects exactly three approved ten-second shots"
     { shot_id: "SHOT-005", summary: "five", runway_prompt: "five", duration_seconds: 10, risk_tags: [] },
   ] }], tasks: [task("SHOT-001"), task("SHOT-002"), task("SHOT-003"), task("SHOT-005")] };
   assert.deepEqual(selectEvaluationReelSourceTasks(pilot).map((item) => item.shot_id), ["SHOT-001", "SHOT-003", "SHOT-005"]);
+});
+
+test("provider face gate rejects a full-body fallback before Runway is called", () => {
+  assert.throws(() => validateProviderReadyFaceReference({ face_reference_url: "body", body_reference_url: "body" }), /SEPARATE_APPROVED_CLOSEUP/);
+  assert.equal(validateProviderReadyFaceReference({ face_reference_url: "face", body_reference_url: "body" }), "face");
+});
+
+test("failed reel resumes from first unfinished shot and preserves completed paid work", () => {
+  const manifest = { status: "FAILED", current_task_index: 1, tasks: [
+    { character_id: "A", completed_video: "done", runway_task_id: "paid", face_reference_url: "a-face", body_reference_url: "a-body", master_identity_id: "A" },
+    { character_id: "B", runway_task_id: "failed", runway_status: "FAILED", face_reference_url: "b-body", body_reference_url: "b-body", master_identity_id: "B" },
+    { character_id: "A", face_reference_url: "a-face", body_reference_url: "a-body", master_identity_id: "A" },
+  ], error: { stage: "RUNWAY", message: "NO_FACE_FOUND" }, heartbeat_at: "before" } as Parameters<typeof resumeEvaluationReelManifest>[0];
+  const refreshed = new Map([["A", { face_reference_url: "a-face", body_reference_url: "a-body", master_identity_id: "A" }], ["B", { face_reference_url: "b-face", body_reference_url: "b-body", master_identity_id: "B" }]]);
+  const resumed = resumeEvaluationReelManifest(manifest, refreshed);
+  assert.equal(resumed.current_task_index, 1); assert.equal(resumed.tasks[0].runway_task_id, "paid"); assert.equal(resumed.tasks[1].runway_task_id, undefined); assert.equal(resumed.tasks[1].face_reference_url, "b-face"); assert.equal(resumed.status, "PROCESSING_RUNWAY");
 });
 
 test("identity correction requires the shot keyframe to be the assigned approved and locked Character Master", () => {
