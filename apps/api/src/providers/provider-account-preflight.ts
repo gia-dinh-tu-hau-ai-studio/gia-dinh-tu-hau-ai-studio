@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const ProviderAccountPreflightRequestSchema = z.object({
-  project_type: z.enum(["SHORT_FILM", "MUSIC_VIDEO", "SHORT_MUSIC_CLIP"]),
+  project_type: z.literal("SHORT_FILM"),
   duration_seconds: z.number().int().positive().max(3600),
   providers: z.object({
     script: z.enum(["OPENAI_RESPONSES", "PROJECT_OWNER"]),
@@ -21,7 +21,7 @@ type ProviderCheck = {
 };
 
 function dialogueRatio(projectType: string) {
-  return projectType === "MUSIC_VIDEO" ? 0.15 : projectType === "SHORT_MUSIC_CLIP" ? 0.1 : 0.35;
+  return 0.35;
 }
 
 async function runwayCheck(secret: string | undefined, requiredCredits: number, fetcher: typeof fetch): Promise<ProviderCheck> {

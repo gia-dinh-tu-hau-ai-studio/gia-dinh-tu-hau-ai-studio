@@ -15,10 +15,9 @@ It does not introduce a destructive database migration.
 
 ## Drive layout
 
-New SHORT_FILM projects receive additive folders: contract, character, script,
-shot plan, pilot, film production, final QC, and publishing. MUSIC_VIDEO folder
-creation is unchanged. No existing folder or Character Master asset is renamed,
-moved, overwritten, or deleted.
+New projects receive folders for contract, character, script, shot plan, pilot,
+film production, final QC, and publishing. No existing Character Master asset is
+renamed, moved, overwritten, or deleted.
 
 ## Identity readiness
 

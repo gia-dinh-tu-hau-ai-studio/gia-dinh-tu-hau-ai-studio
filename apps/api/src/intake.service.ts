@@ -1,3 +1,4 @@
+
 import {
   BadGatewayException,
   BadRequestException,
@@ -127,7 +128,7 @@ export class IntakeService {
     if (!projectId) {
       throw new BadRequestException({
         code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
+        message: "project_id lÃ  báº¯t buá»™c",
       });
     }
 
@@ -164,7 +165,7 @@ export class IntakeService {
 
   async getShortFilmWorkflow(projectIdInput: string) {
     const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
+    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id lÃ  báº¯t buá»™c" });
     try {
       return await this.projectRegistry.getShortFilmWorkflow(projectId);
     } catch (error) {
@@ -174,7 +175,7 @@ export class IntakeService {
 
   async getProjectProgress(projectIdInput: string) {
     const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
+    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id lÃ  báº¯t buá»™c" });
     try {
       return await this.projectRegistry.getProjectProgress(projectId);
     } catch (error) {
@@ -184,13 +185,13 @@ export class IntakeService {
       if (error instanceof ProjectRegistryNotConfiguredError) {
         throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
       }
-      throw new BadGatewayException({ code: "PROJECT_PROGRESS_UNAVAILABLE", message: error instanceof Error ? error.message : "Không đọc được tiến độ dự án" });
+      throw new BadGatewayException({ code: "PROJECT_PROGRESS_UNAVAILABLE", message: error instanceof Error ? error.message : "KhÃ´ng Ä‘á»c Ä‘Æ°á»£c tiáº¿n Ä‘á»™ dá»± Ã¡n" });
     }
   }
 
   async saveShortFilmWorkflow(projectIdInput: string, body: unknown) {
     const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
+    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id lÃ  báº¯t buá»™c" });
     try {
       const request = ShortFilmWorkflowUpdateRequestSchema.parse(body);
       return await this.projectRegistry.saveShortFilmWorkflow(projectId, request.workflow);
@@ -231,7 +232,7 @@ export class IntakeService {
       if (error instanceof ZodError) {
         throw new BadRequestException({
           code: "PROVIDER_ACCOUNT_PREFLIGHT_REQUEST_INVALID",
-          message: "Dữ liệu dự toán gửi sang kiểm tra tài khoản không hợp lệ.",
+          message: "Dá»¯ liá»‡u dá»± toÃ¡n gá»­i sang kiá»ƒm tra tÃ i khoáº£n khÃ´ng há»£p lá»‡.",
           errors: error.issues,
         });
       }
@@ -241,7 +242,7 @@ export class IntakeService {
 
   async prepareShortFilmPilot(projectIdInput: string, body: unknown) {
     const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
+    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id lÃ  báº¯t buá»™c" });
     const requestSchema = z.object({
       provider_budget: ProviderBudgetPlanSchema,
       pilot_duration_seconds: z.number().int().min(10).max(20).optional(),
@@ -283,595 +284,6 @@ export class IntakeService {
         throw new ConflictException({ code: "SHORT_FILM_PILOT_PREPARATION_BLOCKED", errors: error.issues });
       }
       this.handleShortFilmWorkflowError(error);
-    }
-  }
-
-  async prepareMvProduction(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) {
-      throw new BadRequestException({
-        code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
-      });
-    }
-
-    try {
-      return await this.projectRegistry.prepareMvProduction(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) {
-        throw new NotFoundException({
-          code: "PROJECT_NOT_FOUND",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryInvalidStateError) {
-        throw new ConflictException({
-          code: "MV_PRODUCTION_PREPARATION_INVALID_STATE",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryNotConfiguredError) {
-        throw new ServiceUnavailableException({
-          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryUnavailableError) {
-        throw new BadGatewayException({
-          code: "PROJECT_REGISTRY_UNAVAILABLE",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async approveMvProductionPlan(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) {
-      throw new BadRequestException({
-        code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
-      });
-    }
-
-    try {
-      return await this.projectRegistry.approveMvProductionPlan(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) {
-        throw new NotFoundException({
-          code: "PROJECT_NOT_FOUND",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryInvalidStateError) {
-        throw new ConflictException({
-          code: "MV_PRODUCTION_PLAN_APPROVAL_INVALID_STATE",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryNotConfiguredError) {
-        throw new ServiceUnavailableException({
-          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryUnavailableError) {
-        throw new BadGatewayException({
-          code: "PROJECT_REGISTRY_UNAVAILABLE",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async prepareMvAssets(projectIdInput: string, body: unknown) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) {
-      throw new BadRequestException({
-        code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
-      });
-    }
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      throw new BadRequestException({
-        code: "INSTRUMENTAL_MASTER_FILE_ID_REQUIRED",
-        message: "instrumental_master_file_id là bắt buộc",
-      });
-    }
-    const instrumentalMasterFileId = String(
-      (body as Record<string, unknown>).instrumental_master_file_id ?? "",
-    ).trim();
-    if (!instrumentalMasterFileId) {
-      throw new BadRequestException({
-        code: "INSTRUMENTAL_MASTER_FILE_ID_REQUIRED",
-        message: "instrumental_master_file_id là bắt buộc",
-      });
-    }
-
-    try {
-      return await this.projectRegistry.prepareMvAssets(
-        projectId,
-        instrumentalMasterFileId,
-      );
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) {
-        throw new NotFoundException({
-          code: "PROJECT_NOT_FOUND",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryInvalidStateError) {
-        throw new ConflictException({
-          code: "MV_ASSET_PREPARATION_INVALID_STATE",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryNotConfiguredError) {
-        throw new ServiceUnavailableException({
-          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryUnavailableError) {
-        throw new BadGatewayException({
-          code: "PROJECT_REGISTRY_UNAVAILABLE",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async approveMvAssets(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) {
-      throw new BadRequestException({
-        code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
-      });
-    }
-
-    try {
-      return await this.projectRegistry.approveMvAssets(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) {
-        throw new NotFoundException({
-          code: "PROJECT_NOT_FOUND",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryInvalidStateError) {
-        throw new ConflictException({
-          code: "MV_ASSET_APPROVAL_INVALID_STATE",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryNotConfiguredError) {
-        throw new ServiceUnavailableException({
-          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryUnavailableError) {
-        throw new BadGatewayException({
-          code: "PROJECT_REGISTRY_UNAVAILABLE",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async prepareMvShotPlan(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) {
-      throw new BadRequestException({
-        code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
-      });
-    }
-
-    try {
-      return await this.projectRegistry.prepareMvShotPlan(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) {
-        throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      }
-      if (error instanceof ProjectRegistryInvalidStateError) {
-        throw new ConflictException({
-          code: "MV_SHOT_PLAN_PREPARATION_INVALID_STATE",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryNotConfiguredError) {
-        throw new ServiceUnavailableException({
-          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryUnavailableError) {
-        throw new BadGatewayException({
-          code: "PROJECT_REGISTRY_UNAVAILABLE",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async approveMvShotPlan(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) {
-      throw new BadRequestException({
-        code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
-      });
-    }
-
-    try {
-      return await this.projectRegistry.approveMvShotPlan(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) {
-        throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      }
-      if (error instanceof ProjectRegistryInvalidStateError) {
-        throw new ConflictException({
-          code: "MV_SHOT_PLAN_APPROVAL_INVALID_STATE",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryNotConfiguredError) {
-        throw new ServiceUnavailableException({
-          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryUnavailableError) {
-        throw new BadGatewayException({
-          code: "PROJECT_REGISTRY_UNAVAILABLE",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async prepareMvTimecodeAlignment(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try {
-      return await this.projectRegistry.prepareMvTimecodeAlignment(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_TIMECODE_ALIGNMENT_PREPARATION_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async approveMvTimecodeAlignment(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try {
-      return await this.projectRegistry.approveMvTimecodeAlignment(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_TIMECODE_ALIGNMENT_APPROVAL_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async prepareMvRenderPlan(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) {
-      throw new BadRequestException({
-        code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
-      });
-    }
-    try {
-      return await this.projectRegistry.prepareMvRenderPlan(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) {
-        throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      }
-      if (error instanceof ProjectRegistryInvalidStateError) {
-        throw new ConflictException({
-          code: "MV_RENDER_PLAN_PREPARATION_INVALID_STATE",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryNotConfiguredError) {
-        throw new ServiceUnavailableException({
-          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryUnavailableError) {
-        throw new BadGatewayException({
-          code: "PROJECT_REGISTRY_UNAVAILABLE",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async approveMvRenderPlan(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) {
-      throw new BadRequestException({
-        code: "PROJECT_ID_REQUIRED",
-        message: "project_id là bắt buộc",
-      });
-    }
-    try {
-      return await this.projectRegistry.approveMvRenderPlan(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) {
-        throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      }
-      if (error instanceof ProjectRegistryInvalidStateError) {
-        throw new ConflictException({
-          code: "MV_RENDER_PLAN_APPROVAL_INVALID_STATE",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryNotConfiguredError) {
-        throw new ServiceUnavailableException({
-          code: "PROJECT_REGISTRY_NOT_CONFIGURED",
-          message: error.message,
-        });
-      }
-      if (error instanceof ProjectRegistryUnavailableError) {
-        throw new BadGatewayException({
-          code: "PROJECT_REGISTRY_UNAVAILABLE",
-          message: error.message,
-        });
-      }
-      throw error;
-    }
-  }
-
-  async prepareMvRenderExecution(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try {
-      return await this.projectRegistry.prepareMvRenderExecution(projectId);
-    } catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_RENDER_EXECUTION_PREPARATION_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async approveMvRenderExecution(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.approveMvRenderExecution(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_RENDER_EXECUTION_APPROVAL_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async prepareMvProviderSubmission(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.prepareMvProviderSubmission(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_PROVIDER_SUBMISSION_PREPARATION_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async approveMvProviderSubmission(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.approveMvProviderSubmission(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_PROVIDER_SUBMISSION_APPROVAL_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async prepareMvProviderPilot(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.prepareMvProviderPilot(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_PROVIDER_PILOT_PREPARATION_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async prepareMvDuetBaseComposite(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.prepareMvDuetBaseComposite(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_DUET_BASE_COMPOSITE_PREPARATION_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async executeMvDuetBaseComposite(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.executeMvDuetBaseComposite(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_DUET_BASE_COMPOSITE_EXECUTION_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async approveMvDuetBaseComposite(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.approveMvDuetBaseComposite(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_DUET_BASE_COMPOSITE_APPROVAL_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async approveMvDuetBaseCompositeReview(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.approveMvDuetBaseCompositeReview(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_DUET_BASE_COMPOSITE_REVIEW_APPROVAL_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async prepareMvDuetBaseCompositeRollout(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.prepareMvDuetBaseCompositeRollout(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_DUET_BASE_COMPOSITE_ROLLOUT_PREPARATION_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async approveMvDuetBaseCompositeRollout(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.approveMvDuetBaseCompositeRollout(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_DUET_BASE_COMPOSITE_ROLLOUT_APPROVAL_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async executeMvDuetBaseCompositeRolloutUnit(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.executeMvDuetBaseCompositeRolloutUnit(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "MV_DUET_BASE_COMPOSITE_ROLLOUT_EXECUTION_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async startRp015FinalProof(projectIdInput: string, body: unknown) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    const request = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
-    const vocalMasterFileId = String(request.vocal_master_file_id ?? "").trim();
-    if (!vocalMasterFileId) throw new BadRequestException({ code: "VOCAL_MASTER_FILE_ID_REQUIRED", message: "vocal_master_file_id có giọng hát là bắt buộc" });
-    try { return await this.projectRegistry.startRp015FinalProof(projectId, vocalMasterFileId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "RP015_FINAL_PROOF_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async getRp015FinalProofStatus(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.getRp015FinalProofStatus(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "RP015_FINAL_PROOF_STATUS_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async prepareRp015VocalPilot(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.prepareRp015VocalPilot(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "RP015_VOCAL_PILOT_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async prepareRp015CleanVoiceReferences(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.prepareRp015CleanVoiceReferences(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "RP015_CLEAN_VOICE_REFERENCES_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async approveRp015CleanVoiceReferences(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.approveRp015CleanVoiceReferences(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "RP015_CLEAN_VOICE_REFERENCES_APPROVAL_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
-    }
-  }
-
-  async approveRp015VocalPilot(projectIdInput: string) {
-    const projectId = projectIdInput.trim();
-    if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id là bắt buộc" });
-    try { return await this.projectRegistry.approveRp015VocalPilot(projectId); }
-    catch (error) {
-      if (error instanceof ProjectRegistryProjectNotFoundError) throw new NotFoundException({ code: "PROJECT_NOT_FOUND", message: error.message });
-      if (error instanceof ProjectRegistryInvalidStateError) throw new ConflictException({ code: "RP015_VOCAL_PILOT_APPROVAL_INVALID_STATE", message: error.message });
-      if (error instanceof ProjectRegistryNotConfiguredError) throw new ServiceUnavailableException({ code: "PROJECT_REGISTRY_NOT_CONFIGURED", message: error.message });
-      if (error instanceof ProjectRegistryUnavailableError) throw new BadGatewayException({ code: "PROJECT_REGISTRY_UNAVAILABLE", message: error.message });
-      throw error;
     }
   }
 
@@ -940,13 +352,13 @@ export class IntakeService {
       throw new ServiceUnavailableException({
         code: "CHARACTER_LIBRARY_NOT_CONFIGURED",
         message:
-          "Cấu hình GIA_DINH_TU_HAU_DATABASE_ID và CHARACTER_LIBRARY_SHEET_NAME; runtime phải có Google Application Default Credentials hoặc GOOGLE_SERVICE_ACCOUNT_JSON.",
+          "Cáº¥u hÃ¬nh GIA_DINH_TU_HAU_DATABASE_ID vÃ  CHARACTER_LIBRARY_SHEET_NAME; runtime pháº£i cÃ³ Google Application Default Credentials hoáº·c GOOGLE_SERVICE_ACCOUNT_JSON.",
       });
     }
 
     throw new BadGatewayException({
       code: "CHARACTER_LIBRARY_UNAVAILABLE",
-      message: error instanceof Error ? error.message : "Không đọc được Character Library",
+      message: error instanceof Error ? error.message : "KhÃ´ng Ä‘á»c Ä‘Æ°á»£c Character Library",
     });
   }
 }

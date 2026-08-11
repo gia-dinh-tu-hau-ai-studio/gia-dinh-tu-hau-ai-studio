@@ -28,8 +28,60 @@ import {
   shortFilmSourceActorsNeedSync,
   syncShortFilmSourceActors,
   ShortFilmScriptGenerationRequestSchema,
+  ShortFilmPerformancePlanSchema,
+  ShortFilmTimingContractSchema,
   ShortFilmWorkflowSchema,
 } from "./index";
+
+test("performance timing contract rejects silent tail disguised as a ten-second dialogue shot", () => {
+  assert.throws(() => ShortFilmTimingContractSchema.parse({
+    shot_id: "SHOT-001", dialogue_line_id: "LINE-001",
+    speech_start_ms: 250, speech_end_ms: 4_000, shot_end_ms: 10_000,
+    max_post_speech_action_ms: 1_000,
+    review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+  }), /POST_SPEECH_ACTION_TOO_LONG/);
+});
+
+test("performance-driven plan accepts measured speech, reaction and natural cut without paid animatic", () => {
+  const result = ShortFilmPerformancePlanSchema.parse({
+    production_mode: "PERFORMANCE_DRIVEN_HYBRID",
+    shots: [{
+      shot_id: "SHOT-001", duration_ms: 5_000,
+      performance_source_mode: "OWNER_RECORDED",
+      performance_source_url: "https://drive.google.com/file/d/performance/view",
+      beats: [
+        { beat_id: "B1", beat_type: "PREPARE", start_ms: 0, end_ms: 300, direction: "Nhìn người đối diện" },
+        { beat_id: "B2", beat_type: "SPEAK", start_ms: 300, end_ms: 4_000, direction: "Nói đúng câu thoại", dialogue_line_id: "LINE-001" },
+        { beat_id: "B3", beat_type: "SETTLE", start_ms: 4_000, end_ms: 5_000, direction: "Dừng tự nhiên và cắt cảnh" },
+      ],
+      review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+    }],
+    timing_contracts: [{
+      shot_id: "SHOT-001", dialogue_line_id: "LINE-001",
+      speech_start_ms: 300, speech_end_ms: 4_000, measured_speech_end_ms: 4_080,
+      shot_end_ms: 5_000, max_post_speech_action_ms: 1_000,
+      review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+    }],
+    animatic: { video_url: "https://drive.google.com/file/d/animatic/view", uses_paid_provider_output: false, dialogue_timing_visible: true, review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" } },
+    golden_scene: { shot_ids: ["SHOT-001"], identity_locked: true, speech_motion_aligned: true, performance_continuity: true, natural_cut_after_dialogue: true, review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" } },
+    review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+  });
+  assert.equal(result.animatic?.uses_paid_provider_output, false);
+});
+
+test("performance plan draft can be saved before footage and animatic are supplied", () => {
+  const draft = ShortFilmPerformancePlanSchema.parse({
+    production_mode: "PERFORMANCE_DRIVEN_HYBRID",
+    shots: [{
+      shot_id: "SHOT-001", duration_ms: 3_000, performance_source_mode: "OWNER_RECORDED", performance_source_url: "",
+      beats: [{ beat_id: "B1", beat_type: "SPEAK", start_ms: 0, end_ms: 2_000, direction: "Nói theo kịch bản", dialogue_line_id: "LINE-001" }],
+      review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+    }],
+    animatic: { video_url: "", uses_paid_provider_output: false, dialogue_timing_visible: true, review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } },
+    review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+  });
+  assert.equal(draft.shots[0].performance_source_url, "");
+});
 
 test("contract approval can resume only from the pending contract gate", () => {
   assert.equal(canResumeContractApproval({ current_stage: "CONTRACT", next_action: "APPROVE_CONTRACT" }), true);
@@ -40,7 +92,7 @@ test("contract approval can resume only from the pending contract gate", () => {
 test("short-film workflow can resume only after contract approval", () => {
   assert.equal(canResumeShortFilmWorkflow({ project_type: "SHORT_FILM", next_action: "REVIEW_SHORT_FILM_SCRIPT" }), true);
   assert.equal(canResumeShortFilmWorkflow({ project_type: "SHORT_FILM", next_action: "APPROVE_CONTRACT" }), false);
-  assert.equal(canResumeShortFilmWorkflow({ project_type: "MUSIC_VIDEO", next_action: "PREPARE_MV_PRODUCTION" }), false);
+  assert.equal(canResumeShortFilmWorkflow({ project_type: "LEGACY", next_action: "REVIEW_SHORT_FILM_SCRIPT" }), false);
 });
 
 test("creates a provider-free Shot Plan from the approved script and waits for owner review", () => {
@@ -189,6 +241,22 @@ test("migrate legacy short-film draft without deleting user content", () => {
   assert.equal(migrated.dialogue.singing_scene, defaults.dialogue.singing_scene);
 });
 
+test("legacy execution outputs are quarantined while project content and Masters are preserved", () => {
+  const defaults = ShortFilmWorkflowSchema.parse(shortFilmWorkflow);
+  const migrated = migrateShortFilmWorkflowDraft({
+    ...shortFilmWorkflow,
+    idea_brief: "Nội dung dự án phải giữ nguyên",
+    pilot_budget_approval: { sample_count: 3, clip_duration_seconds: 15, runway_credits_cap: 700, elevenlabs_credits_cap: 1_000, sync_usd_cap: 3, decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-01T00:00:00.000Z" },
+    pilot: { duration_seconds: 15, video_url: "https://drive.google.com/file/d/old-pilot/view", qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true }, review: { decision: "APPROVE", notes: "old", reviewer: "PROJECT_OWNER" } },
+    full_film: { video_url: "https://drive.google.com/file/d/old-film/view", qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true }, review: { decision: "APPROVE", notes: "old", reviewer: "PROJECT_OWNER" } },
+  }, defaults);
+  assert.equal(migrated.idea_brief, "Nội dung dự án phải giữ nguyên");
+  assert.deepEqual(migrated.source_actors, shortFilmWorkflow.source_actors);
+  assert.equal(migrated.pilot_budget_approval, undefined);
+  assert.equal(migrated.pilot, undefined);
+  assert.equal(migrated.full_film, undefined);
+});
+
 test("AI có thể tự xây dựng chi tiết nhân vật còn để trống", () => {
   const workflow = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
@@ -298,6 +366,27 @@ const productionReadiness = {
     reviewer: "PROJECT_OWNER",
     reviewed_at: "2026-08-09T00:00:00.000Z",
   }],
+  performance_plan: {
+    production_mode: "PERFORMANCE_DRIVEN_HYBRID",
+    shots: [{
+      shot_id: "SHOT-001", duration_ms: 3400,
+      performance_source_mode: "OWNER_RECORDED",
+      performance_source_url: "https://drive.google.com/file/d/performance/view",
+      beats: [
+        { beat_id: "B1", beat_type: "SPEAK", start_ms: 0, end_ms: 2400, direction: "Nói đúng câu thoại", dialogue_line_id: "LINE-001" },
+        { beat_id: "B2", beat_type: "SETTLE", start_ms: 2400, end_ms: 3400, direction: "Dừng tự nhiên rồi cắt" },
+      ],
+      review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+    }],
+    timing_contracts: [{
+      shot_id: "SHOT-001", dialogue_line_id: "LINE-001", speech_start_ms: 0, speech_end_ms: 2400,
+      measured_speech_end_ms: 2400, shot_end_ms: 3400, max_post_speech_action_ms: 1000,
+      review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+    }],
+    animatic: { video_url: "https://drive.google.com/file/d/animatic/view", uses_paid_provider_output: false, dialogue_timing_visible: true, review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" } },
+    golden_scene: { shot_ids: ["SHOT-001"], identity_locked: true, speech_motion_aligned: true, performance_continuity: true, natural_cut_after_dialogue: true, review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" } },
+    review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+  },
   review: {
     decision: "APPROVE",
     notes: "Identity, voice, keyframe and speaker mapping locked",
@@ -542,38 +631,6 @@ test("chuẩn hóa payload SHORT_FILM", () => {
   assert.equal(result.project_type, "SHORT_FILM");
 });
 
-test("chuẩn hóa payload MUSIC_VIDEO", () => {
-  const result = normalizeProjectIntake({
-    ...common,
-    project_type: "MUSIC_VIDEO",
-    song_title: "Lời Người Đi Trước",
-    song_topic: "Tình chị em",
-    music_genre: "Dân ca Nam Bộ",
-    lyrics_source_mode: "USER_PROVIDED_LOCKED",
-    lyrics: "Lời bài hát đã khóa",
-    music_source_mode: "EXISTING_INSTRUMENTAL",
-    vocal_source_mode: "REAL_RECORDED_VOCAL",
-    visual_direction: "Miền Tây cinematic",
-  });
-
-  assert.equal(result.project_type, "MUSIC_VIDEO");
-});
-
-test("SHORT_MUSIC_CLIP không tạo project_type backend mới", () => {
-  const result = normalizeProjectIntake({
-    ...common,
-    project_type: "SHORT_MUSIC_CLIP",
-    music_source_mode: "EXISTING_SONG",
-    clip_start_time: "00:30",
-    clip_end_time: "01:30",
-    vocal_source_mode: "EXISTING_MASTER_AUDIO",
-    visual_direction: "Biểu diễn sân khấu",
-  });
-
-  assert.equal(result.project_type, "MUSIC_VIDEO");
-  assert.equal(result.project_subtype, "SHORT_MUSIC_CLIP");
-});
-
 test("chấp nhận nhân vật thư viện với costume và voice APPROVED", () => {
   const result = normalizeProjectIntake({
     ...common,
@@ -637,15 +694,14 @@ test("chấp nhận tối đa 5 link công khai khi từng link đã xác nhận
 test("từ chối link tham khảo chưa xác nhận quyền hoặc vượt quá 5 link", () => {
   const project = {
     ...common,
-    project_type: "MUSIC_VIDEO",
-    song_title: "Lời Người Đi Trước",
-    song_topic: "Tình chị em",
-    music_genre: "Dân ca Nam Bộ",
-    lyrics_source_mode: "USER_PROVIDED_LOCKED",
-    lyrics: "Lời bài hát đã khóa",
-    music_source_mode: "EXISTING_INSTRUMENTAL",
-    vocal_source_mode: "REAL_RECORDED_VOCAL",
-    visual_direction: "Miền Tây cinematic",
+    project_type: "SHORT_FILM",
+    story_idea: "Một câu chuyện hậu trường",
+    social_theme: "Tình thân",
+    story_genre: "Hài tình cảm",
+    primary_setting: "Đoàn Lô Tô",
+    ending_direction: "Kết thúc trọn vẹn",
+    dialogue_source: "AI_GENERATED",
+    short_film_workflow: shortFilmWorkflow,
   };
   const reference = {
     platform: "FACEBOOK",
@@ -709,15 +765,14 @@ test("từ chối ORIGINAL_FACE_COMPOSITE khi thiếu file_id video gốc", () =
           identity_mode: "ORIGINAL_FACE_COMPOSITE",
         },
       ],
-      project_type: "MUSIC_VIDEO",
-      song_title: "Lời Người Đi Trước",
-      song_topic: "Tình chị em",
-      music_genre: "Dân ca Nam Bộ",
-      lyrics_source_mode: "USER_PROVIDED_LOCKED",
-      lyrics: "Lời bài hát đã khóa",
-      music_source_mode: "EXISTING_INSTRUMENTAL",
-      vocal_source_mode: "REAL_RECORDED_VOCAL",
-      visual_direction: "Miền Tây cinematic",
+      project_type: "SHORT_FILM",
+      story_idea: "Một câu chuyện hậu trường",
+      social_theme: "Tình thân",
+      story_genre: "Hài tình cảm",
+      primary_setting: "Đoàn Lô Tô",
+      ending_direction: "Kết thúc trọn vẹn",
+      dialogue_source: "AI_GENERATED",
+      short_film_workflow: shortFilmWorkflow,
     }),
   );
 });
@@ -908,6 +963,36 @@ test("media providers remain locked when production readiness is missing", () =>
   assert.equal(shortFilmNextAction(parsed), "LOCK_SHORT_FILM_PRODUCTION_READINESS");
 });
 
+test("legacy approved readiness cannot bypass the performance-driven gate", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"], review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" } },
+    production_readiness: { ...productionReadiness, performance_plan: undefined },
+  });
+  const decision = shortFilmMediaExecutionDecision(parsed, "PILOT");
+  assert.equal(decision.provider_execution_allowed, false);
+  assert.match(decision.blockers.join(","), /PERFORMANCE_PLAN_MISSING/);
+});
+
+test("paid providers remain locked until the Golden Scene passes every criterion", () => {
+  const parsed = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "One shot", shots: ["Close-up Vy"], review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" } },
+    production_readiness: {
+      ...productionReadiness,
+      performance_plan: {
+        ...productionReadiness.performance_plan,
+        golden_scene: { ...productionReadiness.performance_plan.golden_scene, natural_cut_after_dialogue: false },
+      },
+    },
+  });
+  const decision = shortFilmMediaExecutionDecision(parsed, "PILOT");
+  assert.equal(decision.provider_execution_allowed, false);
+  assert.match(decision.blockers.join(","), /GOLDEN_SCENE_NOT_APPROVED/);
+});
+
 test("pilot is blocked when a Character Master is not APPROVED_LOCKED", () => {
   const parsed = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
@@ -1014,6 +1099,16 @@ test("pilot readiness requires only selected pilot shots while full-film readine
       line_id: `LINE-${String(index + 1).padStart(3, "0")}`,
       shot_id,
     })),
+    performance_plan: {
+      ...productionReadiness.performance_plan,
+      shots: pilotShotIds.map((shot_id) => ({ ...productionReadiness.performance_plan.shots[0], shot_id })),
+      timing_contracts: pilotShotIds.map((shot_id, index) => ({
+        ...productionReadiness.performance_plan.timing_contracts[0],
+        shot_id,
+        dialogue_line_id: `LINE-${String(index + 1).padStart(3, "0")}`,
+      })),
+      golden_scene: { ...productionReadiness.performance_plan.golden_scene, shot_ids: pilotShotIds.slice(0, 3) },
+    },
   };
   const parsed = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,

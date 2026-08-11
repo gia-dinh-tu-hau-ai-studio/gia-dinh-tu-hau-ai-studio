@@ -5,7 +5,7 @@ import { approveProviderBudgetForProjectCreation, calculateShortFilmPilotBudget,
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
 import { EvaluationReelQcPanel } from "./evaluation-reel-qc-panel";
 
-type FormProjectType = "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
+type FormProjectType = "SHORT_FILM";
 type IdentityMode = "LIBRARY_MASTER" | "ORIGINAL_FACE_COMPOSITE";
 
 type EligibleCharacter = {
@@ -66,7 +66,7 @@ type ReferenceSource = {
 };
 
 type IntakeDraft = {
-  version: 1;
+  version: 2;
   form_values: Record<string, string[]>;
   reference_sources: ReferenceSource[];
   short_film_workflow: ShortFilmWorkflow;
@@ -114,12 +114,6 @@ type CreatedProject = {
   current_stage: string;
   next_action:
     | "APPROVE_CONTRACT"
-    | "PREPARE_MV_PRODUCTION"
-    | "APPROVE_MV_PRODUCTION_PLAN"
-    | "PREPARE_MV_ASSETS"
-    | "APPROVE_MV_ASSETS"
-    | "PREPARE_MV_SHOT_PLAN"
-    | "APPROVE_MV_SHOT_PLAN"
     | "REVIEW_SHORT_FILM_SCRIPT"
     | "PREPARE_SHORT_FILM_SHOT_PLAN"
     | "REVIEW_SHORT_FILM_SHOT_PLAN"
@@ -152,23 +146,6 @@ type AccountPreflight = {
   providers: Array<{ provider: string; status: string; required_units?: number; available_units?: number; unit?: string; message: string }>;
 };
 
-const projectTypes: Array<{ value: FormProjectType; label: string; description: string }> = [
-  { value: "SHORT_FILM", label: "Phim ngắn / Web Drama", description: "Kịch bản, nhân vật, thoại, pilot và phim hoàn chỉnh." },
-  { value: "MUSIC_VIDEO", label: "MV âm nhạc", description: "Bài hát, giọng hát, hình ảnh và kế hoạch sản xuất MV." },
-  { value: "SHORT_MUSIC_CLIP", label: "Clip âm nhạc ngắn", description: "Video dọc ngắn cho TikTok, Reels hoặc Shorts." },
-];
-
-const projectRoles = ["MAIN", "SUPPORTING", "GUEST", "CAMEO", "BACKGROUND"];
-const performanceRoles = [
-  "ACTOR",
-  "SINGER",
-  "DANCER",
-  "MC",
-  "COMEDIAN",
-  "BAND_MEMBER",
-  "AUDIENCE",
-  "EXTRA",
-];
 const platformOptions = ["YOUTUBE", "TIKTOK", "FACEBOOK"];
 
 function TextField({ name, label, required = true, type = "text", placeholder, help, defaultValue = "" }: { name: string; label: string; required?: boolean; type?: string; placeholder?: string; help?: string; defaultValue?: string }) {
@@ -314,14 +291,12 @@ function ProviderAccountLinks({ provider, status }: { provider: string; status: 
 }
 
 export function ProjectIntakeForm() {
-  const [projectType, setProjectType] = useState<FormProjectType>("SHORT_FILM");
-  const [projectStarted, setProjectStarted] = useState(false);
+  const projectType: FormProjectType = "SHORT_FILM";
   const [frameMessage, setFrameMessage] = useState("");
   const [referenceSources, setReferenceSources] = useState<ReferenceSource[]>([]);
   const [shortFilmWorkflow, setShortFilmWorkflow] = useState<ShortFilmWorkflow>(createInitialShortFilmWorkflow);
   const [eligibleCharacters, setEligibleCharacters] = useState<EligibleCharacter[]>([]);
   const [characters, setCharacters] = useState<CharacterSelection[]>([]);
-  const [characterToAdd, setCharacterToAdd] = useState("");
   const [libraryMessage, setLibraryMessage] = useState("Đang đọc CHARACTER_LIBRARY…");
   const [result, setResult] = useState<string>("");
   const [validationFeedback, setValidationFeedback] = useState<ValidationFeedback | null>(null);
@@ -331,17 +306,6 @@ export function ProjectIntakeForm() {
   const [createdProject, setCreatedProject] = useState<CreatedProject | null>(null);
   const [approving, setApproving] = useState(false);
   const [approvalResult, setApprovalResult] = useState<string>("");
-  const [preparing, setPreparing] = useState(false);
-  const [preparationResult, setPreparationResult] = useState<string>("");
-  const [approvingPlan, setApprovingPlan] = useState(false);
-  const [planApprovalResult, setPlanApprovalResult] = useState<string>("");
-  const [instrumentalMasterFileId, setInstrumentalMasterFileId] = useState("");
-  const [preparingAssets, setPreparingAssets] = useState(false);
-  const [assetPreparationResult, setAssetPreparationResult] = useState("");
-  const [approvingAssets, setApprovingAssets] = useState(false);
-  const [assetApprovalResult, setAssetApprovalResult] = useState("");
-  const [preparingShotPlan, setPreparingShotPlan] = useState(false);
-  const [shotPlanPreparationResult, setShotPlanPreparationResult] = useState("");
   const [savingShortFilm, setSavingShortFilm] = useState(false);
   const [shortFilmSaveResult, setShortFilmSaveResult] = useState("");
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -384,7 +348,7 @@ export function ProjectIntakeForm() {
   const openAiAccountCheck = accountPreflight?.providers.find((provider) => provider.provider === "OPENAI");
   const scriptGenerationReady = accountPreflight?.script_generation_gate === "READY" ||
     (accountPreflight?.script_generation_gate === undefined && ["SUFFICIENT", "UNVERIFIED"].includes(openAiAccountCheck?.status ?? ""));
-  const scriptReadyForCreation = projectType !== "SHORT_FILM" || shortFilmScriptReadyForProjectCreation(shortFilmWorkflow);
+  const scriptReadyForCreation = shortFilmScriptReadyForProjectCreation(shortFilmWorkflow);
 
   async function checkAccounts() {
     setCheckingAccounts(true);
@@ -417,10 +381,8 @@ export function ProjectIntakeForm() {
       "10_MINUTES": 600,
       "15_MINUTES": 900,
     } as Record<string, number>)[durationTarget] ?? 300;
-    if (projectType === "SHORT_FILM") {
-      const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
-      setShortFilmWorkflow((current) => synchronizeShortFilmIntakeFields(current, { target_duration_minutes: durationMinutes }));
-    }
+    const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
+    setShortFilmWorkflow((current) => synchronizeShortFilmIntakeFields(current, { target_duration_minutes: durationMinutes }));
     setAccountPreflight(null);
     setManualBalanceConfirmed(false);
     setProviderBudget((current) => {
@@ -428,15 +390,14 @@ export function ProjectIntakeForm() {
       if (estimate.total === current.estimate.total && estimate.estimated_duration_seconds === current.estimate.estimated_duration_seconds) return current;
       return { ...current, estimate, approval: { ...current.approval, decision: "PENDING", approved_limit: estimate.total, reviewed_at: undefined } };
     });
-  }, [durationTarget, projectType, providerBudget.providers.script, providerBudget.providers.video, providerBudget.providers.voice, providerBudget.providers.lip_sync]);
+  }, [durationTarget, providerBudget.providers.script, providerBudget.providers.video, providerBudget.providers.voice, providerBudget.providers.lip_sync]);
 
   useEffect(() => {
-    if (projectType !== "SHORT_FILM") return;
     const scriptProvider = shortFilmScriptProvider(shortFilmWorkflow.script_source);
     setProviderBudget((current) => current.providers.script === scriptProvider
       ? current
       : { ...current, providers: { ...current.providers, script: scriptProvider }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } });
-  }, [projectType, shortFilmWorkflow.script_source]);
+  }, [shortFilmWorkflow.script_source]);
 
   async function checkProjectProgress(projectIdOverride?: string) {
     const projectId = (projectIdOverride ?? progressProjectId).trim();
@@ -496,7 +457,6 @@ export function ProjectIntakeForm() {
         return;
       }
       const snapshot = body.resume_snapshot as ShortFilmResumeSnapshot;
-      setProjectType("SHORT_FILM");
       setShortFilmWorkflow(snapshot.short_film_workflow);
       setReferenceSources(snapshot.reference_sources);
       setCharacters(snapshot.characters as CharacterSelection[]);
@@ -507,8 +467,7 @@ export function ProjectIntakeForm() {
       setAccountPreflight(null);
       setManualBalanceConfirmed(false);
       setCreatedProject({ project_id: projectProgress.project_id, current_stage: projectProgress.current_stage, next_action: body.next_action });
-      setProjectStarted(true);
-      setTimeout(() => document.getElementById("intake-frame-5")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+      setTimeout(() => document.getElementById("intake-frame-2")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
     } catch {
       setProgressActionMessage("Không kết nối được kho dự án TuhauAI.");
     } finally {
@@ -544,7 +503,7 @@ export function ProjectIntakeForm() {
   }
 
   function syncShortFilmUserField(target: EventTarget | null) {
-    if (projectType !== "SHORT_FILM" || !(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
     if (target.name === "story_idea") {
       setShortFilmWorkflow((current) => synchronizeShortFilmIntakeFields(current, { idea_brief: target.value }));
     }
@@ -554,9 +513,9 @@ export function ProjectIntakeForm() {
   }
 
   function saveDraft(form: HTMLFormElement) {
-    if (!projectStarted || createdProject) return;
+    if (createdProject) return;
     const draft: IntakeDraft = {
-      version: 1,
+      version: 2,
       form_values: collectFormValues(form),
       reference_sources: referenceSources,
       short_film_workflow: shortFilmWorkflow,
@@ -569,51 +528,8 @@ export function ProjectIntakeForm() {
     setDraftSavedAt(draft.saved_at);
   }
 
-  function startProject(type: FormProjectType) {
-    setProjectType(type);
-    setCreatedProject(null);
-    setCreationResult("");
-    setAccountPreflight(null);
-    setManualBalanceConfirmed(false);
-    const fallbackDuration = type === "SHORT_MUSIC_CLIP" ? "30_SECONDS" : "5_MINUTES";
-    try {
-      const stored = localStorage.getItem(`${INTAKE_DRAFT_PREFIX}${type}`);
-      if (stored) {
-        const draft = JSON.parse(stored) as IntakeDraft;
-        if (draft.version === 1) {
-          setReferenceSources(draft.reference_sources ?? []);
-          const defaults = createInitialShortFilmWorkflow();
-          const migratedWorkflow = migrateShortFilmWorkflowDraft(draft.short_film_workflow, defaults);
-          setShortFilmWorkflow({
-            ...migratedWorkflow,
-            idea_brief: draft.form_values?.story_idea?.[0] ?? migratedWorkflow.idea_brief,
-            dialogue: { ...migratedWorkflow.dialogue, language: draft.form_values?.language?.[0] ?? migratedWorkflow.dialogue.language },
-          });
-          setCharacters(draft.characters ?? []);
-          setProviderBudget(resetProviderBudgetApprovalForDraft(draft.provider_budget ?? initialProviderBudget));
-          setDurationTarget(draft.duration_target ?? fallbackDuration);
-          setDraftFormValues(draft.form_values ?? {});
-          setInitialFormValues(draft.form_values ?? {});
-          setDraftSavedAt(draft.saved_at ?? "");
-        }
-      } else {
-        setDurationTarget(fallbackDuration);
-        setDraftFormValues(null);
-        setInitialFormValues({});
-        setDraftSavedAt("");
-      }
-    } catch {
-      setDurationTarget(fallbackDuration);
-      setDraftFormValues(null);
-      setInitialFormValues({});
-      setDraftSavedAt("");
-    }
-    setProjectStarted(true);
-    setFrameMessage("");
-  }
-
   useEffect(() => {
-    if (!projectStarted || !draftFormValues) return;
+    if (!draftFormValues) return;
     const form = document.querySelector<HTMLFormElement>("form[data-intake-form]");
     if (!form) return;
     for (const element of Array.from(form.elements)) {
@@ -627,16 +543,15 @@ export function ProjectIntakeForm() {
       }
     }
     setDraftFormValues(null);
-  }, [projectStarted, draftFormValues]);
+  }, [draftFormValues]);
 
   useEffect(() => {
-    if (!projectStarted || draftFormValues) return;
+    if (draftFormValues) return;
     const form = document.querySelector<HTMLFormElement>("form[data-intake-form]");
     if (form) saveDraft(form);
-  }, [projectStarted, referenceSources, shortFilmWorkflow, characters, providerBudget, durationTarget]);
+  }, [draftFormValues, referenceSources, shortFilmWorkflow, characters, providerBudget, durationTarget]);
 
   useEffect(() => {
-    if (projectType !== "SHORT_FILM") return;
     const syncedCharacters: CharacterSelection[] = shortFilmWorkflow.film_characters.map((character) => ({
       character_id: character.source_actor_id,
       project_role: character.film_role === "PROTAGONIST"
@@ -652,7 +567,7 @@ export function ProjectIntakeForm() {
       original_video_file_id: "",
     }));
     setCharacters((current) => JSON.stringify(current) === JSON.stringify(syncedCharacters) ? current : syncedCharacters);
-  }, [projectType, shortFilmWorkflow.film_characters, shortFilmWorkflow.dialogue.dialogue_mode]);
+  }, [shortFilmWorkflow.film_characters, shortFilmWorkflow.dialogue.dialogue_mode]);
 
   useEffect(() => {
     try {
@@ -664,14 +579,13 @@ export function ProjectIntakeForm() {
   }, []);
 
   useEffect(() => {
-    if (!projectStarted) return;
     const form = document.querySelector<HTMLFormElement>("form[data-intake-form]");
     if (!form) return;
     for (const input of Array.from(form.querySelectorAll<HTMLInputElement>('input[name][type="text"], input[name][type="email"], input[name][type="tel"], input[name][type="url"]'))) {
       input.setAttribute("list", `history-${input.name.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
       input.setAttribute("autocomplete", "off");
     }
-  }, [projectStarted, projectType, inputHistory]);
+  }, [inputHistory]);
 
   useEffect(() => {
     void fetch("/api/characters/eligible")
@@ -684,7 +598,6 @@ export function ProjectIntakeForm() {
           (character) => character.readiness.master_identity === "APPROVED_LOCKED",
         );
         setEligibleCharacters(approvedCharacters);
-        setCharacterToAdd(approvedCharacters[0]?.character_id ?? "");
         setLibraryMessage(
           approvedCharacters.length > 0
             ? `${approvedCharacters.length} nhân vật sẵn sàng sử dụng.`
@@ -714,36 +627,6 @@ export function ProjectIntakeForm() {
     const timer = window.setInterval(() => void refreshShortFilmFullFilmStatus(), 10_000);
     return () => window.clearInterval(timer);
   }, [monitoringFullFilmExecution, createdProject?.project_id]);
-
-  function addCharacter() {
-    if (!characterToAdd || characters.some((item) => item.character_id === characterToAdd)) {
-      return;
-    }
-
-    invalidateConfirmation();
-
-    setCharacters((current) => [
-      ...current,
-      {
-        character_id: characterToAdd,
-        project_role: current.length === 0 ? "MAIN" : "SUPPORTING",
-        performance_role: "ACTOR",
-        voice_required: false,
-        lip_sync_required: false,
-        identity_mode: "LIBRARY_MASTER",
-        original_video_file_id: "",
-      },
-    ]);
-  }
-
-  function updateCharacter(index: number, patch: Partial<CharacterSelection>) {
-    invalidateConfirmation();
-    setCharacters((current) =>
-      current.map((character, characterIndex) =>
-        characterIndex === index ? { ...character, ...patch } : character,
-      ),
-    );
-  }
 
   function focusValidationTarget(targetPath?: string) {
     document.querySelectorAll(".validation-target-error").forEach((element) => element.classList.remove("validation-target-error"));
@@ -834,7 +717,7 @@ export function ProjectIntakeForm() {
       platforms: form.getAll("platforms").map(String),
       reference_sources: referenceSources.filter((source) => source.url.trim()),
       provider_budget: approvedProviderBudget,
-      short_film_workflow: projectType === "SHORT_FILM" ? shortFilmIntakeOnly(shortFilmWorkflow) : undefined,
+      short_film_workflow: shortFilmIntakeOnly(shortFilmWorkflow),
       characters: characters.map((character) => {
         const libraryCharacter = eligibleCharacters.find(
           (item) => item.character_id === character.character_id,
@@ -1204,195 +1087,29 @@ export function ProjectIntakeForm() {
     }
   }
 
-  async function prepareMvProduction() {
-    if (!createdProject) {
-      return;
-    }
-
-    setPreparing(true);
-    setPreparationResult("");
-    try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(createdProject.project_id)}/prepare-mv-production`,
-        { method: "POST" },
-      );
-      const body = await response.json();
-      setPreparationResult(JSON.stringify(body, null, 2));
-      if (response.ok && body.approval_status === "PENDING") {
-        setCreatedProject({
-          project_id: body.project_id,
-          current_stage: body.current_stage,
-          next_action: body.next_action,
-        });
-      }
-    } catch {
-      setPreparationResult(
-        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp kế hoạch.",
-      );
-    } finally {
-      setPreparing(false);
-    }
-  }
-
-  async function approveMvProductionPlan() {
-    if (!createdProject) {
-      return;
-    }
-
-    setApprovingPlan(true);
-    setPlanApprovalResult("");
-    try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(createdProject.project_id)}/approve-mv-production-plan`,
-        { method: "POST" },
-      );
-      const body = await response.json();
-      setPlanApprovalResult(JSON.stringify(body, null, 2));
-      if (response.ok && body.approval_status === "APPROVED") {
-        setCreatedProject({
-          project_id: body.project_id,
-          current_stage: body.current_stage,
-          next_action: body.next_action,
-        });
-      }
-    } catch {
-      setPlanApprovalResult(
-        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp sự kiện duyệt kế hoạch.",
-      );
-    } finally {
-      setApprovingPlan(false);
-    }
-  }
-
-  async function prepareMvAssets() {
-    if (!createdProject || !instrumentalMasterFileId.trim()) return;
-
-    setPreparingAssets(true);
-    setAssetPreparationResult("");
-    try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(createdProject.project_id)}/prepare-mv-assets`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            instrumental_master_file_id: instrumentalMasterFileId.trim(),
-          }),
-        },
-      );
-      const body = await response.json();
-      setAssetPreparationResult(JSON.stringify(body, null, 2));
-      if (response.ok && body.approval_status === "PENDING") {
-        setCreatedProject({
-          project_id: body.project_id,
-          current_stage: body.current_stage,
-          next_action: body.next_action,
-        });
-      }
-    } catch {
-      setAssetPreparationResult(
-        "Không kết nối được kho dự án. Hệ thống chưa tự gửi lại để tránh tạo thao tác trùng.",
-      );
-    } finally {
-      setPreparingAssets(false);
-    }
-  }
-
-  async function approveMvAssets() {
-    if (!createdProject) return;
-
-    setApprovingAssets(true);
-    setAssetApprovalResult("");
-    try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(createdProject.project_id)}/approve-mv-assets`,
-        { method: "POST" },
-      );
-      const body = await response.json();
-      setAssetApprovalResult(JSON.stringify(body, null, 2));
-      if (response.ok && body.approval_status === "APPROVED") {
-        setCreatedProject({
-          project_id: body.project_id,
-          current_stage: body.current_stage,
-          next_action: body.next_action,
-        });
-      }
-    } catch {
-      setAssetApprovalResult(
-        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp sự kiện duyệt tài sản.",
-      );
-    } finally {
-      setApprovingAssets(false);
-    }
-  }
-
-  async function prepareMvShotPlan() {
-    if (!createdProject) return;
-
-    setPreparingShotPlan(true);
-    setShotPlanPreparationResult("");
-    try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(createdProject.project_id)}/prepare-mv-shot-plan`,
-        { method: "POST" },
-      );
-      const body = await response.json();
-      setShotPlanPreparationResult(JSON.stringify(body, null, 2));
-      if (response.ok && body.approval_status === "PENDING") {
-        setCreatedProject({
-          project_id: body.project_id,
-          current_stage: body.current_stage,
-          next_action: body.next_action,
-        });
-      }
-    } catch {
-      setShotPlanPreparationResult(
-        "Không kết nối được kho dự án. Không tự động gửi lại để tránh ghi lặp shot plan.",
-      );
-    } finally {
-      setPreparingShotPlan(false);
-    }
-  }
-
   return (
     <form data-intake-form noValidate onBlur={rememberInput} onChange={(event) => { syncShortFilmUserField(event.target); invalidateConfirmation(); saveDraft(event.currentTarget); }} onInput={(event) => { syncShortFilmUserField(event.target); saveDraft(event.currentTarget); }} onSubmit={handleSubmit}>
       {Object.entries(inputHistory).map(([name, values]) => <datalist id={`history-${name.replace(/[^a-zA-Z0-9_-]/g, "-")}`} key={name}>{values.map((value) => <option key={value} value={value} />)}</datalist>)}
-      {!projectStarted && <section className="project-gateway">
-        <div className="section-heading"><span>01</span><div><h2>Chọn loại dự án</h2><p>Chọn đúng loại nội dung bạn muốn thực hiện.</p></div></div>
-        <div className="project-grid">
-          {projectTypes.map((item) => (
-            <button className={`project-card ${projectType === item.value ? "selected" : ""}`} key={item.value} onClick={() => startProject(item.value)} type="button">
-              <strong>{item.label}</strong>
-              <small>{item.description}</small>
-              <span>Bắt đầu →</span>
-            </button>
-          ))}
-        </div>
-      </section>}
-
-      {!projectStarted && <section className="progress-lookup">
-        <div className="section-heading"><span>↻</span><div><h2>Kiểm tra tiến độ dự án</h2><p>Nhập mã dự án để xem phần trăm hoàn thành, giai đoạn hiện tại và bước đang chờ duyệt.</p></div></div>
-        <div className="progress-search"><label><span>Mã dự án</span><input placeholder="Ví dụ: GDTH-FILM-20260809150000-ABCD" value={progressProjectId} onChange={(event) => setProgressProjectId(event.target.value)} /></label><button disabled={checkingProgress || !progressProjectId.trim()} type="button" onClick={() => void checkProjectProgress()}>{checkingProgress ? "Đang kiểm tra…" : "Kiểm tra tiến độ"}</button></div>
-        {progressMessage && <p className="operation-error">{progressMessage}</p>}
-        {projectProgress && <div className="progress-result">
-          <header><div><strong>{projectProgress.project_name}</strong><small>{projectProgress.project_id}</small></div><b>{projectProgress.percent_complete}%</b></header>
-          <div className="progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={projectProgress.percent_complete}><span style={{ width: `${projectProgress.percent_complete}%` }} /></div>
-          <p>Bước hiện tại: <strong>{projectProgress.milestones.find((milestone) => milestone.status === "CURRENT")?.label ?? "Đã hoàn thành"}</strong></p>
-          {canResumeContractApproval(projectProgress) && <button disabled={approvingProgressContract} type="button" onClick={() => void approveContractFromProgress()}>{approvingProgressContract ? "Đang duyệt hợp đồng…" : "Duyệt hợp đồng và tiếp tục dự án"}</button>}
-          {canResumeShortFilmWorkflow(projectProgress) && <button disabled={resumingProject} type="button" onClick={() => void resumeShortFilmProject()}>{resumingProject ? "Đang mở dự án…" : "Mở dự án để tiếp tục review"}</button>}
-          {progressActionMessage && <p className={progressActionMessage.startsWith("Đã duyệt") ? "operation-success" : "operation-error"}>{progressActionMessage}</p>}
-          <ol>{projectProgress.milestones.map((milestone) => <li className={milestone.status.toLowerCase()} key={milestone.action}><span>{milestone.status === "COMPLETED" ? "✓" : milestone.status === "CURRENT" ? "●" : "○"}</span><div><strong>{milestone.label}</strong><small>{milestone.status === "CURRENT" ? "Đang thực hiện/chờ duyệt" : milestone.status === "COMPLETED" ? "Đã hoàn thành" : "Chưa bắt đầu"}</small></div></li>)}</ol>
-        </div>}
-      </section>}
-
-      {projectStarted && <>
+      <>
       <input name="project_type" type="hidden" value={projectType} />
-      <div className="wizard-bar"><button className="secondary-button" type="button" onClick={() => setProjectStarted(false)}>← Đổi loại dự án</button><strong>{projectTypes.find((item) => item.value === projectType)?.label}</strong><small>{draftSavedAt ? "Đã tự động lưu nháp trên thiết bị này" : "Nội dung sẽ tự động lưu trên thiết bị này"}</small></div>
+      <div className="wizard-bar"><strong>TuhauAI · Sản xuất phim</strong><small>{draftSavedAt ? "Đã tự động lưu nháp trên thiết bị này" : "Nội dung sẽ tự động lưu trên thiết bị này"}</small></div>
+      <nav className="film-production-roadmap" aria-label="Quy trình sản xuất phim">
+        <strong>Quy trình của dự án</strong>
+        <ol>
+          <li className="current"><b>1</b><span>Thông tin &amp; ý tưởng</span></li>
+          <li><b>2</b><span>Kịch bản &amp; nhân vật</span></li>
+          <li><b>3</b><span>Kinh phí &amp; tài khoản</span></li>
+          <li><b>4</b><span>Shot Plan &amp; khóa Master</span></li>
+          <li><b>5</b><span>Clip pilot &amp; QC</span></li>
+          <li><b>6</b><span>Sản xuất &amp; xuất bản</span></li>
+        </ol>
+        <small>Các bước sản xuất có chi phí chỉ mở sau khi bước trước đã được duyệt.</small>
+      </nav>
       {frameMessage && <p className="frame-message" role="alert">{frameMessage}</p>}
       {validationFeedback && <div className={`validation-feedback ${validationFeedback.kind}`} role={validationFeedback.kind === "error" ? "alert" : "status"} aria-live="polite"><strong>{validationFeedback.title}</strong><span>{validationFeedback.message}</span>{validationFeedback.kind === "error" && <button className="validation-target-button" onClick={() => focusValidationTarget(validationFeedback.targetPath)} type="button">Đi đến mục cần sửa ↓</button>}</div>}
 
-      <section className="intake-frame active" id="intake-frame-2">
-        <div className="section-heading"><span>02</span><div><h2>Thông tin cơ bản</h2><p>Chọn nhanh theo gợi ý; các trường kỹ thuật đã được ẩn.</p></div></div>
+      <section className="intake-frame active" id="intake-frame-1">
+        <div className="section-heading"><span>01</span><div><h2>Thông tin phim</h2><p>Nhập thông tin người dùng cần biết; cấu hình kỹ thuật được hệ thống tự xử lý.</p></div></div>
         <div className="field-grid">
           <TextField defaultValue={initialFormValues.project_name?.[0]} name="project_name" label="Tên dự án" placeholder="Tập 01 – Bữa cơm gia đình" help="Tập 01 – Bữa cơm gia đình" />
           <TextField defaultValue={initialFormValues.client_name?.[0]} name="client_name" label="Người phụ trách" placeholder="Nguyễn Văn A" help="Tên người tạo dự án" />
@@ -1404,7 +1121,7 @@ export function ProjectIntakeForm() {
           <SelectField defaultValue={initialFormValues.language?.[0]} name="language" label="Ngôn ngữ" options={[["vi-VN", "Tiếng Việt"], ["vi-VN-southwest", "Tiếng Việt – giọng miền Tây"], ["en", "Tiếng Anh"]]} />
           <SelectField defaultValue={initialFormValues.content_rating?.[0]} name="content_rating" label="Độ tuổi phù hợp" options={[["ALL", "Mọi độ tuổi"], ["13+", "Từ 13 tuổi"], ["16+", "Từ 16 tuổi"], ["18+", "Từ 18 tuổi"]]} />
           <SelectField defaultValue={initialFormValues.target_audience?.[0]} name="target_audience" label="Khán giả chính" options={[["FAMILY", "Gia đình"], ["YOUTH", "Người trẻ"], ["GENERAL", "Đại chúng"], ["SOUTHWEST_VIETNAM", "Khán giả miền Tây"]]} />
-          <fieldset className="duration-picker"><legend>Thời lượng *</legend><div>{(projectType === "SHORT_MUSIC_CLIP" ? [["15_SECONDS", "15 giây"], ["30_SECONDS", "30 giây"], ["60_SECONDS", "60 giây"]] : [["3_MINUTES", "3 phút"], ["5_MINUTES", "5 phút"], ["7_MINUTES", "7 phút"], ["10_MINUTES", "10 phút"], ["15_MINUTES", "15 phút"]]).map(([value, text]) => <label className={durationTarget === value ? "selected" : ""} key={value}><input checked={durationTarget === value} name="duration_target" onChange={() => setDurationTarget(value)} required type="radio" value={value} /><span>{text}</span></label>)}</div><small>Chạm trực tiếp vào thời lượng mong muốn; dự toán sẽ tự tính lại.</small></fieldset>
+          <fieldset className="duration-picker"><legend>Thời lượng *</legend><div>{[["3_MINUTES", "3 phút"], ["5_MINUTES", "5 phút"], ["7_MINUTES", "7 phút"], ["10_MINUTES", "10 phút"], ["15_MINUTES", "15 phút"]].map(([value, text]) => <label className={durationTarget === value ? "selected" : ""} key={value}><input checked={durationTarget === value} name="duration_target" onChange={() => setDurationTarget(value)} required type="radio" value={value} /><span>{text}</span></label>)}</div><small>Chạm trực tiếp vào thời lượng mong muốn; dự toán sẽ tự tính lại.</small></fieldset>
           <SelectField defaultValue={initialFormValues.aspect_ratio?.[0]} name="aspect_ratio" label="Khung hình" options={[["9:16", "Dọc 9:16 – TikTok/Reels/Shorts"], ["16:9", "Ngang 16:9 – YouTube/Facebook"], ["1:1", "Vuông 1:1"]]} />
         </div>
         <fieldset className="platform-field">
@@ -1419,23 +1136,11 @@ export function ProjectIntakeForm() {
         </fieldset>
       </section>
 
-      <section className="intake-frame active" id="intake-frame-3">
-        <div className="section-heading"><span>03</span><div><h2>Video tham khảo</h2><p>Dán tối đa 5 link công khai. Hệ thống chỉ học cấu trúc/phong cách, không sao chép nguyên bản nếu chưa có quyền.</p></div></div>
-        {referenceSources.map((source, index) => <article className="reference-row" key={index}>
-          <label><span>Nền tảng *</span><select required value={source.platform} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, platform: event.target.value as ReferenceSource["platform"]} : item))}><option value="YOUTUBE">YouTube</option><option value="TIKTOK">TikTok</option><option value="FACEBOOK">Facebook</option></select></label>
-          <label><span>Link video *</span><input required type="url" placeholder="https://..." value={source.url} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, url: event.target.value} : item))} /></label>
-          <label><span>Cách sử dụng *</span><select required value={source.usage_mode} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, usage_mode: event.target.value as ReferenceSource["usage_mode"]} : item))}><option value="INSPIRATION_ONLY">Chỉ lấy cảm hứng</option><option value="STRUCTURE_REFERENCE">Tham khảo cấu trúc</option><option value="AUTHORIZED_ADAPTATION">Chuyển thể – đã có quyền</option></select></label>
-          <label className="wide-field"><span>Điểm muốn học theo</span><input placeholder="Ví dụ: nhịp dựng nhanh, mở đầu gây tò mò, tông hài gia đình" value={source.notes} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, notes: event.target.value} : item))} /></label>
-          <label className="consent"><input required type="checkbox" checked={source.rights_confirmed} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, rights_confirmed: event.target.checked} : item))} /> Tôi xác nhận link công khai và có quyền sử dụng theo lựa chọn trên.</label>
-          <button type="button" className="remove-button" onClick={() => setReferenceSources((items) => items.filter((_, i) => i !== index))}>Xóa link</button>
-        </article>)}
-        <button type="button" className="secondary-button" disabled={referenceSources.length >= 5} onClick={() => setReferenceSources((items) => [...items, {platform: "YOUTUBE", url: "", usage_mode: "INSPIRATION_ONLY", rights_confirmed: false, notes: ""}])}>+ Thêm link tham khảo</button>
-      </section>
-
-      <section className="intake-frame active" id="intake-frame-5">
-        <div className="section-heading"><span>04</span><div><h2>Nội dung dự án</h2><p>Chỉ hiển thị thông tin cần cho loại dự án đã chọn.</p></div></div>
+      <section className="intake-frame active" id="intake-frame-2">
+        <div className="section-heading"><span>02</span><div><h2>Kịch bản, nhân vật và giọng thoại</h2><p>Hoàn thiện ý tưởng, duyệt kịch bản, phân vai và khóa đúng Character/Voice Master trước khi sản xuất.</p></div></div>
+        <p className="library-status">{libraryMessage}</p>
         <div className="field-grid">
-          {projectType === "SHORT_FILM" && <>
+          <>
             <TextField defaultValue={initialFormValues.story_idea?.[0]} name="story_idea" label="Ý tưởng tập / phim" placeholder="Hai chị em hiểu lầm nhau vì chuyện chăm sóc mẹ" help="Một câu kể chuyện chính" />
             <SelectField defaultValue={initialFormValues.social_theme?.[0]} name="social_theme" label="Chủ đề" options={[["FAMILY", "Gia đình"], ["LOVE", "Tình cảm"], ["FRIENDSHIP", "Bạn bè"], ["COMMUNITY", "Đời sống xã hội"], ["EDUCATION", "Giáo dục"]]} />
             <SelectField defaultValue={initialFormValues.story_genre?.[0]} name="story_genre" label="Thể loại" options={[["FAMILY_DRAMA", "Tâm lý gia đình"], ["COMEDY", "Hài"], ["ROMANCE", "Tình cảm"], ["INSPIRATIONAL", "Truyền cảm hứng"], ["MYSTERY", "Bí ẩn"]]} />
@@ -1468,31 +1173,26 @@ export function ProjectIntakeForm() {
                 setShortFilmWorkflow(workflow);
               }}
             />
-          </>}
+          </>
 
-          {projectType === "MUSIC_VIDEO" && <>
-            <TextField name="song_title" label="Tên bài hát" placeholder="Nhà là nơi để về" />
-            <SelectField name="song_topic" label="Chủ đề bài hát" options={[["FAMILY", "Gia đình"], ["LOVE", "Tình yêu"], ["HOMELAND", "Quê hương"], ["LIFE", "Cuộc sống"], ["CELEBRATION", "Lễ hội/sự kiện"]]} />
-            <SelectField name="music_genre" label="Thể loại nhạc" options={[["BOLERO", "Bolero"], ["POP", "Pop"], ["BALLAD", "Ballad"], ["FOLK", "Dân ca"], ["DANCE", "Dance"]]} />
-            <SelectField name="lyrics_source_mode" label="Nguồn lời" options={[["AI_GENERATED", "AI hỗ trợ sáng tác"], ["USER_PROVIDED_LOCKED", "Lời có sẵn và đã chốt"]]} />
-            <TextField name="lyrics" label="Lời bài hát hoặc link file lời" required={false} placeholder="Dán lời đã có quyền hoặc link Google Drive" />
-            <SelectField name="music_source_mode" label="Nguồn nhạc" options={[["AI_COMPOSITION", "AI hỗ trợ sáng tác"], ["EXISTING_INSTRUMENTAL", "Beat/instrumental có sẵn"], ["EXISTING_SONG", "Bài hát có sẵn"], ["NEW_STUDIO_PRODUCTION", "Thu mới tại studio"]]} />
-            <SelectField name="vocal_source_mode" label="Nguồn giọng hát" options={[["REAL_RECORDED_VOCAL", "Giọng thu thật"], ["AUTHORIZED_VOICE_MODEL", "Voice model đã được cấp quyền"], ["EXISTING_MASTER_AUDIO", "Bản vocal master có sẵn"]]} />
-            <TextField name="visual_direction" label="Định hướng hình ảnh" placeholder="Ví dụ: điện ảnh miền Tây, ấm áp, nhiều cảnh đời thường" />
-          </>}
-
-          {projectType === "SHORT_MUSIC_CLIP" && <>
-            <SelectField name="music_source_mode" label="Nguồn bài / nhạc" options={[["AI_COMPOSITION", "AI hỗ trợ sáng tác"], ["EXISTING_INSTRUMENTAL", "Beat có sẵn"], ["EXISTING_SONG", "Bài hát có sẵn"], ["NEW_STUDIO_PRODUCTION", "Thu mới"]]} />
-            <TextField name="clip_start_time" label="Thời điểm bắt đầu" placeholder="Ví dụ: 00:45" />
-            <TextField name="clip_end_time" label="Thời điểm kết thúc" placeholder="Ví dụ: 01:15" />
-            <SelectField name="vocal_source_mode" label="Nguồn giọng" options={[["REAL_RECORDED_VOCAL", "Giọng thu thật"], ["AUTHORIZED_VOICE_MODEL", "Voice model đã cấp quyền"], ["EXISTING_MASTER_AUDIO", "Vocal master có sẵn"]]} />
-            <TextField name="visual_direction" label="Phong cách biểu diễn" placeholder="Ví dụ: năng động, cận mặt, chuyển động máy mượt" />
-          </>}
         </div>
       </section>
 
+      <section className="intake-frame active" id="intake-frame-3">
+        <div className="section-heading"><span>03</span><div><h2>Video tham khảo (không bắt buộc)</h2><p>Dán tối đa 5 link công khai. Hệ thống chỉ học cấu trúc/phong cách, không sao chép nguyên bản nếu chưa có quyền.</p></div></div>
+        {referenceSources.map((source, index) => <article className="reference-row" key={index}>
+          <label><span>Nền tảng *</span><select required value={source.platform} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, platform: event.target.value as ReferenceSource["platform"]} : item))}><option value="YOUTUBE">YouTube</option><option value="TIKTOK">TikTok</option><option value="FACEBOOK">Facebook</option></select></label>
+          <label><span>Link video *</span><input required type="url" placeholder="https://..." value={source.url} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, url: event.target.value} : item))} /></label>
+          <label><span>Cách sử dụng *</span><select required value={source.usage_mode} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, usage_mode: event.target.value as ReferenceSource["usage_mode"]} : item))}><option value="INSPIRATION_ONLY">Chỉ lấy cảm hứng</option><option value="STRUCTURE_REFERENCE">Tham khảo cấu trúc</option><option value="AUTHORIZED_ADAPTATION">Chuyển thể – đã có quyền</option></select></label>
+          <label className="wide-field"><span>Điểm muốn học theo</span><input placeholder="Ví dụ: nhịp dựng nhanh, mở đầu gây tò mò, tông hài gia đình" value={source.notes} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, notes: event.target.value} : item))} /></label>
+          <label className="consent"><input required type="checkbox" checked={source.rights_confirmed} onChange={(event) => setReferenceSources((items) => items.map((item, i) => i === index ? {...item, rights_confirmed: event.target.checked} : item))} /> Tôi xác nhận link công khai và có quyền sử dụng theo lựa chọn trên.</label>
+          <button type="button" className="remove-button" onClick={() => setReferenceSources((items) => items.filter((_, i) => i !== index))}>Xóa link</button>
+        </article>)}
+        <button type="button" className="secondary-button" disabled={referenceSources.length >= 5} onClick={() => setReferenceSources((items) => [...items, {platform: "YOUTUBE", url: "", usage_mode: "INSPIRATION_ONLY", rights_confirmed: false, notes: ""}])}>+ Thêm link tham khảo</button>
+      </section>
+
       <section className="budget-panel intake-frame active" id="intake-frame-4">
-        <div className="section-heading"><span>05</span><div><h2>Dự toán kinh phí</h2><p>Xem tổng chi phí dự kiến và kiểm tra tài khoản. Kịch bản AI chỉ phát sinh phí khi bạn bấm nút tạo bản nháp rõ ràng.</p></div></div>
+        <div className="section-heading"><span>04</span><div><h2>Kinh phí và tài khoản nhà cung cấp</h2><p>Hệ thống tự dự toán, kiểm tra hạn mức và chỉ mở nút chạy khi từng nhà cung cấp sẵn sàng.</p></div></div>
         <div className="internal-service-grid">
           <label><span>Nguồn nhạc phim</span><select value={providerBudget.internal_services.music_source} onChange={(event) => setProviderBudget((current) => ({ ...current, internal_services: { ...current.internal_services, music_source: event.target.value as ProviderBudgetPlan["internal_services"]["music_source"] }, approval: { ...current.approval, decision: "PENDING", reviewed_at: undefined } }))}><option value="NOT_SELECTED">Chưa chọn</option><option value="PROJECT_OWNER_LICENSED">Chủ dự án cung cấp · đã có quyền</option><option value="LICENSED_LIBRARY">Thư viện nhạc đã cấp phép</option></select><small>Không sử dụng nhạc chưa xác nhận quyền.</small></label>
         </div>
@@ -1501,7 +1201,7 @@ export function ProjectIntakeForm() {
           <div className="budget-total"><span>Kinh phí đề xuất</span><strong>{providerBudget.estimate.total.toLocaleString("vi-VN")} USD</strong><small>Ước tính cho {providerBudget.estimate.estimated_duration_seconds} giây</small></div>
         </div>
         <div className={`budget-approval ${budgetApproved ? "approved" : "pending"}`}>
-          <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "CHỜ DUYỆT"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Các bước sản xuất vẫn chờ bạn duyệt.` : projectType === "SHORT_FILM" && shortFilmWorkflow.script_source !== "PROJECT_OWNER_PROVIDED" ? "Sau khi tài khoản đạt, nút tạo bản nháp AI sẽ duyệt hạn mức và chỉ gọi OpenAI. Dự án chỉ được khởi tạo sau khi bạn duyệt kịch bản." : "Nút cuối trang sẽ đồng thời duyệt kinh phí và khởi tạo dự án. Chưa tạo hình ảnh, giọng nói hoặc video."}</p></div>
+          <div><strong>{budgetApproved ? "KINH PHÍ ĐÃ DUYỆT" : "CHỜ DUYỆT"}</strong><p>{budgetApproved ? `Hạn mức ${providerBudget.approval.approved_limit.toLocaleString("vi-VN")} ${providerBudget.estimate.currency}. Các bước sản xuất vẫn chờ bạn duyệt.` : shortFilmWorkflow.script_source !== "PROJECT_OWNER_PROVIDED" ? "Sau khi tài khoản đạt, nút tạo bản nháp AI sẽ duyệt hạn mức và chỉ gọi OpenAI. Dự án chỉ được khởi tạo sau khi bạn duyệt kịch bản." : "Nút cuối trang sẽ đồng thời duyệt kinh phí và khởi tạo dự án. Chưa tạo hình ảnh, giọng nói hoặc video."}</p></div>
         </div>
         <div className={`account-preflight ${accountExecutionReady ? "approved" : "pending"}`}>
           <div><strong>KIỂM TRA TÀI KHOẢN TRƯỚC KHI CHẠY</strong><p>Chỉ đọc số dư/hạn mức. Không tạo ảnh, video, giọng hoặc trừ credit.</p></div>
@@ -1514,7 +1214,7 @@ export function ProjectIntakeForm() {
       </section>
 
       <section className="intake-frame active" id="intake-frame-6">
-        <div className="section-heading"><span>06</span><div><h2>Kiểm tra &amp; tạo dự án</h2><p>Xem lại dữ liệu đã nhập ngay trên trang. Mục thiếu sẽ đỏ; mục đạt sẽ xanh.</p></div></div>
+        <div className="section-heading"><span>05</span><div><h2>Kiểm tra và khởi tạo dự án phim</h2><p>Xem lại dữ liệu đã nhập ngay trên trang. Mục thiếu hiển thị đỏ; mục đạt chuyển xanh.</p></div></div>
         <div className="next-step-guide" aria-live="polite">
           <strong>Bước tiếp theo cần làm</strong>
           <ol>
@@ -1524,24 +1224,7 @@ export function ProjectIntakeForm() {
           </ol>
           <p>Khởi tạo dự án không gọi nhà cung cấp sản xuất và chưa phát sinh credit.</p>
         </div>
-        {projectType !== "SHORT_FILM" && <>
-          <p className="library-status">{libraryMessage}</p>
-          <div className="character-picker">
-          <label>
-            <span>1. Chọn nhân vật</span>
-            <select value={characterToAdd} onChange={(event) => setCharacterToAdd(event.target.value)}>
-              {eligibleCharacters.map((character) => (
-                <option key={character.character_id} value={character.character_id}>
-                  {character.character_name} · {character.character_type}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="secondary-button" disabled={!characterToAdd} onClick={addCharacter} type="button">2. Thêm nhân vật vào dự án</button>
-          </div>
-        </>}
-
-        {projectType === "SHORT_FILM" && <div className="selected-character-summary">
+        <div className="selected-character-summary">
           <strong>Nhân vật đã chọn ở phần trước</strong>
           <span>{shortFilmWorkflow.film_characters.length} nhân vật sẽ được đưa vào hợp đồng.</span>
           {shortFilmWorkflow.film_characters.map((character) => {
@@ -1549,39 +1232,15 @@ export function ProjectIntakeForm() {
             const roleLabel = ({ PROTAGONIST: "Nhân vật chính", ANTAGONIST: "Đối trọng", SUPPORTING: "Hỗ trợ", CAMEO: "Khách mời", EXTRA: "Quần chúng" } as const)[character.film_role];
             return <article key={character.source_actor_id}><div><b>{character.film_character_name}</b><small>{actor?.character_name ?? character.source_actor_id}</small></div><span>{roleLabel}</span></article>;
           })}
-        </div>}
+        </div>
 
-        {projectType !== "SHORT_FILM" && <div className="character-list">
-          {characters.map((character, index) => {
-            const libraryCharacter = eligibleCharacters.find(
-              (item) => item.character_id === character.character_id,
-            );
-            return (
-              <article className="character-card" key={character.character_id}>
-                <div className="character-card-heading">
-                  <div>
-                    <strong>{libraryCharacter?.character_name}</strong>
-                  </div>
-                  <button className="remove-button" onClick={() => {
-                    invalidateConfirmation();
-                    setCharacters((current) => current.filter((_, itemIndex) => itemIndex !== index));
-                  }} type="button">Xóa</button>
-                </div>
-                <div className="field-grid">
-                  <label><span>Vai trò dự án *</span><select value={character.project_role} onChange={(event) => updateCharacter(index, { project_role: event.target.value })}>{projectRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
-                  <label><span>Vai trò biểu diễn *</span><select value={character.performance_role} onChange={(event) => updateCharacter(index, { performance_role: event.target.value })}>{performanceRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
-                </div>
-              </article>
-            );
-          })}
-        </div>}
         <div className="final-action-panel">
           <strong>{characters.length === 0 ? "Chưa có nhân vật trong dự án" : `Sẵn sàng kiểm tra ${characters.length} nhân vật`}</strong>
           <span>{characters.length === 0 ? "Quay lại phần nội dung để chọn nhân vật." : "Nhân vật đã được đồng bộ tự động; không cần chọn lại."}</span>
           <button className={`final-check-button${createdProject ? " action-completed" : ""}`} disabled={submitting || creating || Boolean(createdProject) || characters.length === 0 || !accountExecutionReady || !scriptReadyForCreation} type="submit">{createdProject ? `✓ Dự án ${createdProject.project_id} đã được tạo` : submitting || creating ? "Đang kiểm tra và khởi tạo…" : characters.length === 0 ? "Chưa thể tạo — chưa có nhân vật" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tạo" : !scriptReadyForCreation ? "Hoàn thiện và duyệt kịch bản trước khi tạo" : `Duyệt ${providerBudget.estimate.total.toLocaleString("vi-VN")} USD & khởi tạo dự án`}</button>
         </div>
       </section>
-      </>}
+      </>
       {result && <ResultDetails value={result} />}
       {creationResult && <ResultDetails value={creationResult} />}
       {createdProject?.next_action === "APPROVE_CONTRACT" && (
@@ -1591,16 +1250,12 @@ export function ProjectIntakeForm() {
             <p>Dự án <strong>{createdProject.project_id}</strong> đã được tạo. Duyệt để mở phần chuẩn bị nội dung tiếp theo.</p>
           </div>
           <button disabled={approving} onClick={approveContract} type="button">
-            {approving
-              ? "Đang duyệt hợp đồng…"
-              : projectType === "SHORT_FILM"
-                ? "Duyệt hợp đồng và chuyển sang review kịch bản"
-                : "Duyệt hợp đồng và chuẩn bị sản xuất MV"}
+            {approving ? "Đang duyệt hợp đồng…" : "Duyệt hợp đồng và chuyển sang review kịch bản"}
           </button>
         </section>
       )}
       {approvalResult && <ResultDetails value={approvalResult} />}
-      {createdProject && projectType === "SHORT_FILM" && createdProject.next_action !== "APPROVE_CONTRACT" && (
+      {createdProject && createdProject.next_action !== "APPROVE_CONTRACT" && (
         <section className="operations-panel">
           <div>
             <h2>Tiếp tục hoàn thiện phim ngắn</h2>
@@ -1612,7 +1267,7 @@ export function ProjectIntakeForm() {
           {shortFilmSaveResult && <ResultDetails value={shortFilmSaveResult} />}
         </section>
       )}
-      {createdProject && projectType === "SHORT_FILM" && createdProject.next_action !== "APPROVE_CONTRACT" && <EvaluationReelQcPanel projectId={createdProject.project_id} />}
+      {createdProject && createdProject.next_action !== "APPROVE_CONTRACT" && <EvaluationReelQcPanel projectId={createdProject.project_id} />}
       {createdProject?.next_action === "PREPARE_SHORT_FILM_PILOT" && (
         <section className="confirmation-panel">
           <div>
@@ -1648,17 +1303,6 @@ export function ProjectIntakeForm() {
           </div>}
         </section>
       )}
-      {createdProject?.next_action === "PREPARE_MV_PRODUCTION" && (
-        <section className="confirmation-panel">
-          <div>
-            <h2>Lập kế hoạch sản xuất MV</h2>
-            <p>Chuẩn bị kế hoạch cho dự án <strong>{createdProject.project_id}</strong> và đưa vào trạng thái chờ bạn duyệt. Bước này chưa tạo video.</p>
-          </div>
-          <button disabled={preparing} onClick={prepareMvProduction} type="button">
-            {preparing ? "Đang lập kế hoạch…" : "Lập kế hoạch MV để duyệt"}
-          </button>
-        </section>
-      )}
       {createdProject?.next_action === "PRODUCE_SHORT_FILM" && (() => {
         const caps = proposedFullFilmCaps();
         return <section className="confirmation-panel">
@@ -1673,76 +1317,6 @@ export function ProjectIntakeForm() {
           {fullFilmExecutionResult && <ResultDetails value={fullFilmExecutionResult} />}
         </section>;
       })()}
-      {preparationResult && <ResultDetails value={preparationResult} />}
-      {createdProject?.next_action === "APPROVE_MV_PRODUCTION_PLAN" && (
-        <section className="confirmation-panel">
-          <div>
-            <h2>Kế hoạch sản xuất đang chờ duyệt</h2>
-            <p>Kế hoạch đã được chuẩn bị cho <strong>{createdProject.project_id}</strong>. Chưa tạo hình ảnh hoặc video.</p>
-          </div>
-          <button disabled={approvingPlan} onClick={approveMvProductionPlan} type="button">
-            {approvingPlan ? "Đang duyệt kế hoạch…" : "Duyệt kế hoạch sản xuất MV"}
-          </button>
-        </section>
-      )}
-      {planApprovalResult && <ResultDetails value={planApprovalResult} />}
-      {createdProject?.next_action === "PREPARE_MV_ASSETS" && (
-        <section className="confirmation-panel">
-          <div>
-            <h2>Chuẩn bị nhạc và tài liệu MV</h2>
-            <p>Nhập link Google Drive của beat hoặc nhạc nền chính. Hệ thống chỉ kiểm tra nguồn và chờ bạn duyệt, chưa tạo video.</p>
-            <label>
-              <span>Link Google Drive của beat/nhạc nền *</span>
-              <input
-                onChange={(event) => setInstrumentalMasterFileId(event.target.value)}
-                placeholder="1k9sgXZfFwo42XY0Y0NoWKXUQ-CuA63M5"
-                type="text"
-                value={instrumentalMasterFileId}
-              />
-            </label>
-          </div>
-          <button
-            disabled={preparingAssets || !instrumentalMasterFileId.trim()}
-            onClick={prepareMvAssets}
-            type="button"
-          >
-            {preparingAssets ? "Đang kiểm tra tài sản…" : "Chuẩn bị tài sản MV để duyệt"}
-          </button>
-        </section>
-      )}
-      {assetPreparationResult && <ResultDetails value={assetPreparationResult} />}
-      {createdProject?.next_action === "APPROVE_MV_ASSETS" && (
-        <section className="confirmation-panel">
-          <div>
-            <h2>Tài sản MV đang chờ duyệt</h2>
-            <p>Nhạc, lời và video nguồn của dự án <strong>{createdProject.project_id}</strong> đã được kiểm tra. Duyệt để mở bước lập kế hoạch cảnh; chưa tạo video.</p>
-          </div>
-          <button disabled={approvingAssets} onClick={approveMvAssets} type="button">
-            {approvingAssets ? "Đang duyệt tài sản…" : "Duyệt tài sản MV"}
-          </button>
-        </section>
-      )}
-      {assetApprovalResult && <ResultDetails value={assetApprovalResult} />}
-      {createdProject?.next_action === "PREPARE_MV_SHOT_PLAN" && (
-        <section className="confirmation-panel">
-          <div>
-            <h2>Tài sản MV đã được duyệt an toàn</h2>
-            <p>Tài sản của <strong>{createdProject.project_id}</strong> đã sẵn sàng để lập kế hoạch cảnh. Chưa tạo video.</p>
-          </div>
-          <button disabled={preparingShotPlan} onClick={prepareMvShotPlan} type="button">
-            {preparingShotPlan ? "Đang lập shot plan…" : "Lập shot plan MV để duyệt"}
-          </button>
-        </section>
-      )}
-      {shotPlanPreparationResult && <ResultDetails value={shotPlanPreparationResult} />}
-      {createdProject?.next_action === "APPROVE_MV_SHOT_PLAN" && (
-        <section className="confirmation-panel">
-          <div>
-            <h2>Kế hoạch cảnh MV đang chờ duyệt</h2>
-            <p>Kế hoạch cảnh của <strong>{createdProject.project_id}</strong> đã bám theo lời và nhạc. Chưa tạo video.</p>
-          </div>
-        </section>
-      )}
     </form>
   );
 }
