@@ -20,11 +20,44 @@ type PilotTask = {
   dialogue_line_id?: string;
   audio_drive_file_id?: string;
   elevenlabs_request_id?: string;
+  voice_master_id?: string;
+  elevenlabs_voice_id?: string;
+  tts_model_id?: "eleven_v3";
+  tts_language_code?: "vi";
+  transcript_text?: string;
+  transcript_language_code?: string;
+  transcript_language_probability?: number;
+  transcript_similarity?: number;
+  transcript_verified?: boolean;
   sync_generation_id?: string;
   sync_status?: string;
   sync_output_url?: string;
   final_drive_file_id?: string;
 };
+
+function normalizeVietnamese(value: string) {
+  return value.normalize("NFC").toLocaleLowerCase("vi").replace(/[^a-z\u00c0-\u024f\u1e00-\u1eff\d\s]/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+function dialogueSimilarity(expected: string, actual: string) {
+  const left = normalizeVietnamese(expected), right = normalizeVietnamese(actual);
+  if (!left || !right) return 0;
+  const distances = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    let diagonal = distances[0]; distances[0] = row;
+    for (let column = 1; column <= right.length; column += 1) {
+      const above = distances[column];
+      distances[column] = Math.min(distances[column] + 1, distances[column - 1] + 1, diagonal + (left[row - 1] === right[column - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return 1 - distances[right.length] / Math.max(left.length, right.length);
+}
+
+export function verifyVietnameseTranscript(expected: string, evidence: { text: string; languageCode: string; languageProbability: number }) {
+  const similarity = dialogueSimilarity(expected, evidence.text);
+  return { passed: ["vi", "vie"].includes(evidence.languageCode.toLowerCase()) && evidence.languageProbability >= 0.8 && similarity >= 0.82, similarity };
+}
 
 type PilotExecutionManifest = {
   schema_version: "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1";
@@ -135,7 +168,13 @@ export class ShortFilmPilotExecutionService {
         const voice = context.workflow.production_readiness!.voice_masters.find((item) => item.voice_master_id === line.voice_master_id);
         const providerVoiceId = voice ? library.find((item) => item.character_id === voice.source_actor_id)?.elevenlabs_voice_id : undefined;
         if (!providerVoiceId) throw new Error(`ELEVENLABS_VOICE_ID_MISSING:${line.voice_master_id}`);
-        const audio = await eleven.synthesize({ voiceId: providerVoiceId, text: line.dialogue_text });
+        if (context.workflow.dialogue.language !== "vi-VN-southwest" || voice?.locale !== "vi-VN-southwest") throw new Error(`VIETNAMESE_LANGUAGE_LOCK_MISSING:${line.line_id}`);
+        if (voice.source_actor_id !== line.speaker_source_actor_id || voice.voice_master_id !== line.voice_master_id) throw new Error(`VOICE_SPEAKER_LOCK_MISMATCH:${line.line_id}`);
+        const audio = await eleven.synthesize({ voiceId: providerVoiceId, text: line.dialogue_text, languageCode: "vi" });
+        const transcript = await eleven.transcribeVietnamese(audio.audio);
+        const verification = verifyVietnameseTranscript(line.dialogue_text, transcript);
+        Object.assign(pendingRunway, { voice_master_id: voice.voice_master_id, elevenlabs_voice_id: providerVoiceId, tts_model_id: audio.modelId, tts_language_code: audio.languageCode, transcript_text: transcript.text, transcript_language_code: transcript.languageCode, transcript_language_probability: transcript.languageProbability, transcript_similarity: verification.similarity, transcript_verified: verification.passed });
+        if (!verification.passed) throw new Error(`VIETNAMESE_AUDIO_VERIFICATION_FAILED:${line.line_id}:LANG=${transcript.languageCode}:PROB=${transcript.languageProbability.toFixed(3)}:SIM=${verification.similarity.toFixed(3)}`);
         const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, `${pendingRunway.sample_id}_${pendingRunway.shot_id}.mp3`, "audio/mpeg", audio.audio);
         pendingRunway.audio_drive_file_id = uploaded.id as string;
         pendingRunway.elevenlabs_request_id = audio.requestId;
@@ -162,6 +201,7 @@ export class ShortFilmPilotExecutionService {
       const syncTask = manifest.tasks.find((task) => task.audio_drive_file_id && (!task.sync_generation_id || !["COMPLETED", "FAILED", "REJECTED"].includes(task.sync_status ?? "")));
       if (syncTask) {
         if (!syncTask.sync_generation_id) {
+          if (!syncTask.transcript_verified) throw new Error(`SYNC_BLOCKED_UNVERIFIED_VIETNAMESE_AUDIO:${syncTask.shot_id}`);
           const audio = await this.drive.downloadBuffer(syncTask.audio_drive_file_id as string);
           const generation = await sync.submit({ videoUrl: syncTask.runway_output_url as string, audio, fileName: `${syncTask.shot_id}.mp3` });
           syncTask.sync_generation_id = generation.generationId;

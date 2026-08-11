@@ -6,6 +6,7 @@ import { CharacterLibraryConnector } from "../connectors/google-sheets/character
 import { ProjectRegistryConnector } from "../connectors/google-sheets/project-registry.connector";
 import { assembleVideoBuffers } from "../media/short-film-pilot-assembler";
 import { ElevenLabsPilotProvider, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
+import { verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const FULL_MANIFEST = "SHORT_FILM_FULL_EXECUTION_V1.json";
@@ -16,6 +17,8 @@ type FullTask = {
   status: "PENDING_SUBMIT" | "RUNWAY_PROCESSING" | "SYNC_PROCESSING" | "COMPLETED" | "FAILED";
   reused_from_pilot: boolean; final_drive_file_id?: string; runway_task_id?: string; runway_output_url?: string;
   audio_drive_file_id?: string; sync_generation_id?: string; sync_output_url?: string; error?: string;
+  voice_master_id?: string; elevenlabs_voice_id?: string; tts_model_id?: "eleven_v3"; tts_language_code?: "vi";
+  transcript_language_code?: string; transcript_language_probability?: number; transcript_similarity?: number; transcript_verified?: boolean;
 };
 type FullManifest = {
   schema_version: "SHORT_FILM_FULL_EXECUTION_V1"; execution_id: string; project_id: string;
@@ -89,6 +92,7 @@ export class ShortFilmFullExecutionService {
           active.runway_output_url = state.outputUrl;
           const line = dialogue.get(active.shot_id);
           if (line) {
+            if (!active.transcript_verified) throw new Error(`SYNC_BLOCKED_UNVERIFIED_VIETNAMESE_AUDIO:${active.shot_id}`);
             const audio = await this.drive.downloadBuffer(active.audio_drive_file_id as string);
             const generation = await sync.submit({ videoUrl: state.outputUrl as string, audio, fileName: `${active.shot_id}.mp3` });
             active.sync_generation_id = generation.generationId; active.status = "SYNC_PROCESSING";
@@ -114,7 +118,13 @@ export class ShortFilmFullExecutionService {
             const voice = context.workflow.production_readiness!.voice_masters.find((item) => item.voice_master_id === line.voice_master_id);
             const providerVoiceId = voice ? voiceIds.get(voice.source_actor_id) : undefined;
             if (!providerVoiceId) throw new Error(`ELEVENLABS_VOICE_ID_MISSING:${line.voice_master_id}`);
-            const audio = await eleven.synthesize({ voiceId: providerVoiceId, text: line.dialogue_text });
+            if (context.workflow.dialogue.language !== "vi-VN-southwest" || voice?.locale !== "vi-VN-southwest") throw new Error(`VIETNAMESE_LANGUAGE_LOCK_MISSING:${line.line_id}`);
+            if (voice.source_actor_id !== line.speaker_source_actor_id || voice.voice_master_id !== line.voice_master_id) throw new Error(`VOICE_SPEAKER_LOCK_MISMATCH:${line.line_id}`);
+            const audio = await eleven.synthesize({ voiceId: providerVoiceId, text: line.dialogue_text, languageCode: "vi" });
+            const transcript = await eleven.transcribeVietnamese(audio.audio);
+            const verification = verifyVietnameseTranscript(line.dialogue_text, transcript);
+            Object.assign(next, { voice_master_id: voice.voice_master_id, elevenlabs_voice_id: providerVoiceId, tts_model_id: audio.modelId, tts_language_code: audio.languageCode, transcript_language_code: transcript.languageCode, transcript_language_probability: transcript.languageProbability, transcript_similarity: verification.similarity, transcript_verified: verification.passed });
+            if (!verification.passed) throw new Error(`VIETNAMESE_AUDIO_VERIFICATION_FAILED:${line.line_id}:LANG=${transcript.languageCode}:PROB=${transcript.languageProbability.toFixed(3)}:SIM=${verification.similarity.toFixed(3)}`);
             const uploaded = await this.drive.uploadFullFilmArtifact(context.project_folder_id, `${next.shot_id}.mp3`, "audio/mpeg", audio.audio);
             next.audio_drive_file_id = uploaded.id as string;
           }

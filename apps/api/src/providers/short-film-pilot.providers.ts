@@ -72,13 +72,13 @@ export class RunwayPilotProvider {
 export class ElevenLabsPilotProvider {
   constructor(private readonly apiKey: string, private readonly fetcher: typeof fetch = fetch) {}
 
-  async synthesize(input: { voiceId: string; text: string }) {
+  async synthesize(input: { voiceId: string; text: string; languageCode: "vi" }) {
     const response = await providerResponse(await this.fetcher(
       `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voiceId)}?output_format=mp3_44100_128`,
       {
         method: "POST",
         headers: { "xi-api-key": this.apiKey, "content-type": "application/json" },
-        body: JSON.stringify({ text: input.text, model_id: "eleven_multilingual_v2", voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true } }),
+        body: JSON.stringify({ text: input.text, model_id: "eleven_v3", language_code: input.languageCode, voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true } }),
         signal: AbortSignal.timeout(60_000),
       },
     ), "ELEVENLABS");
@@ -86,7 +86,24 @@ export class ElevenLabsPilotProvider {
       audio: Buffer.from(await response.arrayBuffer()),
       requestId: response.headers.get("request-id") ?? undefined,
       characterCost: Number(response.headers.get("character-cost") ?? input.text.length),
+      modelId: "eleven_v3" as const,
+      languageCode: input.languageCode,
     };
+  }
+
+  async transcribeVietnamese(audio: Buffer) {
+    const form = new FormData();
+    form.set("file", new Blob([Uint8Array.from(audio)], { type: "audio/mpeg" }), "approved-dialogue.mp3");
+    form.set("model_id", "scribe_v2");
+    form.set("language_code", "vi");
+    form.set("tag_audio_events", "false");
+    form.set("diarize", "false");
+    const response = await providerResponse(await this.fetcher("https://api.elevenlabs.io/v1/speech-to-text", {
+      method: "POST", headers: { "xi-api-key": this.apiKey }, body: form, signal: AbortSignal.timeout(60_000),
+    }), "ELEVENLABS");
+    const body = await response.json() as { text?: string; language_code?: string; language_probability?: number };
+    if (!body.text || !body.language_code) throw new PilotProviderError("ELEVENLABS", "MALFORMED_TRANSCRIPT", "ElevenLabs did not return transcript evidence", false);
+    return { text: body.text, languageCode: body.language_code.toLowerCase(), languageProbability: body.language_probability ?? 0, requestId: response.headers.get("request-id") ?? undefined, modelId: "scribe_v2" as const };
   }
 }
 
