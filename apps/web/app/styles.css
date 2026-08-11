@@ -30,6 +30,14 @@ label { display: grid; gap: 8px; color: #e4d7d1; font-size: 14px; }
 .field-help { color: #aa9ca2; line-height: 1.4; }
 .wizard-bar { position: sticky; top: 8px; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(14, 11, 13, .96); }
 .wizard-bar button { justify-self: start; padding: 10px 16px; }
+.film-production-roadmap { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--gold); border-radius: 16px; background: linear-gradient(135deg, rgba(99,24,42,.4), rgba(14,11,13,.97)); }
+.film-production-roadmap > strong { color: #ffe6aa; font-size: 18px; }
+.film-production-roadmap > small { color: #cdbfb8; line-height: 1.45; }
+.film-production-roadmap ol { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.film-production-roadmap li { display: grid; gap: 7px; min-width: 0; padding: 10px; border: 1px solid #3b2e33; border-radius: 11px; color: #998b91; background: #151114; }
+.film-production-roadmap li b { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 50%; background: #2c2024; }
+.film-production-roadmap li span { font-size: 12px; line-height: 1.35; }
+.film-production-roadmap li.current { border-color: #d9a846; color: #fff2d0; background: rgba(99,24,42,.48); }
 .frame-navigator { position: sticky; top: 72px; z-index: 4; display: grid; gap: 10px; padding: 14px; border: 1px solid var(--gold); border-radius: 16px; background: rgba(14, 11, 13, .98); box-shadow: 0 12px 30px rgba(0,0,0,.35); }
 .frame-navigator header { display: flex; justify-content: space-between; gap: 12px; color: #ffe6aa; }
 .frame-progress { overflow: hidden; height: 8px; border-radius: 999px; background: #34282d; }
@@ -247,5 +255,5 @@ pre { max-width: 100%; overflow: auto; padding: 20px; border: 1px solid var(--li
 .locked-stage,
 .system-only { display: none !important; }
 .short-film-workflow video { width: 100%; max-height: 480px; border-radius: 12px; background: #000; }
-@media (max-width: 760px) { main { width: min(calc(100% - 20px), 1080px); padding-top: 28px; } .hero { margin-bottom: 24px; } .project-grid, .field-grid, .character-picker, .confirmation-panel, .reference-row, .budget-approval, .progress-search { grid-template-columns: 1fr; } section { padding: 18px; border-radius: 16px; } input, select, textarea { min-height: 48px; font-size: 16px; } button { width: 100%; justify-self: stretch; } .wizard-bar { position: static; align-items: stretch; flex-direction: column; } .frame-navigator { position: static; } .frame-navigator header { display: grid; } .frame-navigator ol { grid-template-columns: repeat(6, 38px); overflow-x: auto; } .frame-navigator button { display: grid; place-items: center; min-height: 38px; padding: 5px; } .frame-navigator button span { display: none; } .frame-actions { display: grid; grid-template-columns: 1fr; } .frame-actions .secondary-button { order: 2; } .frame-message { position: static; } }
+@media (max-width: 760px) { main { width: min(calc(100% - 20px), 1080px); padding-top: 28px; } .hero { margin-bottom: 24px; } .project-grid, .field-grid, .character-picker, .confirmation-panel, .reference-row, .budget-approval, .progress-search { grid-template-columns: 1fr; } section { padding: 18px; border-radius: 16px; } input, select, textarea { min-height: 48px; font-size: 16px; } button { width: 100%; justify-self: stretch; } .wizard-bar { position: static; align-items: stretch; flex-direction: column; } .film-production-roadmap ol { grid-template-columns: repeat(6, minmax(118px, 1fr)); overflow-x: auto; padding-bottom: 5px; } .frame-navigator { position: static; } .frame-navigator header { display: grid; } .frame-navigator ol { grid-template-columns: repeat(6, 38px); overflow-x: auto; } .frame-navigator button { display: grid; place-items: center; min-height: 38px; padding: 5px; } .frame-navigator button span { display: none; } .frame-actions { display: grid; grid-template-columns: 1fr; } .frame-actions .secondary-button { order: 2; } .frame-message { position: static; } }
 @media (max-width: 760px) { .short-film-workflow fieldset, .approval-gate, .script-approval-actions, .review-click-actions { grid-template-columns: 1fr; } }

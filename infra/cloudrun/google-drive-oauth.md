@@ -67,9 +67,8 @@ gcloud run services update ai-executor-api \
   --quiet
 ```
 
-Sau khi revision mới sẵn sàng, gọi `/v1/health`, rồi gọi lại endpoint
-`prepare-mv-production`. Endpoint idempotent: một dự án chỉ có một job, một approval và
-một manifest ở trạng thái đang chờ duyệt.
+Sau khi revision mới sẵn sàng, gọi `/v1/health`, rồi kiểm tra đọc danh sách
+Character Master và tạo một dự án phim thử không gọi provider.
 
 Chỉ xóa file client JSON và ADC cục bộ sau khi secret đã được gắn và endpoint được xác
 minh thành công.

@@ -1,96 +1,31 @@
-# Dự Án Gia Đình Tư Hậu
+# TuhauAI — Gia Đình Tư Hậu
 
-Hệ thống này chỉ phục vụ một dự án: **Gia Đình Tư Hậu**.
+Hệ thống tập trung duy nhất vào **phim ngắn và Web Drama**.
 
-## Nguyên tắc vận hành đã khóa
+## Nguyên tắc vận hành
 
-- Ưu tiên sản xuất phim ngắn/Web Drama; MV ca nhạc tạm khóa trong Form.
-- Dùng `SHORT_FILM_FORM_V1` với cổng duyệt kịch bản, pilot và phim hoàn chỉnh.
-- AI phát triển bản nháp kịch bản từ ý tưởng qua OpenAI Responses API; bản nháp
-  luôn quay về `PENDING` và phải được chủ dự án duyệt trước Shot Plan.
-- Routing provider phim ngắn: OpenAI (kịch bản), Runway (ảnh thành video), Sync
-  (khẩu hình), APPROVED Voice Master (giọng); secret chỉ đọc từ runtime.
-- Chỉ dùng `MASTER_IDENTITY` ở trạng thái `APPROVED+LOCKED`; Tường Vy và Phương An là nguồn tạm trong giai đoạn chuyển đổi.
-- Không gọi workflow, webhook hoặc cơ sở dữ liệu của hệ thống cũ.
-- Không dùng kiến trúc sản xuất cũ.
+- Form mobile-first dùng `SHORT_FILM_FORM_V1`.
+- OpenAI tạo bản nháp kịch bản từ ý tưởng; chủ dự án phải duyệt trước Shot Plan.
+- Chỉ dùng Character Master `APPROVED + LOCKED` và Voice Master đã duyệt.
+- Runway tạo chuyển động, ElevenLabs tạo thoại và Sync xử lý khẩu hình sau các cổng duyệt tương ứng.
+- Pilot đại diện phải được duyệt trước khi mở sản xuất toàn phim.
+- Mọi provider call đều cần cổng ngân sách riêng; secret chỉ được đọc từ runtime.
 
-## Luồng tạo dự án
+## Luồng dự án
 
-1. Web Form kiểm tra hợp đồng đầu vào và nhân vật đủ điều kiện trong `CHARACTER_LIBRARY`.
-2. Người dùng bấm xác nhận tạo dự án.
-3. API tạo `project_id` dạng `GDTH-FILM-*` cho phim ngắn, thư mục Drive riêng và ghi hợp đồng vào `PROJECTS`.
-4. Các nhân vật được ghi vào `PROJECT_CHARACTERS`; sự kiện được ghi vào `AUDIT_LOG`.
-5. Trạng thái đầu tiên là `CONTRACT`, hành động tiếp theo là `APPROVE_CONTRACT`.
-6. Nút duyệt hợp đồng cập nhật đúng dòng theo `project_id`, ghi sự kiện
-   `CONTRACT_APPROVED`, rồi chuyển sang `PRE_PRODUCTION` với hành động
-   `REVIEW_SHORT_FILM_SCRIPT` cho phim ngắn. Gọi lại cùng `project_id` không ghi lặp sự kiện.
-7. Nút lập kế hoạch PRE_PRODUCTION kiểm tra hợp đồng MV đã duyệt, video gốc của
-   từng nhân vật và `ORIGINAL_FACE_COMPOSITE`; sau đó tạo
-   `MV_PRODUCTION_PLAN_V1_<project_id>.json` trong `02_SAN_XUAT_MV`.
-8. Kế hoạch được ghi vào `PRODUCTION_JOBS` ở trạng thái `AWAITING_APPROVAL`, tạo
-   một dòng `APPROVALS/PENDING`, ghi audit `MV_PRODUCTION_PLAN_PREPARED` và đổi
-   `next_action` thành `APPROVE_MV_PRODUCTION_PLAN`. Gọi lại cùng dự án không tạo
-   thêm job, approval hoặc manifest.
-9. Endpoint duyệt kế hoạch cập nhật đúng job thành `APPROVED`, dòng
-   `APPROVALS/APPROVED`, approval gate trong manifest, ghi audit
-   `MV_PRODUCTION_PLAN_APPROVED` và chuyển `next_action` sang
-   `PREPARE_MV_ASSETS`. Dự án vẫn ở `PRE_PRODUCTION`; bước này chưa render và
-   chưa gọi provider. Gọi lại cùng dự án là idempotent.
-10. Endpoint `POST /v1/projects/:projectId/prepare-mv-assets` nhận Drive ID hoặc
-    link beat/instrumental master, kiểm tra beat, lyrics và video gốc
-    `ORIGINAL_FACE_COMPOSITE`, rồi tạo `MV_ASSET_MANIFEST_V1` ở trạng thái
-    `AWAITING_APPROVAL`/`APPROVE_MV_ASSETS`. File nguồn không bị sao chép; render
-    và provider vẫn bị khóa.
-11. Endpoint `POST /v1/projects/:projectId/approve-mv-assets` duyệt manifest tài
-    sản, khóa nguồn Tường Vy là tạm thời với `close_up_allowed=false`, ghi audit
-    `MV_ASSETS_APPROVED` và chuyển `next_action` sang `PREPARE_MV_SHOT_PLAN`.
-    Dự án vẫn ở `PRE_PRODUCTION`; render và provider tiếp tục bị khóa.
-12. Sau khi Shot Plan và Timecode Alignment đã được duyệt, endpoint
-    `POST /v1/projects/:projectId/prepare-mv-render-plan` tạo 15 render units phủ
-    đủ 371.62 giây. Mỗi unit ở trạng thái `BLOCKED_PENDING_APPROVAL`; cảnh có
-    Tường Vy tiếp tục cấm cận mặt, chỉ `MEDIUM/FULL_BODY` và giữ microphone.
-    Render Plan chuyển sang `APPROVE_MV_RENDER_PLAN`; provider và render vẫn khóa.
-13. Endpoint `POST /v1/projects/:projectId/approve-mv-render-plan` duyệt đúng
-    manifest 15 render units, cập nhật job/approval/audit và chuyển sang
-    `PREPARE_MV_RENDER_EXECUTION`. Các unit vẫn bị chặn chờ chuẩn bị thực thi;
-    provider và render tiếp tục là `false`.
-14. Endpoint `POST /v1/projects/:projectId/prepare-mv-render-execution` tạo hồ sơ
-    thực thi cho đúng 15 render units và chuyển sang `APPROVE_MV_RENDER_EXECUTION`.
-    Tất cả units vẫn khóa chờ duyệt; chưa gọi provider và chưa render.
-15. Endpoint `POST /v1/projects/:projectId/approve-mv-render-execution` ghi nhận
-    quyền thực thi và chuyển sang `PREPARE_MV_PROVIDER_SUBMISSION`. Provider và
-    render vẫn khóa cho đến bước chuẩn bị submission riêng.
-16. Endpoint `POST /v1/projects/:projectId/prepare-mv-provider-submission` kiểm tra
-    hồ sơ thực thi đã duyệt, tạo đúng 15 payload Runway ở trạng thái bị khóa và
-    chuyển sang `APPROVE_MV_PROVIDER_SUBMISSION`. Bước này không gọi API Runway,
-    không truyền tài sản ra ngoài và chưa render.
-17. Endpoint `POST /v1/projects/:projectId/approve-mv-provider-submission` duyệt
-    gói 15 payload và chuyển sang `SUBMIT_MV_PROVIDER_JOBS`. Việc duyệt không tự
-    gọi Runway; provider và render vẫn khóa cho đến lệnh submit riêng.
-18. Endpoint `POST /v1/projects/:projectId/prepare-mv-provider-pilot` chỉ chọn
-    cảnh song ca `RP015` dài 9.62 giây để đánh giá hai gương mặt. Pilot Aleph 2.0
-    dự toán tối đa 270 credit (~2.70 USD), giữ khóa Tường Vy và vẫn chờ media,
-    prompt cùng duyệt ngân sách; chưa gọi Runway, chưa upload và chưa tiêu credit.
-19. Endpoint `POST /v1/projects/:projectId/prepare-mv-duet-base-composite` lập kế
-    hoạch ghép hai video nguồn riêng của Tường Vy và Phương An thành base song ca
-    RP015 dài 9.62 giây. Manifest giữ khóa không cận Tường Vy và giữ microphone;
-    chưa chạy composite, chưa upload Runway và chưa tiêu credit.
+1. Nhập thông tin dự án và chọn nhân vật hợp lệ từ `CHARACTER_LIBRARY`.
+2. Kiểm tra tài khoản, duyệt kinh phí và tạo dự án `GDTH-FILM-*`.
+3. Duyệt hợp đồng và toàn bộ kịch bản.
+4. Tạo, review và duyệt Shot Plan.
+5. Khóa Character Master, Voice Master, người nói và keyframe.
+6. Tạo audio để nghe duyệt, rồi tạo các clip pilot đại diện.
+7. QC identity, diễn xuất, chuyển động, khẩu hình, giọng, bối cảnh, ánh sáng và continuity.
+8. Chỉ khi pilot đạt mới được duyệt ngân sách và sản xuất toàn phim.
+9. QC phim hoàn chỉnh trước khi xuất bản.
 
-Gate PRE_PRODUCTION chỉ chuẩn bị hồ sơ để con người duyệt. Nó không render nội
-dung, không gọi nhà cung cấp và không cho phép bắt đầu Web Drama.
+Google Sheets dùng Application Default Credentials. Google Drive dùng OAuth chủ sở hữu qua secret `GOOGLE_DRIVE_OAUTH_CREDENTIALS_JSON`; không đưa khóa vào source, image hoặc GitHub.
 
-Yêu cầu cấu hình nằm trong `.env.example`.
-
-- Google Sheets dùng Application Default Credentials của service account Cloud Run;
-  `GOOGLE_SERVICE_ACCOUNT_JSON` chỉ dành cho môi trường ngoài Google Cloud.
-- Google Drive dùng OAuth của chủ sở hữu My Drive qua
-  `GOOGLE_DRIVE_OAUTH_CREDENTIALS_JSON`. Biến này chỉ nhận JSON
-  `type=authorized_user` và phải được gắn từ Secret Manager. Không đưa client secret
-  hoặc refresh token vào GitHub, image hay biến môi trường dạng văn bản thường.
-- Quy trình tạo và gắn secret được mô tả tại
-  [`infra/cloudrun/google-drive-oauth.md`](infra/cloudrun/google-drive-oauth.md).
-
-## Chạy kiểm tra
+## Kiểm tra
 
 ```bash
 npm ci

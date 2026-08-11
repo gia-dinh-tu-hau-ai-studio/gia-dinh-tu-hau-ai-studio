@@ -1,12 +1,8 @@
 import { z } from "zod";
 
-export const FormProjectTypeSchema = z.enum([
-  "SHORT_FILM",
-  "MUSIC_VIDEO",
-  "SHORT_MUSIC_CLIP",
-]);
+export const FormProjectTypeSchema = z.literal("SHORT_FILM");
 
-export const BackendProjectTypeSchema = z.enum(["SHORT_FILM", "MUSIC_VIDEO"]);
+export const BackendProjectTypeSchema = z.literal("SHORT_FILM");
 
 export const ProjectRoleSchema = z.enum([
   "MAIN",
@@ -220,6 +216,70 @@ export const ShortFilmDialogueLineApprovalSchema = z.object({
   reviewed_at: z.string().datetime(),
 });
 
+export const ShortFilmPerformanceBeatSchema = z.object({
+  beat_id: z.string().trim().min(1),
+  beat_type: z.enum(["PREPARE", "SPEAK", "LISTEN", "REACTION", "PURPOSEFUL_ACTION", "SETTLE"]),
+  start_ms: z.number().int().min(0),
+  end_ms: z.number().int().positive(),
+  direction: z.string().trim().min(3).max(500),
+  dialogue_line_id: z.string().trim().min(1).optional(),
+}).superRefine((beat, context) => {
+  if (beat.end_ms <= beat.start_ms) context.addIssue({ code: "custom", message: "PERFORMANCE_BEAT_RANGE_INVALID", path: ["end_ms"] });
+  if (beat.beat_type === "SPEAK" && !beat.dialogue_line_id) context.addIssue({ code: "custom", message: "SPEAK_BEAT_REQUIRES_DIALOGUE_LINE", path: ["dialogue_line_id"] });
+});
+
+export const ShortFilmPerformanceShotSchema = z.object({
+  shot_id: z.string().trim().min(1),
+  duration_ms: z.number().int().min(1_000).max(10_000),
+  performance_source_mode: z.enum(["OWNER_RECORDED", "LICENSED_PERFORMANCE", "APPROVED_SYNTHETIC_PERFORMANCE"]),
+  performance_source_url: z.union([z.url(), z.literal("")]),
+  beats: z.array(ShortFilmPerformanceBeatSchema).min(1),
+  review: ShortFilmReviewSchema,
+}).superRefine((shot, context) => {
+  const ordered = [...shot.beats].sort((a, b) => a.start_ms - b.start_ms);
+  ordered.forEach((beat, index) => {
+    if (beat.end_ms > shot.duration_ms) context.addIssue({ code: "custom", message: `PERFORMANCE_BEAT_EXCEEDS_SHOT:${beat.beat_id}`, path: ["beats", index] });
+    if (index > 0 && ordered[index - 1].end_ms > beat.start_ms) context.addIssue({ code: "custom", message: `PERFORMANCE_BEATS_OVERLAP:${beat.beat_id}`, path: ["beats", index] });
+  });
+});
+
+export const ShortFilmTimingContractSchema = z.object({
+  shot_id: z.string().trim().min(1),
+  dialogue_line_id: z.string().trim().min(1),
+  speech_start_ms: z.number().int().min(0),
+  speech_end_ms: z.number().int().positive(),
+  shot_end_ms: z.number().int().positive(),
+  max_post_speech_action_ms: z.number().int().min(0).max(1_250).default(1_000),
+  measured_speech_end_ms: z.number().int().positive().optional(),
+  review: ShortFilmReviewSchema,
+}).superRefine((contract, context) => {
+  if (contract.speech_end_ms <= contract.speech_start_ms) context.addIssue({ code: "custom", message: "SPEECH_WINDOW_INVALID", path: ["speech_end_ms"] });
+  if (contract.shot_end_ms < contract.speech_end_ms) context.addIssue({ code: "custom", message: "SHOT_ENDS_BEFORE_SPEECH", path: ["shot_end_ms"] });
+  if (contract.shot_end_ms - contract.speech_end_ms > contract.max_post_speech_action_ms) context.addIssue({ code: "custom", message: "POST_SPEECH_ACTION_TOO_LONG", path: ["shot_end_ms"] });
+  if (contract.measured_speech_end_ms !== undefined && Math.abs(contract.measured_speech_end_ms - contract.speech_end_ms) > 250) context.addIssue({ code: "custom", message: "MEASURED_SPEECH_WINDOW_MISMATCH", path: ["measured_speech_end_ms"] });
+});
+
+export const ShortFilmPerformancePlanSchema = z.object({
+  production_mode: z.literal("PERFORMANCE_DRIVEN_HYBRID"),
+  shots: z.array(ShortFilmPerformanceShotSchema).min(1),
+  timing_contracts: z.array(ShortFilmTimingContractSchema).default([]),
+  animatic: z.object({
+    video_url: z.union([z.url(), z.literal("")]),
+    uses_paid_provider_output: z.literal(false),
+    dialogue_timing_visible: z.literal(true),
+    review: ShortFilmReviewSchema,
+  }).optional(),
+  golden_scene: z.object({
+    shot_ids: z.array(z.string().trim().min(1)).min(1).max(3),
+    identity_locked: z.boolean(),
+    speech_motion_aligned: z.boolean(),
+    performance_continuity: z.boolean(),
+    natural_cut_after_dialogue: z.boolean(),
+    review: ShortFilmReviewSchema,
+  }).optional(),
+  review: ShortFilmReviewSchema,
+});
+
 export const ShortFilmKeyframeApprovalSchema = z.object({
   shot_id: z.string().trim().min(1),
   approved_image_url: z.url(),
@@ -262,6 +322,7 @@ export const ShortFilmProductionReadinessSchema = z.object({
   dialogue_shot_ids: z.array(z.string().trim().min(1)).default([]),
   speaker_locks: z.array(ShortFilmSpeakerLockSchema).default([]),
   dialogue_line_approvals: z.array(ShortFilmDialogueLineApprovalSchema).default([]),
+  performance_plan: ShortFilmPerformancePlanSchema.optional(),
   review: ShortFilmReviewSchema,
 });
 
@@ -363,12 +424,12 @@ export const ProviderBudgetPlanSchema = z.object({
 export type ProviderBudgetPlan = z.infer<typeof ProviderBudgetPlanSchema>;
 
 export function calculateSuggestedProviderBudget(input: {
-  project_type: "SHORT_FILM" | "MUSIC_VIDEO" | "SHORT_MUSIC_CLIP";
+  project_type: "SHORT_FILM";
   duration_seconds: number;
   providers: ProviderBudgetPlan["providers"];
 }): ProviderBudgetPlan["estimate"] {
   const durationSeconds = Math.max(1, Math.round(input.duration_seconds));
-  const dialogueRatio = input.project_type === "MUSIC_VIDEO" ? 0.15 : input.project_type === "SHORT_MUSIC_CLIP" ? 0.1 : 0.35;
+  const dialogueRatio = 0.35;
   const dialogueSeconds = durationSeconds * dialogueRatio;
   const script = input.providers.script === "OPENAI_RESPONSES" ? 1 : 0;
   // Runway Gen-4.5 baseline: 12 credits/second at $0.01/API credit. The 1.5 multiplier covers controlled retries/QC.
@@ -418,27 +479,8 @@ const ShortFilmProgressActions = [
   ["READY_TO_PUBLISH", "Sẵn sàng xuất bản"],
 ] as const;
 
-const MusicVideoProgressActions = [
-  ["APPROVE_CONTRACT", "Khởi tạo và duyệt hợp đồng"],
-  ["PREPARE_MV_PRODUCTION", "Lập kế hoạch sản xuất"],
-  ["APPROVE_MV_PRODUCTION_PLAN", "Duyệt kế hoạch sản xuất"],
-  ["PREPARE_MV_ASSETS", "Chuẩn bị tài sản"],
-  ["APPROVE_MV_ASSETS", "Duyệt tài sản"],
-  ["PREPARE_MV_SHOT_PLAN", "Lập Shot Plan"],
-  ["APPROVE_MV_SHOT_PLAN", "Duyệt Shot Plan"],
-  ["PREPARE_MV_TIMECODE_ALIGNMENT", "Căn timecode"],
-  ["APPROVE_MV_TIMECODE_ALIGNMENT", "Duyệt timecode"],
-  ["PREPARE_MV_RENDER_PLAN", "Lập kế hoạch render"],
-  ["APPROVE_MV_RENDER_PLAN", "Duyệt kế hoạch render"],
-  ["PREPARE_MV_RENDER_EXECUTION", "Chuẩn bị thực thi"],
-  ["APPROVE_MV_RENDER_EXECUTION", "Duyệt thực thi"],
-  ["PREPARE_MV_PROVIDER_SUBMISSION", "Chuẩn bị gửi nhà cung cấp"],
-  ["APPROVE_MV_PROVIDER_SUBMISSION", "Duyệt gửi nhà cung cấp"],
-  ["READY_TO_PUBLISH", "Sẵn sàng xuất bản"],
-] as const;
-
-export function calculateProjectProgress(projectType: string, nextAction: string) {
-  const steps = projectType === "SHORT_FILM" ? ShortFilmProgressActions : MusicVideoProgressActions;
+export function calculateProjectProgress(_projectType: "SHORT_FILM", nextAction: string) {
+  const steps = ShortFilmProgressActions;
   const currentIndex = Math.max(0, steps.findIndex(([action]) => action === nextAction));
   const completed = nextAction === "READY_TO_PUBLISH" ? steps.length : currentIndex;
   return {
@@ -778,7 +820,25 @@ export function migrateShortFilmWorkflowDraft(draft: unknown, defaults: ShortFil
     if (stored === undefined || stored === null || typeof stored !== typeof fallback) return fallback;
     return stored;
   };
-  return mergeMissing(defaults, draft) as ShortFilmWorkflow;
+  const migrated = mergeMissing(defaults, draft) as ShortFilmWorkflow;
+  if (!migrated.production_readiness?.performance_plan) {
+    return {
+      ...migrated,
+      pilot_budget_approval: undefined,
+      pilot: undefined,
+      pilot_batch: undefined,
+      full_film: undefined,
+      production_readiness: migrated.production_readiness ? {
+        ...migrated.production_readiness,
+        review: {
+          decision: "PENDING",
+          notes: "Dữ liệu thực thi cũ đã được vô hiệu hóa; cần duyệt lại theo Performance Plan và Golden Scene.",
+          reviewer: "PROJECT_OWNER",
+        },
+      } : undefined,
+    };
+  }
+  return migrated;
 }
 
 export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
@@ -1059,6 +1119,27 @@ export function shortFilmProductionReadinessBlockers(
   ) {
     blockers.push("SPEAKER_FACE_LOCKS_INCOMPLETE");
   }
+  const performance = readiness.performance_plan;
+  if (!performance || performance.production_mode !== "PERFORMANCE_DRIVEN_HYBRID") {
+    blockers.push("PERFORMANCE_PLAN_MISSING");
+  } else {
+    const performanceByShot = new Map(performance.shots.map((shot) => [shot.shot_id, shot]));
+    for (const shotId of expectedShotIds) {
+      const shot = performanceByShot.get(shotId);
+      if (!shot || !shot.performance_source_url || shot.review.decision !== "APPROVE") blockers.push(`PERFORMANCE_SOURCE_NOT_APPROVED:${shotId}`);
+    }
+    const timingByShot = new Map(performance.timing_contracts.map((contract) => [contract.shot_id, contract]));
+    for (const shotId of expectedDialogueShotIds) {
+      const timing = timingByShot.get(shotId);
+      if (!timing || timing.review.decision !== "APPROVE") blockers.push(`SPEECH_TIMING_CONTRACT_NOT_APPROVED:${shotId}`);
+    }
+    if (!performance.animatic || !performance.animatic.video_url || performance.animatic.review.decision !== "APPROVE") blockers.push("ANIMATIC_NOT_APPROVED");
+    const golden = performance.golden_scene;
+    if (!golden || golden.review.decision !== "APPROVE" || !golden.identity_locked || !golden.speech_motion_aligned || !golden.performance_continuity || !golden.natural_cut_after_dialogue) {
+      blockers.push("GOLDEN_SCENE_NOT_APPROVED");
+    }
+    if (performance.review.decision !== "APPROVE") blockers.push("PERFORMANCE_PLAN_NOT_APPROVED");
+  }
   if (readiness.review.decision !== "APPROVE") blockers.push("PRODUCTION_READINESS_NOT_APPROVED");
   return blockers;
 }
@@ -1126,60 +1207,13 @@ const ShortFilmBranchSchema = z.object({
   short_film_workflow: ShortFilmWorkflowSchema,
 });
 
-const MusicVideoBranchSchema = z.object({
-  song_title: z.string().trim().min(1),
-  song_topic: z.string().trim().min(1),
-  music_genre: z.string().trim().min(1),
-  lyrics_source_mode: z.enum(["USER_PROVIDED_LOCKED", "AI_GENERATED"]),
-  lyrics: OptionalText,
-  music_source_mode: z.enum([
-    "AI_COMPOSITION",
-    "EXISTING_INSTRUMENTAL",
-    "EXISTING_SONG",
-    "NEW_STUDIO_PRODUCTION",
-  ]),
-  vocal_source_mode: z.enum([
-    "REAL_RECORDED_VOCAL",
-    "AUTHORIZED_VOICE_MODEL",
-    "EXISTING_MASTER_AUDIO",
-  ]),
-  visual_direction: z.string().trim().min(1),
-});
-
-const ShortMusicClipBranchSchema = z.object({
-  music_source_mode: z.enum([
-    "AI_COMPOSITION",
-    "EXISTING_INSTRUMENTAL",
-    "EXISTING_SONG",
-    "NEW_STUDIO_PRODUCTION",
-  ]),
-  clip_start_time: z.string().trim().min(1),
-  clip_end_time: z.string().trim().min(1),
-  vocal_source_mode: z
-    .enum([
-      "REAL_RECORDED_VOCAL",
-      "AUTHORIZED_VOICE_MODEL",
-      "EXISTING_MASTER_AUDIO",
-    ])
-    .optional(),
-  visual_direction: z.string().trim().min(1),
-});
-
-export const ProjectIntakeFormSchema = z.discriminatedUnion("project_type", [
-  CommonProjectInputSchema.extend({
-    project_type: z.literal("SHORT_FILM"),
-  }).merge(ShortFilmBranchSchema),
-  CommonProjectInputSchema.extend({
-    project_type: z.literal("MUSIC_VIDEO"),
-  }).merge(MusicVideoBranchSchema),
-  CommonProjectInputSchema.extend({
-    project_type: z.literal("SHORT_MUSIC_CLIP"),
-  }).merge(ShortMusicClipBranchSchema),
-]);
+export const ProjectIntakeFormSchema = CommonProjectInputSchema.extend({
+  project_type: z.literal("SHORT_FILM"),
+}).merge(ShortFilmBranchSchema);
 
 export type ProjectIntakeForm = z.infer<typeof ProjectIntakeFormSchema>;
 
-export type ShortFilmProjectIntake = Extract<ProjectIntakeForm, { project_type: "SHORT_FILM" }>;
+export type ShortFilmProjectIntake = ProjectIntakeForm;
 
 export type ShortFilmResumeSnapshot = {
   form_values: Record<string, string[]>;
@@ -1192,10 +1226,6 @@ export type ShortFilmResumeSnapshot = {
 
 export function createShortFilmResumeSnapshot(input: unknown): ShortFilmResumeSnapshot {
   const parsed = ProjectIntakeFormSchema.parse(input);
-  if (parsed.project_type !== "SHORT_FILM") {
-    throw new Error("SHORT_FILM_PROJECT_REQUIRED");
-  }
-
   const formValues: Record<string, string[]> = {};
   const put = (name: string, value: string | undefined) => {
     if (value !== undefined) formValues[name] = [value];
@@ -1281,12 +1311,8 @@ export type ProjectSubmitRequest = z.infer<typeof ProjectSubmitRequestSchema>;
 export function normalizeProjectIntake(input: unknown): NormalizedProjectIntake {
   const parsed = ProjectIntakeFormSchema.parse(input);
 
-  if (parsed.project_type === "SHORT_MUSIC_CLIP") {
-    return {
-      ...parsed,
-      project_type: "MUSIC_VIDEO",
-      project_subtype: "SHORT_MUSIC_CLIP",
-    };
+  if (parsed.project_type !== "SHORT_FILM") {
+    throw new Error("PROJECT_TYPE_DISABLED:ONLY_SHORT_FILM_AND_WEB_DRAMA_SUPPORTED");
   }
 
   return parsed;

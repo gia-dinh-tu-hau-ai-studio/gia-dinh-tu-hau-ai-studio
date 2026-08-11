@@ -140,6 +140,12 @@ function readinessBlockerLabel(blocker: string) {
   if (blocker.startsWith("AGE_CASTING_NOT_APPROVED:")) return `Độ tuổi giọng chưa được duyệt: ${actorOrShot}`;
   if (blocker.startsWith("DIALOGUE_TIMING_NOT_APPROVED:")) return `Thời lượng câu thoại chưa được duyệt: ${actorOrShot}`;
   if (blocker.startsWith("SPEAKER_VOICE_MISMATCH:") || blocker.startsWith("DIALOGUE_LINE_VOICE_MISMATCH:")) return `Người nói và Voice Master chưa khớp: ${actorOrShot}`;
+  if (blocker === "PERFORMANCE_PLAN_MISSING") return "Chưa có kế hoạch diễn xuất theo nhịp thoại cho các cảnh mẫu.";
+  if (blocker.startsWith("PERFORMANCE_SOURCE_NOT_APPROVED:")) return `Video diễn xuất tham chiếu chưa được duyệt: ${actorOrShot}`;
+  if (blocker.startsWith("SPEECH_TIMING_CONTRACT_NOT_APPROVED:")) return `Nhịp thoại, phản ứng và điểm cắt chưa được duyệt: ${actorOrShot}`;
+  if (blocker === "ANIMATIC_NOT_APPROVED") return "Bản dựng nháp miễn phí chưa được duyệt.";
+  if (blocker === "GOLDEN_SCENE_NOT_APPROVED") return "Cảnh chuẩn mẫu chưa đạt đủ nhận dạng, diễn xuất, nhịp thoại và tính liên tục.";
+  if (blocker === "PERFORMANCE_PLAN_NOT_APPROVED") return "Kế hoạch diễn xuất chưa được chủ dự án khóa.";
   return blocker;
 }
 
@@ -301,12 +307,53 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     } });
   }
 
+  function initializePerformancePlan() {
+    if (!value.production_readiness) return;
+    const selectedShotIds = [...new Set(selectShortFilmPilotSamples(value).flatMap((sample) => sample.shots.map((shot) => shot.shot_id)))];
+    const shots = selectedShotIds.map((shotId) => {
+      const line = value.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === shotId);
+      const speechEndMs = Math.min(9_000, Math.max(1_000, line?.target_duration_ms ?? 3_000));
+      const shotEndMs = Math.min(10_000, speechEndMs + 1_000);
+      return {
+        shot_id: shotId,
+        duration_ms: shotEndMs,
+        performance_source_mode: "OWNER_RECORDED" as const,
+        performance_source_url: "",
+        beats: [
+          { beat_id: `${shotId}-SPEAK`, beat_type: "SPEAK" as const, start_ms: 0, end_ms: speechEndMs, direction: "Nói tự nhiên, ánh mắt và cử chỉ bám sát ý nghĩa câu thoại.", dialogue_line_id: line?.line_id },
+          { beat_id: `${shotId}-SETTLE`, beat_type: "SETTLE" as const, start_ms: speechEndMs, end_ms: shotEndMs, direction: "Giữ phản ứng tự nhiên rồi cắt cảnh; không tiếp tục diễn kéo dài." },
+        ],
+        review: { decision: "PENDING" as const, notes: "", reviewer: "PROJECT_OWNER" as const },
+      };
+    });
+    patch({ production_readiness: {
+      ...value.production_readiness,
+      performance_plan: {
+        production_mode: "PERFORMANCE_DRIVEN_HYBRID",
+        shots,
+        timing_contracts: shots.map((shot) => ({
+          shot_id: shot.shot_id,
+          dialogue_line_id: shot.beats[0].dialogue_line_id ?? `LINE-${shot.shot_id.slice(-3)}`,
+          speech_start_ms: 0,
+          speech_end_ms: shot.beats[0].end_ms,
+          shot_end_ms: shot.duration_ms,
+          max_post_speech_action_ms: 1_250,
+          review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+        })),
+        animatic: { video_url: "", uses_paid_provider_output: false, dialogue_timing_visible: true, review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } },
+        golden_scene: { shot_ids: shots.slice(0, 3).map((shot) => shot.shot_id), identity_locked: false, speech_motion_aligned: false, performance_continuity: false, natural_cut_after_dialogue: false, review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" } },
+        review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
+      },
+    } });
+  }
+
   const persistedPilotBudgetApproved = value.shot_plan?.execution_shots.length
     ? shortFilmPilotBudgetApprovalIsSufficient(value)
     : false;
   const pilotBudget = value.shot_plan?.execution_shots.length ? calculateShortFilmPilotBudget(value) : undefined;
   const pilotSamples = value.shot_plan?.execution_shots.length ? selectShortFilmPilotSamples(value) : [];
   const pilotShotIds = [...new Set(pilotSamples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id)))];
+  const goldenSceneApproved = value.production_readiness?.performance_plan?.golden_scene?.review.decision === "APPROVE" && value.production_readiness.performance_plan.review.decision === "APPROVE";
   const readinessBlockers = value.production_readiness
     ? shortFilmProductionReadinessBlockers(value, pilotApproved ? "FULL" : "PILOT")
     : ["PRODUCTION_READINESS_MISSING"];
@@ -445,13 +492,14 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             <p>{pilotBudgetSummary ?? "3 clip × 15 giây · Runway tối đa 700 credits · ElevenLabs tối đa 1.000 credits · Sync tối đa 3 USD."}</p>
             <small>Chỉ áp dụng cho đợt pilot; không duyệt sản xuất toàn phim.</small>
           </div>
-          <button className={persistedPilotBudgetApproved ? "action-completed" : "action-current"} disabled={persistedPilotBudgetApproved} type="button" onClick={() => {
+          <button className={persistedPilotBudgetApproved ? "action-completed" : goldenSceneApproved ? "action-current" : "action-pending"} disabled={persistedPilotBudgetApproved || !goldenSceneApproved} type="button" onClick={() => {
             if (!pilotBudget) return;
             patch({ pilot_budget_approval: { sample_count: value.pilot_sampling.sample_count, clip_duration_seconds: value.pilot_sampling.clip_duration_seconds, runway_credits_cap: pilotBudget.proposed_caps.runway_credits, elevenlabs_credits_cap: pilotBudget.proposed_caps.elevenlabs_characters, sync_usd_cap: pilotBudget.proposed_caps.sync_usd, decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() } });
             onApprovePilotBudget?.();
           }}>
             {persistedPilotBudgetApproved ? "✓ Đã duyệt ngân sách pilot" : "Duyệt ngân sách 3 clip pilot"}
           </button>
+          {!goldenSceneApproved && <small>Ngân sách chỉ mở sau khi cảnh chuẩn mẫu được duyệt.</small>}
         </div>
         {!value.production_readiness && <button type="button" onClick={initializeProductionReadiness}>Chuẩn bị danh sách kiểm tra</button>}
         {value.production_readiness && <>
@@ -512,6 +560,42 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
               </article>;
             })}
           </div>
+          <section className="approval-gate performance-driven-gate">
+            <strong>Cổng diễn xuất điện ảnh — bắt buộc trước khi gọi nhà cung cấp</strong>
+            <p className="gate-note">Mỗi cảnh mẫu phải có video diễn xuất tham chiếu, điểm kết thúc thoại và điểm cắt. Hệ thống không cho chuyển ảnh tĩnh thành clip rồi kéo chuyển động quá lời thoại.</p>
+            {!value.production_readiness.performance_plan && <button type="button" onClick={initializePerformancePlan}>Tạo kế hoạch nhịp diễn cho cảnh mẫu</button>}
+            {value.production_readiness.performance_plan && <>
+              {value.production_readiness.performance_plan.shots.map((performanceShot) => {
+                const timing = value.production_readiness?.performance_plan?.timing_contracts.find((item) => item.shot_id === performanceShot.shot_id);
+                return <article className="workflow-card" key={`performance-${performanceShot.shot_id}`}>
+                  <h4>{performanceShot.shot_id} · Video diễn xuất tham chiếu</h4>
+                  <label><span>Link video đã có quyền sử dụng *</span><input type="url" placeholder="Ví dụ: link Drive của đoạn diễn thử đúng nhân vật" value={performanceShot.performance_source_url} onChange={(event) => {
+                    if (!value.production_readiness?.performance_plan) return;
+                    const shots = value.production_readiness.performance_plan.shots.map((item) => item.shot_id === performanceShot.shot_id ? { ...item, performance_source_url: event.target.value, review: { ...item.review, decision: "PENDING" as const } } : item);
+                    patch({ production_readiness: { ...value.production_readiness, performance_plan: { ...value.production_readiness.performance_plan, shots, review: { ...value.production_readiness.performance_plan.review, decision: "PENDING" } } } });
+                  }} /></label>
+                  <p className="gate-note">Thoại kết thúc: {timing?.speech_end_ms ?? 0} ms · Cắt cảnh: {timing?.shot_end_ms ?? 0} ms · phần phản ứng sau thoại tối đa 1,25 giây.</p>
+                  <button className={performanceShot.review.decision === "APPROVE" && timing?.review.decision === "APPROVE" ? "action-completed" : "action-current"} disabled={!performanceShot.performance_source_url} type="button" onClick={() => {
+                    if (!value.production_readiness?.performance_plan) return;
+                    const reviewed_at = new Date().toISOString();
+                    const shots = value.production_readiness.performance_plan.shots.map((item) => item.shot_id === performanceShot.shot_id ? { ...item, review: { ...item.review, decision: "APPROVE" as const, reviewed_at } } : item);
+                    const timing_contracts = value.production_readiness.performance_plan.timing_contracts.map((item) => item.shot_id === performanceShot.shot_id ? { ...item, review: { ...item.review, decision: "APPROVE" as const, reviewed_at } } : item);
+                    patch({ production_readiness: { ...value.production_readiness, performance_plan: { ...value.production_readiness.performance_plan, shots, timing_contracts } } });
+                  }}>{performanceShot.review.decision === "APPROVE" && timing?.review.decision === "APPROVE" ? "✓ Đã duyệt video và nhịp cắt" : "Duyệt video và nhịp cắt"}</button>
+                </article>;
+              })}
+              <label><span>Bản dựng nháp kiểm tra nhịp *</span><input type="url" placeholder="Link bản dựng nháp có hiển thị điểm thoại và điểm cắt" value={value.production_readiness.performance_plan.animatic!.video_url} onChange={(event) => patch({ production_readiness: { ...value.production_readiness!, performance_plan: { ...value.production_readiness!.performance_plan!, animatic: { ...value.production_readiness!.performance_plan!.animatic!, video_url: event.target.value, review: { ...value.production_readiness!.performance_plan!.animatic!.review, decision: "PENDING" } } } } })} /></label>
+              <button disabled={!value.production_readiness.performance_plan.animatic!.video_url} type="button" onClick={() => patch({ production_readiness: { ...value.production_readiness!, performance_plan: { ...value.production_readiness!.performance_plan!, animatic: { ...value.production_readiness!.performance_plan!.animatic!, review: { ...value.production_readiness!.performance_plan!.animatic!.review, decision: "APPROVE", reviewed_at: new Date().toISOString() } } } } })}>Duyệt bản dựng nháp</button>
+              <div className="qc-grid">
+                {([['identity_locked', 'Đúng nhân vật đã khóa'], ['speech_motion_aligned', 'Hình thể khớp nhịp thoại'], ['performance_continuity', 'Continuity ổn định'], ['natural_cut_after_dialogue', 'Cắt tự nhiên, không diễn thừa']] as const).map(([key, label]) => <label key={key}><input checked={value.production_readiness!.performance_plan!.golden_scene![key]} type="checkbox" onChange={(event) => patch({ production_readiness: { ...value.production_readiness!, performance_plan: { ...value.production_readiness!.performance_plan!, golden_scene: { ...value.production_readiness!.performance_plan!.golden_scene!, [key]: event.target.checked, review: { ...value.production_readiness!.performance_plan!.golden_scene!.review, decision: "PENDING" } } } } })} /> {label}</label>)}
+              </div>
+              <button type="button" disabled={!value.production_readiness.performance_plan.animatic!.video_url || value.production_readiness.performance_plan.animatic!.review.decision !== "APPROVE" || !value.production_readiness.performance_plan.shots.every((item) => item.review.decision === "APPROVE") || !value.production_readiness.performance_plan.timing_contracts.every((item) => item.review.decision === "APPROVE") || !(['identity_locked', 'speech_motion_aligned', 'performance_continuity', 'natural_cut_after_dialogue'] as const).every((key) => value.production_readiness!.performance_plan!.golden_scene![key])} onClick={() => {
+                const reviewed_at = new Date().toISOString();
+                patch({ production_readiness: { ...value.production_readiness!, performance_plan: { ...value.production_readiness!.performance_plan!, golden_scene: { ...value.production_readiness!.performance_plan!.golden_scene!, review: { ...value.production_readiness!.performance_plan!.golden_scene!.review, decision: "APPROVE", reviewed_at } }, review: { ...value.production_readiness!.performance_plan!.review, decision: "APPROVE", reviewed_at } } } });
+              }}>Duyệt cảnh chuẩn mẫu và khóa kế hoạch diễn xuất</button>
+            </>}
+            {value.production_readiness.performance_plan?.golden_scene?.review.decision !== "APPROVE" && <p className="operation-error">Nhà cung cấp trả phí đang khóa. Chỉ mở sau khi cảnh chuẩn mẫu đạt.</p>}
+          </section>
           {readinessBlockers.length > 0 && <div className="operation-error" role="status">
             <strong>Còn điều kiện cần hoàn tất</strong>
             <ul>{readinessBlockers.map((blocker) => <li key={blocker}>{readinessBlockerLabel(blocker)}</li>)}</ul>
