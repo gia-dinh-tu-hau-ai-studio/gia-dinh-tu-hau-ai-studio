@@ -6,7 +6,7 @@ import { CharacterLibraryConnector } from "../connectors/google-sheets/character
 import { ProjectRegistryConnector } from "../connectors/google-sheets/project-registry.connector";
 import { checkProviderAccounts } from "./provider-account-preflight";
 import { ElevenLabsPilotProvider, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
-import { assembleVideoBuffers, trimVideoBuffer } from "../media/short-film-pilot-assembler";
+import { assembleVideoBuffers, fitAudioBuffer, probeVideoBuffer, trimVideoBuffer, type VideoTechnicalEvidence } from "../media/short-film-pilot-assembler";
 import { preparePrivateRunwayCharacterFace, preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const MANIFEST_NAME = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
@@ -138,7 +138,29 @@ type EvaluationReelTask = {
   sync_output_url?: string;
   completed_video?: string;
   generation_mode?: "APPROVED_FACE_IMAGE_TO_VIDEO";
+  performance_contract?: EvaluationPerformanceContract;
+  technical_evidence?: VideoTechnicalEvidence;
+  sync_audio_duration_seconds?: 10;
   runway_assets?: RunwayAssetCache;
+};
+
+type EvaluationPerformanceContract = {
+  framing: "CINEMATIC_MEDIUM_CLOSE_UP";
+  setting: "SHOT_PLAN_LOCATION_NOT_STUDIO_BACKDROP";
+  acting_mode: "DIALOGUE_DRIVEN_PHYSICAL_PERFORMANCE";
+  required_beats: ["LISTEN_OR_CONSIDER", "EMOTIONAL_REACTION", "PURPOSEFUL_ACTION", "SETTLE_IN_CHARACTER"];
+  forbidden: ["PRESENTER_DELIVERY", "STATIC_TALKING_HEAD", "PLAIN_GRAY_STUDIO", "RANDOM_GESTURES"];
+};
+
+type EvaluationReelQc = {
+  identity_locked: boolean;
+  cinematic_setting: boolean;
+  purposeful_action: boolean;
+  emotional_arc: boolean;
+  dialogue_lip_sync: boolean;
+  voice_match: boolean;
+  continuity: boolean;
+  exact_duration_30s: boolean;
 };
 
 type EvaluationReelManifest = {
@@ -147,16 +169,48 @@ type EvaluationReelManifest = {
   project_id: string;
   source_execution_id: string;
   duration_seconds: 30;
-  status: "PROCESSING_RUNWAY" | "PROCESSING_SYNC" | "ASSEMBLING" | "AWAITING_REEL_QC" | "FAILED";
+  status: "PROCESSING_RUNWAY" | "PROCESSING_SYNC" | "ASSEMBLING" | "AWAITING_REEL_QC" | "APPROVED" | "REJECTED" | "FAILED";
   caps: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8 };
   tasks: EvaluationReelTask[];
   current_task_index: number;
   final_drive_file_id?: string;
   video_url?: string;
+  technical_evidence?: VideoTechnicalEvidence;
+  qc?: EvaluationReelQc;
+  reviewed_at?: string;
   heartbeat_at: string;
   started_at: string;
   error?: { stage: string; message: string };
 };
+
+export const EVALUATION_PERFORMANCE_CONTRACT: EvaluationPerformanceContract = {
+  framing: "CINEMATIC_MEDIUM_CLOSE_UP",
+  setting: "SHOT_PLAN_LOCATION_NOT_STUDIO_BACKDROP",
+  acting_mode: "DIALOGUE_DRIVEN_PHYSICAL_PERFORMANCE",
+  required_beats: ["LISTEN_OR_CONSIDER", "EMOTIONAL_REACTION", "PURPOSEFUL_ACTION", "SETTLE_IN_CHARACTER"],
+  forbidden: ["PRESENTER_DELIVERY", "STATIC_TALKING_HEAD", "PLAIN_GRAY_STUDIO", "RANDOM_GESTURES"],
+};
+
+export function validateEvaluationReelTechnicalEvidence(evidence: VideoTechnicalEvidence) {
+  if (Math.abs(evidence.duration_seconds - 30) > 0.25) throw new Error(`EVALUATION_REEL_ACTUAL_DURATION_MISMATCH:expected=30:actual=${evidence.duration_seconds.toFixed(3)}`);
+  if (evidence.width !== 1920 || evidence.height !== 1080) throw new Error(`EVALUATION_REEL_RESOLUTION_MISMATCH:${evidence.width}x${evidence.height}`);
+  if (!evidence.has_audio) throw new Error("EVALUATION_REEL_AUDIO_MISSING");
+  return evidence;
+}
+
+export function reviewEvaluationReelGate(manifest: EvaluationReelManifest, input: { decision: "APPROVE" | "REJECT"; qc: EvaluationReelQc }, reviewedAt: string) {
+  if (manifest.status !== "AWAITING_REEL_QC" || !manifest.final_drive_file_id || !manifest.technical_evidence) throw new Error("EVALUATION_REEL_NOT_READY_FOR_QC");
+  validateEvaluationReelTechnicalEvidence(manifest.technical_evidence);
+  manifest.qc = input.qc; manifest.reviewed_at = reviewedAt; manifest.heartbeat_at = reviewedAt;
+  if (input.decision === "APPROVE") {
+    if (Object.values(input.qc).some((value) => !value)) throw new Error("EVALUATION_REEL_QC_INCOMPLETE");
+    manifest.status = "APPROVED";
+  } else {
+    manifest.status = "REJECTED";
+    manifest.error = { stage: "EVALUATION_REEL_QC", message: "EVALUATION_REEL_REJECTED_BY_PROJECT_OWNER" };
+  }
+  return manifest;
+}
 
 export function validateEvaluationReelRequest(input: { durationSeconds: number; caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number } }) {
   if (input.durationSeconds !== 30) throw new Error("EVALUATION_REEL_DURATION_MUST_BE_30_SECONDS");
@@ -179,10 +233,12 @@ export function buildEvaluationReelFacePrompt(input: { scenePrompt: string; dial
   return [
     "Cinematic medium close-up of the exact approved and locked character identity from the input image.",
     "Keep the full head, both eyes, nose, mouth and shoulders visible for the entire shot; never crop the face out of frame.",
-    "Natural Vietnamese television drama performance with purposeful head, eye, shoulder and hand movement matching the dialogue meaning.",
-    "Vietnamese speech performance only; no subtitles, text, identity change, face replacement, dancing or exaggerated random gestures.",
-    `Dialogue meaning: ${input.dialogueText}`,
     `Scene: ${input.scenePrompt}`,
+    `Dialogue meaning: ${input.dialogueText}`,
+    "Use the real location, lighting, props and camera axis described by the scene; never use a plain gray studio or interview backdrop.",
+    "Perform four readable drama beats: listen or consider, react emotionally, complete one purposeful physical action motivated by the line, then settle in character.",
+    "Natural Vietnamese television drama performance and acting timed to the dialogue meaning; never perform as a presenter or static talking head.",
+    "Vietnamese speech only; no subtitles, text, identity change, face replacement, dancing or exaggerated random gestures.",
   ].join(" ").slice(0, 1_000);
 }
 
@@ -687,7 +743,7 @@ export class ShortFilmPilotExecutionService {
     const stored = await this.drive.readPilotJson<EvaluationReelManifest>(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME);
     if (!stored) throw new Error("EVALUATION_REEL_NOT_FOUND");
     const manifest = stored.value;
-    if (["AWAITING_REEL_QC", "FAILED"].includes(manifest.status)) return manifest;
+    if (["AWAITING_REEL_QC", "APPROVED", "REJECTED", "FAILED"].includes(manifest.status)) return manifest;
     try {
       const runwayKey = process.env.RUNWAYML_API_SECRET?.trim(), syncKey = process.env.SYNC_API_KEY?.trim();
       if (!runwayKey || !syncKey) throw new Error("EVALUATION_REEL_PROVIDER_SECRET_NOT_CONFIGURED");
@@ -701,6 +757,7 @@ export class ShortFilmPilotExecutionService {
           const dialogue = context.workflow.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === task.shot_id);
           if (!shot || !dialogue) throw new Error(`EVALUATION_REEL_LOCKED_PROMPT_MISSING:${task.shot_id}`);
           const prompt = buildEvaluationReelFacePrompt({ scenePrompt: shot.runway_prompt, dialogueText: dialogue.dialogue_text });
+          task.performance_contract = EVALUATION_PERFORMANCE_CONTRACT;
           task.runway_task_id = (await runway.submit({ imageUrl: imageUri, prompt, durationSeconds: 10, ratio: "1280:720" })).taskId;
           task.generation_mode = "APPROVED_FACE_IMAGE_TO_VIDEO";
           task.runway_status = "PENDING";
@@ -711,9 +768,9 @@ export class ShortFilmPilotExecutionService {
         }
       } else if (task && manifest.status === "PROCESSING_SYNC") {
         if (!task.sync_generation_id) {
-          const audio = await this.drive.downloadBuffer(task.audio_drive_file_id);
+          const audio = await fitAudioBuffer(await this.drive.downloadBuffer(task.audio_drive_file_id), 10);
           const generation = await sync.submit({ videoUrl: task.runway_output_url as string, audio, fileName: `${task.shot_id}_APPROVED_VOICE.mp3` });
-          task.sync_generation_id = generation.generationId; task.sync_status = "PENDING";
+          task.sync_generation_id = generation.generationId; task.sync_status = "PENDING"; task.sync_audio_duration_seconds = 10;
         } else {
           const state = await sync.status(task.sync_generation_id); task.sync_status = state.status; task.sync_output_url = state.outputUrl;
           if (["FAILED", "REJECTED"].includes(state.status ?? "")) throw new Error(`EVALUATION_REEL_SYNC_FAILED:${task.shot_id}:${state.errorCode ?? state.error ?? state.status}`);
@@ -729,9 +786,13 @@ export class ShortFilmPilotExecutionService {
         for (const completed of manifest.tasks) {
           const response = await fetch(completed.completed_video as string, { signal: AbortSignal.timeout(60_000) });
           if (!response.ok) throw new Error(`EVALUATION_REEL_OUTPUT_HTTP_${response.status}`);
-          buffers.push(await trimVideoBuffer(Buffer.from(await response.arrayBuffer()), 10));
+          const source = Buffer.from(await response.arrayBuffer());
+          const trimmed = await trimVideoBuffer(source, 10);
+          completed.technical_evidence = await probeVideoBuffer(trimmed);
+          buffers.push(trimmed);
         }
-        const reel = await assembleVideoBuffers(buffers);
+        const reel = await assembleVideoBuffers(buffers, 30);
+        manifest.technical_evidence = validateEvaluationReelTechnicalEvidence(await probeVideoBuffer(reel));
         const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, "SHORT_FILM_EVALUATION_REEL_30S_1920x1080.mp4", "video/mp4", reel);
         manifest.final_drive_file_id = uploaded.id as string; manifest.video_url = uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`; manifest.status = "AWAITING_REEL_QC";
       }
@@ -755,6 +816,15 @@ export class ShortFilmPilotExecutionService {
     const manifest = resumeEvaluationReelManifest(stored.value, refreshed);
     await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
     return { ...manifest, resumed: true, preserved_completed_shots: manifest.current_task_index };
+  }
+
+  async reviewEvaluationReel(projectId: string, request: { decision: "APPROVE" | "REJECT"; qc: EvaluationReelQc }) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<EvaluationReelManifest>(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME);
+    if (!stored) throw new Error("EVALUATION_REEL_NOT_FOUND");
+    const manifest = reviewEvaluationReelGate(stored.value, request, new Date().toISOString());
+    await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
+    return manifest;
   }
 
   async evaluationReelOutput(projectId: string, fileId: string) {

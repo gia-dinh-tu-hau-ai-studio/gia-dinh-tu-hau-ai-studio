@@ -154,6 +154,13 @@ export class AppController {
   @Get("projects/:projectId/short-film/pilot/evaluation-reel/status")
   shortFilmPilotEvaluationReelStatus(@Param("projectId") projectId: string) { return this.pilotExecution.evaluationReelStatus(projectId); }
 
+  @Post("projects/:projectId/short-film/pilot/evaluation-reel/review")
+  reviewShortFilmPilotEvaluationReel(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const qc = z.object({ identity_locked: z.boolean(), cinematic_setting: z.boolean(), purposeful_action: z.boolean(), emotional_arc: z.boolean(), dialogue_lip_sync: z.boolean(), voice_match: z.boolean(), continuity: z.boolean(), exact_duration_30s: z.boolean() });
+    const request = z.object({ decision: z.enum(["APPROVE", "REJECT"]), qc }).parse(body);
+    return this.pilotExecution.reviewEvaluationReel(projectId, request);
+  }
+
   @Post("projects/:projectId/short-film/pilot/evaluation-reel/resume")
   resumeShortFilmPilotEvaluationReel(@Param("projectId") projectId: string, @Body() body: unknown) {
     const request = z.object({ execution_approved: z.literal(true), duration_seconds: z.literal(30), caps: z.object({ runway_credits: z.literal(432), elevenlabs_characters: z.literal(2000), sync_usd: z.literal(1.8) }) }).parse(body);

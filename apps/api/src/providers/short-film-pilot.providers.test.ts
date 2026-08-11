@@ -3,7 +3,7 @@ import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
-import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -100,8 +100,30 @@ test("evaluation reel prompt keeps the approved face visible and binds acting to
   assert.match(prompt, /exact approved and locked character identity/);
   assert.match(prompt, /full head, both eyes, nose, mouth and shoulders visible/);
   assert.match(prompt, /Vietnamese television drama performance/);
+  assert.match(prompt, /never use a plain gray studio/);
+  assert.match(prompt, /four readable drama beats/);
+  assert.match(prompt, /never perform as a presenter or static talking head/);
   assert.match(prompt, /Em quyết định liền nha/);
   assert.ok(prompt.length <= 1_000);
+  assert.deepEqual(EVALUATION_PERFORMANCE_CONTRACT.required_beats, ["LISTEN_OR_CONSIDER", "EMOTIONAL_REACTION", "PURPOSEFUL_ACTION", "SETTLE_IN_CHARACTER"]);
+});
+
+test("evaluation reel technical gate rejects a short reel before owner QC", () => {
+  const valid = { duration_seconds: 30.04, width: 1920, height: 1080, has_audio: true };
+  assert.equal(validateEvaluationReelTechnicalEvidence(valid), valid);
+  assert.throws(() => validateEvaluationReelTechnicalEvidence({ ...valid, duration_seconds: 13.588 }), /ACTUAL_DURATION_MISMATCH/);
+  assert.throws(() => validateEvaluationReelTechnicalEvidence({ ...valid, width: 1280 }), /RESOLUTION_MISMATCH/);
+  assert.throws(() => validateEvaluationReelTechnicalEvidence({ ...valid, has_audio: false }), /AUDIO_MISSING/);
+});
+
+test("owner cannot approve a technically valid reel when any acting QC item is missing", () => {
+  const completeQc = { identity_locked: true, cinematic_setting: true, purposeful_action: true, emotional_arc: true, dialogue_lip_sync: true, voice_match: true, continuity: true, exact_duration_30s: true };
+  const manifest = { status: "AWAITING_REEL_QC", final_drive_file_id: "reel", technical_evidence: { duration_seconds: 30, width: 1920, height: 1080, has_audio: true }, heartbeat_at: "before" } as Parameters<typeof reviewEvaluationReelGate>[0];
+  assert.throws(() => reviewEvaluationReelGate({ ...manifest }, { decision: "APPROVE", qc: { ...completeQc, purposeful_action: false } }, "now"), /QC_INCOMPLETE/);
+  assert.equal(reviewEvaluationReelGate({ ...manifest }, { decision: "APPROVE", qc: completeQc }, "now").status, "APPROVED");
+  const rejected = reviewEvaluationReelGate({ ...manifest }, { decision: "REJECT", qc: { ...completeQc, cinematic_setting: false } }, "now");
+  assert.equal(rejected.status, "REJECTED");
+  assert.equal(rejected.error?.message, "EVALUATION_REEL_REJECTED_BY_PROJECT_OWNER");
 });
 
 test("failed reel resumes from first unfinished shot and preserves completed paid work", () => {
