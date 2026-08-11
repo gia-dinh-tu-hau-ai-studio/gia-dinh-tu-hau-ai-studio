@@ -212,6 +212,20 @@ export function reviewEvaluationReelGate(manifest: EvaluationReelManifest, input
   return manifest;
 }
 
+export function rejectEvaluationReelForRestart(manifest: EvaluationReelManifest, rejectedAt: string) {
+  if (manifest.status !== "AWAITING_REEL_QC") throw new Error("EVALUATION_REEL_NOT_AWAITING_QC_RESTART");
+  return {
+    archiveName: `SHORT_FILM_EVALUATION_REEL_REJECTED_${rejectedAt.replace(/[:.]/g, "-")}_${manifest.execution_id}.json`,
+    archived: {
+      ...manifest,
+      status: "REJECTED" as const,
+      reviewed_at: rejectedAt,
+      heartbeat_at: rejectedAt,
+      error: { stage: "EVALUATION_REEL_QC", message: "EVALUATION_REEL_REJECTED_BY_PROJECT_OWNER_FOR_RESTART" },
+    },
+  };
+}
+
 export function validateEvaluationReelRequest(input: { durationSeconds: number; caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number } }) {
   if (input.durationSeconds !== 30) throw new Error("EVALUATION_REEL_DURATION_MUST_BE_30_SECONDS");
   if (input.caps.runway_credits !== 432 || input.caps.elevenlabs_characters !== 2000 || input.caps.sync_usd !== 1.8) throw new Error("EVALUATION_REEL_CAP_MISMATCH");
@@ -736,6 +750,35 @@ export class ShortFilmPilotExecutionService {
     const manifest: EvaluationReelManifest = { schema_version: "SHORT_FILM_PILOT_EVALUATION_REEL_30S_V1", execution_id: randomUUID(), project_id: projectId, source_execution_id: pilotStored.value.execution_id, duration_seconds: 30, status: "PROCESSING_RUNWAY", caps: { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 }, tasks, current_task_index: 0, heartbeat_at: now, started_at: now };
     await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
     return { ...manifest, idempotent_replay: false };
+  }
+
+  async restartEvaluationReel(projectId: string, request: { duration_seconds: number; caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number } }) {
+    validateEvaluationReelRequest({ durationSeconds: request.duration_seconds, caps: request.caps });
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const pilotStored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
+    if (!pilotStored || pilotStored.value.status !== "AWAITING_PILOT_QC") throw new Error("EVALUATION_REEL_REQUIRES_PILOT_AWAITING_QC");
+    const existing = await this.drive.readPilotJson<EvaluationReelManifest>(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME);
+    if (!existing) throw new Error("EVALUATION_REEL_NOT_FOUND");
+    const rejectedAt = new Date().toISOString();
+    const rejected = rejectEvaluationReelForRestart(existing.value, rejectedAt);
+
+    const candidates = selectEvaluationReelSourceTasks(pilotStored.value);
+    const library = await this.characters.listEligibleCharacters();
+    const tasks = candidates.map((task): EvaluationReelTask => {
+      const keyframe = context.workflow.production_readiness?.keyframes.find((item) => item.shot_id === task.shot_id);
+      const dialogue = context.workflow.production_readiness?.dialogue_line_approvals.find((item) => item.shot_id === task.shot_id);
+      if (!keyframe?.approved_image_url || !dialogue) throw new Error(`EVALUATION_REEL_LOCKED_SOURCE_MISSING:${task.shot_id}`);
+      const character = validateLockedCharacterPerformanceSource({ dialogue, keyframe, character: library.find((item) => item.character_id === dialogue.speaker_source_actor_id) });
+      return { shot_id: task.shot_id, character_id: character.character_id, master_identity_id: character.master_identity_id as string, face_reference_url: character.face_reference_url, body_reference_url: character.body_reference_url, source_video_drive_file_id: task.final_drive_file_id as string, audio_drive_file_id: task.audio_drive_file_id as string };
+    });
+    const account = await checkProviderAccounts({ project_type: "SHORT_FILM", duration_seconds: 30, providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "APPROVED_VOICE_MASTER", lip_sync: "SYNC" } }, process.env);
+    if (account.providers.some((provider) => ["INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED"].includes(provider.status))) throw new Error(`PROVIDER_ACCOUNT_BLOCKED:${account.providers.map((provider) => `${provider.provider}:${provider.status}`).join(",")}`);
+
+    const now = new Date().toISOString();
+    const manifest: EvaluationReelManifest = { schema_version: "SHORT_FILM_PILOT_EVALUATION_REEL_30S_V1", execution_id: randomUUID(), project_id: projectId, source_execution_id: pilotStored.value.execution_id, duration_seconds: 30, status: "PROCESSING_RUNWAY", caps: { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 }, tasks, current_task_index: 0, heartbeat_at: now, started_at: now };
+    await this.drive.writePilotJson(context.project_folder_id, rejected.archiveName, rejected.archived);
+    await this.drive.writePilotJson(context.project_folder_id, EVALUATION_REEL_MANIFEST_NAME, manifest);
+    return { ...manifest, previous_execution_id: existing.value.execution_id, archived_manifest_name: rejected.archiveName };
   }
 
   async evaluationReelStatus(projectId: string) {
