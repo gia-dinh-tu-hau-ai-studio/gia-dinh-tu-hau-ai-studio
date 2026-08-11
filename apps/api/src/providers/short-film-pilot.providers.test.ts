@@ -3,7 +3,7 @@ import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
-import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -77,6 +77,17 @@ test("30-second evaluation reel requires the exact one-time approved provider ca
   assert.throws(() => validateEvaluationReelRequest({ durationSeconds: 20, caps }), /DURATION_MUST_BE_30/);
   assert.throws(() => validateEvaluationReelRequest({ durationSeconds: 30, caps: { ...caps, runway_credits: 433 } }), /CAP_MISMATCH/);
   assert.throws(() => validateEvaluationReelRequest({ durationSeconds: 30, caps: { ...caps, sync_usd: 1.81 } }), /CAP_MISMATCH/);
+});
+
+test("30-second evaluation reel selects exactly three approved ten-second shots", () => {
+  const task = (shot_id: string) => ({ sample_id: "S", shot_id, runway_status: "SUCCEEDED", audio_drive_file_id: `audio-${shot_id}`, final_drive_file_id: `video-${shot_id}`, transcript_verified: true, audio_review_decision: "APPROVE" as const });
+  const pilot = { samples: [{ sample_id: "S", purpose: "IDENTITY_DIALOGUE" as const, expected_duration_seconds: 35, shots: [
+    { shot_id: "SHOT-001", summary: "one", runway_prompt: "one", duration_seconds: 10, risk_tags: [] },
+    { shot_id: "SHOT-002", summary: "two", runway_prompt: "two", duration_seconds: 5, risk_tags: [] },
+    { shot_id: "SHOT-003", summary: "three", runway_prompt: "three", duration_seconds: 10, risk_tags: [] },
+    { shot_id: "SHOT-005", summary: "five", runway_prompt: "five", duration_seconds: 10, risk_tags: [] },
+  ] }], tasks: [task("SHOT-001"), task("SHOT-002"), task("SHOT-003"), task("SHOT-005")] };
+  assert.deepEqual(selectEvaluationReelSourceTasks(pilot).map((item) => item.shot_id), ["SHOT-001", "SHOT-003", "SHOT-005"]);
 });
 
 test("identity correction requires the shot keyframe to be the assigned approved and locked Character Master", () => {
