@@ -143,6 +143,18 @@ export function approvePilotPerformanceVariant(input: {
   return target;
 }
 
+export function buildPilotPerformancePrompt(basePrompt: string, dialogueText: string) {
+  const prompt = [
+    "Preserve the exact approved Tường Vy Character Master face, body proportions, wardrobe, room continuity and camera axis.",
+    "Natural Vietnamese television drama acting timed to the approved Vietnamese dialogue; no identity change, subtitles, text, dancing, random gestures or foreign-language mouth movement.",
+    "Tường Vy holds her phone naturally. Her finger pauses immediately before confirming a money transfer. Her shoulders and face show believable tension.",
+    "On the words about two million dong she looks toward Phương An for reassurance. When explaining the promised first-workday refund, she draws the phone back toward her body and hesitates.",
+    `Dialogue meaning: ${dialogueText}`,
+    `Scene: ${basePrompt}`,
+  ].join(" ");
+  return prompt.slice(0, 1_000);
+}
+
 export function rejectPilotForRestart(manifest: PilotExecutionManifest, rejectedAt: string) {
   if (manifest.status !== "AWAITING_PILOT_QC") throw new Error("PILOT_NOT_AWAITING_QC_REJECTION");
   const archiveName = `SHORT_FILM_PILOT_REJECTED_${rejectedAt.replace(/[:.]/g, "-")}_${manifest.execution_id}.json`;
@@ -422,15 +434,7 @@ export class ShortFilmPilotExecutionService {
     if (account.providers.some((provider) => ["INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED"].includes(provider.status))) {
       throw new Error(`PROVIDER_ACCOUNT_BLOCKED:${account.providers.map((provider) => `${provider.provider}:${provider.status}`).join(",")}`);
     }
-    const performancePrompt = [
-      shot.runway_prompt,
-      `Exact approved Vietnamese dialogue meaning: ${dialogue.dialogue_text}`,
-      "Tường Vy holds her phone naturally; her finger pauses immediately before confirming a money transfer.",
-      "Her shoulders and face show believable tension; on the words about two million dong she looks toward Phương An for reassurance.",
-      "When explaining the promised refund on the first workday, she draws the phone back toward her body and hesitates.",
-      "Natural Vietnamese television drama acting, restrained hand motion, correct eyeline and conversational timing; no random gestures, no dancing, no identity change.",
-      "Preserve the exact approved Character Master face, body proportions, wardrobe, room continuity and camera axis. No text, subtitles or foreign-language mouth movement.",
-    ].join(" ");
+    const performancePrompt = buildPilotPerformancePrompt(shot.runway_prompt, dialogue.dialogue_text);
     const now = new Date().toISOString();
     const manifest: PilotPerformanceVariantManifest = {
       schema_version: "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1",

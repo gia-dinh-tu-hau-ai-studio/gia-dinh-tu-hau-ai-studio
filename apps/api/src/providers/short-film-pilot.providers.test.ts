@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
-import { approvePilotPerformanceVariant, rejectPilotForRestart, reviewDialogueAudioGate, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { approvePilotPerformanceVariant, buildPilotPerformancePrompt, rejectPilotForRestart, reviewDialogueAudioGate, validatePilotPerformanceVariant, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -78,6 +78,14 @@ test("approved performance variant replaces only its pilot shot for full-film re
   assert.equal(target.final_drive_file_id, "variant-final");
   assert.equal(untouched.final_drive_file_id, "other-final");
   assert.throws(() => approvePilotPerformanceVariant({ variant: { status: "PROCESSING_SYNC", shot_id: "SHOT-005", final_drive_file_id: "unsafe" }, pilot }), /NOT_AWAITING_QC/);
+});
+
+test("performance prompt stays within Runway's 1000-character contract", () => {
+  const prompt = buildPilotPerformancePrompt("Cảnh phòng trọ. ".repeat(100), "Họ kêu mình chuyển hai triệu giữ chỗ, nói ngày đầu đi làm sẽ hoàn lại");
+  assert.ok(prompt.length <= 1_000);
+  assert.match(prompt, /finger pauses immediately/);
+  assert.match(prompt, /two million dong/);
+  assert.match(prompt, /exact approved Tường Vy Character Master/);
 });
 
 test("private Drive keyframes use a Runway ephemeral upload instead of exposing a protected URL", async () => {
