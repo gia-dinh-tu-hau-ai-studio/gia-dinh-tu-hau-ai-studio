@@ -110,6 +110,17 @@ test("evaluation reel prompt keeps the approved face visible and binds acting to
   assert.deepEqual(EVALUATION_PERFORMANCE_CONTRACT.required_beats, ["LISTEN_OR_CONSIDER", "EMOTIONAL_REACTION", "PURPOSEFUL_ACTION", "SETTLE_IN_CHARACTER"]);
 });
 
+test("dialogue-audio rejection can restart, but unrelated failures cannot", () => {
+  const dialogueRejected = {
+    schema_version: "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1", execution_id: "exec-audio", project_id: "project-1",
+    status: "FAILED", samples: [], tasks: [], caps: { runway_credits: 1, elevenlabs_characters: 1, sync_usd: 1 },
+    provider_calls_made: true, heartbeat_at: "before", started_at: "before",
+    error: { stage: "DIALOGUE_AUDIO_APPROVAL", message: "DIALOGUE_AUDIO_REJECTED_BY_PROJECT_OWNER" },
+  } as Parameters<typeof rejectPilotForRestart>[0];
+  assert.equal(rejectPilotForRestart(dialogueRejected, "now").failed.error?.stage, "DIALOGUE_AUDIO_APPROVAL");
+  assert.throws(() => rejectPilotForRestart({ ...dialogueRejected, error: { stage: "PROVIDER_PROCESSING", message: "failed" } }, "now"), /NOT_AWAITING/);
+});
+
 test("Vietnamese transcript gate rejects a high-similarity wrong word", () => {
   const expected = "Bên anh chỉ còn đúng một suất ưu tiên thôi nghen.";
   const wrong = verifyVietnameseTranscript(expected, {
