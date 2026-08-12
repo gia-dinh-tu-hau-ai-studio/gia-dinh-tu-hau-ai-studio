@@ -596,11 +596,21 @@ test("kịch bản chủ dự án cung cấp không tính phí OpenAI", () => {
 
 test("pilot plan khóa provider và tài sản nhưng chưa gọi provider", () => {
   const preparedAt = "2026-08-09T10:00:00.000Z";
+  const goldenShots = Array.from({ length: 3 }, (_, index) => ({
+    shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+    summary: `Shot ${index + 1}: CẢNH 1 – NHÀ – NGÀY — Nhịp ${index + 1}`,
+    runway_prompt: `Cinematic Golden Scene shot ${index + 1}`,
+    duration_seconds: 10,
+    risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : [],
+  }));
   const workflow = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER", reviewed_at: preparedAt },
-    shot_plan: { summary: "Pilot", shots: ["Cận cảnh Vy nói thoại"] },
-    production_readiness: productionReadiness,
+    shot_plan: { summary: "Pilot", shots: goldenShots.map((shot) => shot.summary), execution_shots: goldenShots },
+    production_readiness: {
+      ...productionReadiness,
+      keyframes: goldenShots.map((shot) => ({ ...productionReadiness.keyframes[0], shot_id: shot.shot_id })),
+    },
   });
   const plan = prepareShortFilmPilotPlan({
     project_id: "GDTH-FILM-PILOT-001",
@@ -617,7 +627,9 @@ test("pilot plan khóa provider và tài sản nhưng chưa gọi provider", () 
   assert.equal(plan.submission_gate, "AWAITING_PROJECT_OWNER_APPROVAL");
   assert.equal(plan.provider_calls_made, false);
   assert.equal(plan.pilot_shot_ids[0], "SHOT-001");
+  assert.deepEqual(plan.pilot_shot_ids, ["SHOT-001", "SHOT-002", "SHOT-003"]);
   assert.equal(plan.pilot_samples.length, 1);
+  assert.deepEqual(plan.pilot_samples[0]?.shot_ids, ["SHOT-001", "SHOT-002", "SHOT-003"]);
   assert.equal(plan.total_sample_duration_seconds, 30);
   assert.deepEqual(plan.locked_identity_master_ids, ["TUONG_VY_MASTER_IDENTITY_V1"]);
   assert.deepEqual(plan.locked_voice_master_ids, ["TUONG_VY_VOICE_MASTER_AI_V1"]);
