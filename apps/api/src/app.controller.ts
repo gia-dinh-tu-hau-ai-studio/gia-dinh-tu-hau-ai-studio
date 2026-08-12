@@ -33,6 +33,9 @@ export class AppController {
   @Post("projects/:projectId/short-film/golden-scene/professional-30s/approve-plan")
   approveProfessionalGoldenScenePlan(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.approveProfessionalScene30sPlan(projectId); }
 
+  @Post("projects/:projectId/short-film/golden-scene/professional-30s/dialogue-audio/execute")
+  executeProfessionalGoldenSceneAudio(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.executeProfessionalScene30sAudio(projectId); }
+
   @Get("projects/:projectId/short-film/golden-scene/motion/status")
   goldenSceneMotionStatus(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.status(projectId); }
 
