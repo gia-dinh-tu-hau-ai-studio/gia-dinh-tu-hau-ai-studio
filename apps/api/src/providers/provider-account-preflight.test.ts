@@ -8,8 +8,17 @@ test("khóa chạy khi Runway không đủ credit", async () => {
   const fetcher = async (url: string | URL | Request) => new Response(JSON.stringify(String(url).includes("runway") ? { creditBalance: 100 } : { character_count: 100, character_limit: 10000, status: "active" }), { status: 200 });
   const result = await checkProviderAccounts(request, { RUNWAYML_API_SECRET: "rw", ELEVENLABS_API_KEY: "el" }, fetcher as typeof fetch);
   assert.equal(result.execution_gate, "BLOCKED");
+  assert.equal(result.project_creation_gate, "READY");
   assert.equal(result.providers.find((item) => item.provider === "RUNWAY")?.status, "INSUFFICIENT");
   assert.doesNotMatch(JSON.stringify(result), /\brw\b|\bel\b/);
+});
+
+test("khởi tạo hồ sơ dự án không bị khóa bởi hạn mức sản xuất toàn phim", async () => {
+  const fetcher = async (url: string | URL | Request) => new Response(JSON.stringify(String(url).includes("runway") ? { creditBalance: 700 } : { character_count: 100, character_limit: 10000, status: "active" }), { status: 200 });
+  const result = await checkProviderAccounts({ ...request, duration_seconds: 180 }, { RUNWAYML_API_SECRET: "rw", ELEVENLABS_API_KEY: "el" }, fetcher as typeof fetch);
+  assert.equal(result.execution_gate, "BLOCKED");
+  assert.equal(result.project_creation_gate, "READY");
+  assert.equal(result.providers.find((item) => item.provider === "RUNWAY")?.required_units, 3240);
 });
 
 test("mở chạy khi các provider có API số dư đều đủ", async () => {
