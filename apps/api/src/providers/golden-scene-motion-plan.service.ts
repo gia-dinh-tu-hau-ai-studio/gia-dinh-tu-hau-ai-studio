@@ -6,6 +6,8 @@ import { ProjectRegistryConnector } from "../connectors/google-sheets/project-re
 import { CharacterLibraryConnector } from "../connectors/google-sheets/character-library.connector";
 import { ElevenLabsPilotProvider } from "./short-film-pilot.providers";
 import { verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { RunwayPilotProvider } from "./short-film-pilot.providers";
+import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const CHARACTER_KEYFRAME_MANIFEST = "SHORT_FILM_OPENAI_CHARACTER_KEYFRAMES_V1.json";
 const MOTION_PLAN_MANIFEST = "SHORT_FILM_GOLDEN_SCENE_MOTION_PLAN_V1.json";
@@ -30,17 +32,18 @@ export type GoldenSceneMotionTask = {
   direction: { prepare: string; speak: string; settle: string };
 };
 
-type GoldenSceneAudio = { drive_file_id: string; drive_url: string; transcript_text: string; transcript_language_code: string; transcript_language_probability: number; transcript_similarity: number; verified: true; review: "PENDING" };
+type GoldenSceneAudio = { drive_file_id: string; drive_url: string; transcript_text: string; transcript_language_code: string; transcript_language_probability: number; transcript_similarity: number; verified: true; review: "PENDING" | "APPROVE" };
+type SilentMotion = { runway_task_id?: string; runway_status: string; output_url?: string; drive_file_id?: string; drive_url?: string; review: "PENDING" };
 
 export type GoldenSceneMotionPlan = {
   schema_version: "SHORT_FILM_GOLDEN_SCENE_MOTION_PLAN_V1";
   execution_id: string;
   project_id: string;
-  status: "AWAITING_MOTION_BUDGET_APPROVAL" | "PREPARING_DIALOGUE_AUDIO" | "AWAITING_DIALOGUE_AUDIO_APPROVAL" | "FAILED";
+  status: "AWAITING_MOTION_BUDGET_APPROVAL" | "PREPARING_DIALOGUE_AUDIO" | "AWAITING_DIALOGUE_AUDIO_APPROVAL" | "PROCESSING_SILENT_MOTION" | "AWAITING_SILENT_MOTION_APPROVAL" | "FAILED";
   source_character_keyframe_execution_id: string;
   provider_calls_made: boolean;
   immutable_inputs: true;
-  tasks: Array<GoldenSceneMotionTask & { audio?: GoldenSceneAudio }>;
+  tasks: Array<GoldenSceneMotionTask & { audio?: GoldenSceneAudio; silent_motion?: SilentMotion }>;
   stages: readonly ["DIALOGUE_AUDIO_REVIEW", "SILENT_MOTION_REVIEW", "LIP_SYNC_REVIEW"];
   proposed_caps: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8 };
   created_at: string;
@@ -48,6 +51,7 @@ export type GoldenSceneMotionPlan = {
   approved_caps?: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8; approved_at: string; reviewer: "PROJECT_OWNER" };
   elevenlabs_characters_used?: number;
   error?: { stage: string; message: string };
+  runway_assets?: RunwayAssetCache;
 };
 
 export function approveGoldenSceneMotionBudget(plan: GoldenSceneMotionPlan, caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number }, now: string) {
@@ -60,6 +64,18 @@ export function approveGoldenSceneMotionBudget(plan: GoldenSceneMotionPlan, caps
   plan.status = "PREPARING_DIALOGUE_AUDIO";
   plan.heartbeat_at = now;
   return plan;
+}
+
+export function approveGoldenSceneDialogueAudio(plan: GoldenSceneMotionPlan, now: string) {
+  if (plan.status !== "AWAITING_DIALOGUE_AUDIO_APPROVAL" || plan.tasks.some((task) => !task.audio?.verified)) throw new Error("VERIFIED_DIALOGUE_AUDIO_REQUIRED");
+  for (const task of plan.tasks) { task.audio!.review = "APPROVE"; task.silent_motion = { runway_status: "PENDING_SUBMIT", review: "PENDING" }; }
+  plan.status = "PROCESSING_SILENT_MOTION"; plan.heartbeat_at = now; return plan;
+}
+
+export function buildGoldenSceneSilentMotionPrompt(task: GoldenSceneMotionTask) {
+  const prompt = `Vietnamese cinematic drama. Preserve the exact approved character identity, face, age, hair, wardrobe, framing, location and lighting from the input image. Natural purposeful acting for this meaning: ${task.dialogue_text} Physical performance: begin with a brief attentive hold; during the dialogue window use restrained eye focus, breathing, one motivated hand or body gesture, and a clear emotional reaction; after the line, stop speaking motion and settle naturally. No identity drift, no extra person, no camera jump, no text, no microphone, no exaggerated repeated movement.`;
+  if (prompt.length > 1000) throw new Error(`SILENT_MOTION_PROMPT_TOO_LONG:${task.shot_id}`);
+  return prompt;
 }
 
 export function validateGoldenSceneMotionBinding(input: {
@@ -172,6 +188,7 @@ export class GoldenSceneMotionPlanService {
     const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
     if (!stored) return { project_id: projectId, status: "NOT_PREPARED" };
     const plan = stored.value;
+    if (plan.status === "PROCESSING_SILENT_MOTION") return this.advanceSilentMotion(context.project_folder_id, plan);
     if (plan.status !== "PREPARING_DIALOGUE_AUDIO") return plan;
     try {
       const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
@@ -205,5 +222,36 @@ export class GoldenSceneMotionPlanService {
   async approveBudget(projectId: string, caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number }) {
     const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
     if (!stored) throw new Error("GOLDEN_SCENE_MOTION_PLAN_NOT_FOUND"); const plan = approveGoldenSceneMotionBudget(stored.value, caps, new Date().toISOString()); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
+  }
+
+  async approveAudio(projectId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
+    if (!stored) throw new Error("GOLDEN_SCENE_MOTION_PLAN_NOT_FOUND"); const plan = approveGoldenSceneDialogueAudio(stored.value, new Date().toISOString()); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
+  }
+
+  private async advanceSilentMotion(projectFolderId: string, plan: GoldenSceneMotionPlan) {
+    try {
+      const apiKey = process.env.RUNWAYML_API_SECRET?.trim(); if (!apiKey) throw new Error("RUNWAYML_API_SECRET_NOT_CONFIGURED");
+      const runway = new RunwayPilotProvider(apiKey); plan.runway_assets ??= {};
+      const active = plan.tasks.find((task) => task.silent_motion?.runway_task_id && !["SUCCEEDED", "FAILED", "CANCELLED"].includes(task.silent_motion.runway_status));
+      const pending = plan.tasks.find((task) => task.silent_motion?.runway_status === "PENDING_SUBMIT");
+      if (active) {
+        const state = await runway.status(active.silent_motion!.runway_task_id!); active.silent_motion!.runway_status = state.status; active.silent_motion!.output_url = state.outputUrl;
+        if (["FAILED", "CANCELLED"].includes(state.status)) throw new Error(`SILENT_MOTION_RUNWAY_FAILED:${active.shot_id}:${state.errorCode ?? state.error ?? state.status}`);
+        if (state.status === "SUCCEEDED" && state.outputUrl) {
+          const response = await fetch(state.outputUrl, { signal: AbortSignal.timeout(60_000) }); if (!response.ok) throw new Error(`SILENT_MOTION_OUTPUT_HTTP_${response.status}`);
+          const uploaded = await this.drive.uploadPilotArtifact(projectFolderId, `${active.shot_id}_GOLDEN_SCENE_SILENT_MOTION_10S.mp4`, "video/mp4", Buffer.from(await response.arrayBuffer()));
+          active.silent_motion!.drive_file_id = uploaded.id as string; active.silent_motion!.drive_url = uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`;
+        }
+      } else if (pending) {
+        const imageUri = await preparePrivateRunwayKeyframe({ referenceUrl: pending.character_keyframe_url, cache: plan.runway_assets, drive: this.drive, runway });
+        const submitted = await runway.submit({ imageUrl: imageUri, prompt: buildGoldenSceneSilentMotionPrompt(pending), durationSeconds: pending.duration_seconds, ratio: "1280:720" });
+        pending.silent_motion!.runway_task_id = submitted.taskId; pending.silent_motion!.runway_status = "PENDING"; plan.provider_calls_made = true;
+      }
+      if (plan.tasks.every((task) => task.silent_motion?.runway_status === "SUCCEEDED" && task.silent_motion.drive_file_id)) plan.status = "AWAITING_SILENT_MOTION_APPROVAL";
+      plan.heartbeat_at = new Date().toISOString(); await this.drive.writePilotJson(projectFolderId, MOTION_PLAN_MANIFEST, plan); return plan;
+    } catch (error) {
+      plan.status = "FAILED"; plan.error = { stage: "SILENT_MOTION", message: error instanceof Error ? error.message : String(error) }; plan.heartbeat_at = new Date().toISOString(); await this.drive.writePilotJson(projectFolderId, MOTION_PLAN_MANIFEST, plan); return plan;
+    }
   }
 }

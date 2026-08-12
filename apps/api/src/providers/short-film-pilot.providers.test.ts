@@ -6,7 +6,7 @@ import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
-import { approveGoldenSceneMotionBudget, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
+import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, buildGoldenSceneSilentMotionPrompt, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -285,6 +285,19 @@ test("Golden Scene motion budget requires the exact owner-approved caps and unlo
   assert.equal(approved.status, "PREPARING_DIALOGUE_AUDIO");
   assert.equal(approved.approved_caps?.reviewer, "PROJECT_OWNER");
   assert.throws(() => approveGoldenSceneMotionBudget({ ...plan, status: "AWAITING_MOTION_BUDGET_APPROVAL" }, { runway_credits: 433, elevenlabs_characters: 2000, sync_usd: 1.8 }, "now"), /EXACT_CAPS_REQUIRED/);
+});
+
+test("Golden Scene audio approval unlocks silent motion only after every transcript is verified", () => {
+  const task = { audio: { verified: true, review: "PENDING" } };
+  const plan = { status: "AWAITING_DIALOGUE_AUDIO_APPROVAL", tasks: [{ ...task }, { ...task }, { ...task }], heartbeat_at: "before" } as Parameters<typeof approveGoldenSceneDialogueAudio>[0];
+  assert.equal(approveGoldenSceneDialogueAudio(plan, "now").status, "PROCESSING_SILENT_MOTION");
+  assert.equal(plan.tasks[0].silent_motion?.runway_status, "PENDING_SUBMIT");
+  assert.throws(() => approveGoldenSceneDialogueAudio({ ...plan, status: "AWAITING_DIALOGUE_AUDIO_APPROVAL", tasks: [{ ...plan.tasks[0], audio: undefined }] }, "now"), /VERIFIED_DIALOGUE_AUDIO_REQUIRED/);
+});
+
+test("Golden Scene silent motion prompt preserves identity and stops speaking motion after dialogue", () => {
+  const prompt = buildGoldenSceneSilentMotionPrompt({ shot_id: "SHOT-006", dialogue_text: "Việc gì mà chưa làm đã đòi tiền mình trước?" } as Parameters<typeof buildGoldenSceneSilentMotionPrompt>[0]);
+  assert.match(prompt, /exact approved character identity/); assert.match(prompt, /stop speaking motion/); assert.ok(prompt.length <= 1000);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
