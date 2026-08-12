@@ -126,7 +126,20 @@ export class ElevenLabsPilotProvider {
       {
         method: "POST",
         headers: { "xi-api-key": this.apiKey, "content-type": "application/json" },
-        body: JSON.stringify({ text: input.text, model_id: "eleven_v3", language_code: input.languageCode, voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true } }),
+        body: JSON.stringify({
+          text: input.text.normalize("NFC"),
+          model_id: "eleven_v3",
+          language_code: input.languageCode,
+          apply_text_normalization: "on",
+          voice_settings: {
+            // Dialogue needs repeatable Vietnamese diction. Lower stability made short
+            // Southern-Vietnamese words drift (for example "suất" -> "sót").
+            stability: 0.62,
+            similarity_boost: 0.82,
+            style: 0.28,
+            use_speaker_boost: true,
+          },
+        }),
         signal: AbortSignal.timeout(60_000),
       },
     ), "ELEVENLABS");
