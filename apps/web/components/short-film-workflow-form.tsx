@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { calculateShortFilmPilotBudget, createShortFilmShotPlan, matchShortFilmShotActor, selectShortFilmPilotSamples, shortFilmNextAction, shortFilmPilotBudgetApprovalIsSufficient, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
+import { calculateShortFilmPilotBudget, createShortFilmShotPlan, matchShortFilmDialogueSpeaker, matchShortFilmShotActor, selectShortFilmPilotSamples, shortFilmNextAction, shortFilmPilotBudgetApprovalIsSufficient, shortFilmProductionReadinessBlockers, shortFilmSourceActorsNeedSync, syncShortFilmSourceActors, type ShortFilmWorkflow } from "@tu-hau/contracts";
 
 type LibraryActor = {
   character_id: string;
@@ -242,22 +242,14 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
     const usedActors = libraryActors.filter((actor) => usedActorIds.has(actor.source_actor_id));
     const actorById = new Map(usedActors.map((actor) => [actor.source_actor_id, actor]));
     const dialogueRows = value.shot_plan.execution_shots.flatMap((shot, index) => {
-      const beat = shot.summary.replace(/^Shot\s+\d+:\s*/iu, "").trim();
-      const match = beat.match(/^([^:]{1,50}):\s*(.+)$/u);
-      if (!match) return [];
-      const speakerLabel = match[1].trim().toLocaleLowerCase("vi");
-      const character = value.film_characters.find((item) => {
-        const actorName = actorById.get(item.source_actor_id)?.source_actor_name ?? "";
-        return speakerLabel.includes(item.film_character_name.toLocaleLowerCase("vi")) ||
-          speakerLabel.includes(actorName.toLocaleLowerCase("vi"));
-      });
-      if (!character) return [];
-      const actor = actorById.get(character.source_actor_id);
+      const dialogue = matchShortFilmDialogueSpeaker(shot.summary, value.film_characters, value.source_actors);
+      if (!dialogue) return [];
+      const actor = actorById.get(dialogue.source_actor_id);
       if (!actor?.voice_master_id) return [];
-      const dialogueText = match[2].trim();
+      const dialogueText = dialogue.dialogue_text;
       return [{
         shot_id: shot.shot_id,
-        speaker_source_actor_id: character.source_actor_id,
+        speaker_source_actor_id: dialogue.source_actor_id,
         voice_master_id: actor.voice_master_id,
         dialogue_text: dialogueText,
         target_duration_ms: Math.min(shot.duration_seconds * 1_000, Math.max(1_500, dialogueText.length * 90)),
