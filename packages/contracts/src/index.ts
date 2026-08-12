@@ -153,9 +153,9 @@ export const ShortFilmPilotPurposeSchema = z.enum([
 ]);
 
 export const ShortFilmPilotSamplingSchema = z.object({
-  sample_count: z.number().int().min(2).max(5).default(3),
-  clip_duration_seconds: z.number().int().min(10).max(20).default(15),
-  selection_mode: z.literal("RISK_BASED_REPRESENTATIVE_SHOTS").default("RISK_BASED_REPRESENTATIVE_SHOTS"),
+  sample_count: z.number().int().min(1).max(5).default(1),
+  clip_duration_seconds: z.number().int().min(10).max(30).default(30),
+  selection_mode: z.enum(["CONTIGUOUS_GOLDEN_SCENE", "RISK_BASED_REPRESENTATIVE_SHOTS"]).default("CONTIGUOUS_GOLDEN_SCENE"),
   required_purposes: z.array(ShortFilmPilotPurposeSchema).min(2).max(5),
 });
 
@@ -163,14 +163,14 @@ export const ShortFilmPilotSampleSchema = z.object({
   sample_id: z.string().trim().min(1),
   purpose: ShortFilmPilotPurposeSchema,
   shot_ids: z.array(z.string().trim().min(1)).min(1),
-  duration_seconds: z.number().min(10).max(20),
+  duration_seconds: z.number().min(10).max(30),
   video_url: z.url(),
   qc: ShortFilmQcSchema,
   review: ShortFilmReviewSchema,
 });
 
 export const ShortFilmPilotBatchSchema = z.object({
-  samples: z.array(ShortFilmPilotSampleSchema).min(2).max(5),
+  samples: z.array(ShortFilmPilotSampleSchema).min(1).max(5),
   batch_review: ShortFilmReviewSchema,
 }).superRefine((batch, context) => {
   if (batch.batch_review.decision === "APPROVE") {
@@ -270,7 +270,7 @@ export const ShortFilmPerformancePlanSchema = z.object({
     review: ShortFilmReviewSchema,
   }).optional(),
   golden_scene: z.object({
-    shot_ids: z.array(z.string().trim().min(1)).min(1).max(3),
+    shot_ids: z.array(z.string().trim().min(1)).min(1).max(12),
     identity_locked: z.boolean(),
     speech_motion_aligned: z.boolean(),
     performance_continuity: z.boolean(),
@@ -545,14 +545,14 @@ export const ShortFilmWorkflowSchema = z
       singing_scene_notes: z.string().trim().default(""),
     }),
     pilot_sampling: ShortFilmPilotSamplingSchema.default({
-      sample_count: 3,
-      clip_duration_seconds: 15,
-      selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
+      sample_count: 1,
+      clip_duration_seconds: 30,
+      selection_mode: "CONTIGUOUS_GOLDEN_SCENE",
       required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
     }),
     pilot_budget_approval: z.object({
-      sample_count: z.number().int().min(1).max(10),
-      clip_duration_seconds: z.number().int().min(5).max(20),
+      sample_count: z.number().int().min(1).max(5),
+      clip_duration_seconds: z.number().int().min(10).max(30),
       runway_credits_cap: z.number().int().positive().max(100_000),
       elevenlabs_credits_cap: z.number().int().positive().max(100_000),
       sync_usd_cap: z.number().positive().max(1_000),
@@ -853,49 +853,70 @@ export function migrateShortFilmWorkflowDraft(draft: unknown, defaults: ShortFil
     return stored;
   };
   const migrated = mergeMissing(defaults, draft) as ShortFilmWorkflow;
-  return migrated;
+  const sampling: Record<string, unknown> = isPlainRecord(migrated.pilot_sampling) ? migrated.pilot_sampling : {};
+  const isGoldenScene = sampling.sample_count === 1 &&
+    sampling.clip_duration_seconds === 30 &&
+    sampling.selection_mode === "CONTIGUOUS_GOLDEN_SCENE";
+  if (isGoldenScene) return migrated;
+
+  // Legacy multi-clip pilots were not reliable enough to approve a full film. Preserve all
+  // creative/user-entered fields, but detach their sampling, budget and media approvals so
+  // old provider output can never silently authorize or seed the Golden Scene workflow.
+  return {
+    ...migrated,
+    pilot_sampling: defaults.pilot_sampling,
+    pilot_budget_approval: undefined,
+    pilot: undefined,
+    pilot_batch: undefined,
+  };
 }
 
 export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
   const workflow = ShortFilmWorkflowSchema.parse(workflowInput);
+  if (workflow.pilot_sampling.sample_count !== 1 || workflow.pilot_sampling.clip_duration_seconds !== 30 || workflow.pilot_sampling.selection_mode !== "CONTIGUOUS_GOLDEN_SCENE") {
+    throw new Error("LEGACY_PILOT_SAMPLING_REJECTED:GOLDEN_SCENE_1X30_REQUIRED");
+  }
   const shots = workflow.shot_plan?.execution_shots ?? [];
   if (shots.length === 0) throw new Error("STRUCTURED_EXECUTION_SHOTS_REQUIRED");
-  const used = new Set<string>();
-  return Array.from({ length: workflow.pilot_sampling.sample_count }, (_, sampleIndex) => {
-    const purpose = workflow.pilot_sampling.required_purposes[sampleIndex] ?? "HIGH_RISK_SHOT";
-    const ordered = [...shots].sort((left, right) => {
-      if (used.has(left.shot_id) !== used.has(right.shot_id)) return used.has(left.shot_id) ? 1 : -1;
-      const leftScore = left.risk_tags.includes(purpose) ? 1 : 0;
-      const rightScore = right.risk_tags.includes(purpose) ? 1 : 0;
-      return rightScore - leftScore;
-    });
-    const selected: typeof shots = [];
-    let duration = 0;
-    for (const shot of ordered) {
-      const remaining = workflow.pilot_sampling.clip_duration_seconds - duration;
-      if (remaining <= 0) break;
-      if (used.has(shot.shot_id) && shots.length >= workflow.pilot_sampling.sample_count) continue;
-      const selectedDuration = Math.min(shot.duration_seconds, remaining);
-      if (selectedDuration < 2) continue;
-      selected.push({ ...shot, duration_seconds: selectedDuration });
-      used.add(shot.shot_id);
-      duration += selectedDuration;
-      if (duration >= workflow.pilot_sampling.clip_duration_seconds) break;
-    }
-    const missing = workflow.pilot_sampling.clip_duration_seconds - duration;
-    const last = selected.at(-1);
-    if (missing > 0 && last && last.duration_seconds + missing <= 10) {
-      last.duration_seconds += missing;
-      duration += missing;
-    }
-    if (duration !== workflow.pilot_sampling.clip_duration_seconds) throw new Error(`PILOT_SAMPLE_DURATION_MISMATCH:${sampleIndex + 1}`);
-    return {
-      sample_id: `PILOT-SAMPLE-${String(sampleIndex + 1).padStart(2, "0")}`,
-      purpose,
-      shots: selected,
-      expected_duration_seconds: duration,
-    };
-  });
+  const sceneLabel = (summary: string) => summary.includes("|") ? summary.split("|", 1)[0]?.trim() : undefined;
+  const groups = new Map<string, typeof shots>();
+  for (const shot of shots) {
+    const scene = sceneLabel(shot.summary);
+    if (!scene) continue;
+    groups.set(scene, [...(groups.get(scene) ?? []), shot]);
+  }
+  const dialogueShotIds = new Set([
+    ...(workflow.production_readiness?.dialogue_line_approvals ?? []).map((line) => line.shot_id),
+    ...shots.filter((shot) => shot.risk_tags.includes("IDENTITY_DIALOGUE")).map((shot) => shot.shot_id),
+  ]);
+  const candidates = [...groups.entries()].map(([scene, sceneShots]) => ({
+    scene,
+    shots: sceneShots,
+    duration: sceneShots.reduce((sum, shot) => sum + shot.duration_seconds, 0),
+    dialogueCount: sceneShots.filter((shot) => dialogueShotIds.has(shot.shot_id)).length,
+    riskCount: new Set(sceneShots.flatMap((shot) => shot.risk_tags)).size,
+  })).filter((candidate) => candidate.duration >= 30 && candidate.dialogueCount > 0)
+    .sort((left, right) => right.dialogueCount - left.dialogueCount || right.riskCount - left.riskCount);
+  const selectedScene = candidates[0];
+  if (!selectedScene) throw new Error("GOLDEN_SCENE_30S_CONTIGUOUS_SOURCE_REQUIRED");
+  const selected: typeof shots = [];
+  let duration = 0;
+  for (const shot of selectedScene.shots) {
+    const remaining = 30 - duration;
+    if (remaining <= 0) break;
+    const selectedDuration = Math.min(shot.duration_seconds, remaining);
+    if (selectedDuration < 2) throw new Error(`GOLDEN_SCENE_SHOT_TOO_SHORT:${shot.shot_id}`);
+    selected.push({ ...shot, duration_seconds: selectedDuration });
+    duration += selectedDuration;
+  }
+  if (duration !== 30) throw new Error(`GOLDEN_SCENE_DURATION_MISMATCH:${duration}`);
+  if (!selected.some((shot) => dialogueShotIds.has(shot.shot_id))) throw new Error("GOLDEN_SCENE_DIALOGUE_REQUIRED");
+  return [{
+    sample_id: "GOLDEN-SCENE-01",
+    purpose: workflow.pilot_sampling.required_purposes[0] ?? "MOTION_PERFORMANCE",
+    shots: selected,
+    expected_duration_seconds: 30,
+  }];
 }
 
 /** Calculate caps from the unique provider shots, not only assembled output duration. */
@@ -954,7 +975,7 @@ export const ShortFilmPilotPreparationRequestSchema = z.object({
   project_id: z.string().trim().min(1),
   workflow: ShortFilmWorkflowSchema,
   provider_budget: ProviderBudgetPlanSchema,
-  pilot_duration_seconds: z.number().int().min(10).max(20),
+  pilot_duration_seconds: z.number().int().min(10).max(30),
   account_checks: z.array(ShortFilmPilotAccountCheckSchema),
   prepared_at: z.string().datetime(),
 }).superRefine((request, context) => {
@@ -1087,9 +1108,17 @@ export function shortFilmProductionReadinessBlockers(
       ? workflow.shot_plan.execution_shots.map((shot) => shot.shot_id)
       : (workflow.shot_plan?.shots ?? []).map((_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`),
   );
-  const pilotShotIds = workflow.shot_plan?.execution_shots.length
-    ? selectShortFilmPilotSamples(workflow as ShortFilmWorkflow).flatMap((sample) => sample.shots.map((shot) => shot.shot_id))
-    : [...allShotIds].slice(0, Math.max(1, Math.min(allShotIds.size, (workflow as ShortFilmWorkflow).pilot_sampling?.sample_count ?? 3)));
+  let pilotShotIds: string[];
+  if (workflow.shot_plan?.execution_shots.length) {
+    try {
+      pilotShotIds = selectShortFilmPilotSamples(workflow as ShortFilmWorkflow).flatMap((sample) => sample.shots.map((shot) => shot.shot_id));
+    } catch (error) {
+      blockers.push(error instanceof Error ? error.message : "GOLDEN_SCENE_SELECTION_FAILED");
+      pilotShotIds = [];
+    }
+  } else {
+    pilotShotIds = [...allShotIds].slice(0, Math.max(1, Math.min(allShotIds.size, 1)));
+  }
   const expectedShotIds = scope === "PILOT" ? new Set(pilotShotIds) : allShotIds;
   const expectedKeyframes = expectedShotIds.size;
   const approvedShotIds = new Set(readiness.keyframes.map((keyframe) => keyframe.shot_id));

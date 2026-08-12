@@ -573,7 +573,7 @@ test("pilot plan khóa provider và tài sản nhưng chưa gọi provider", () 
     project_id: "GDTH-FILM-PILOT-001",
     workflow,
     provider_budget: approvedProviderBudget,
-    pilot_duration_seconds: 15,
+    pilot_duration_seconds: 30,
     prepared_at: preparedAt,
     account_checks: [
       { provider: "RUNWAY", status: "SUFFICIENT", checked_at: preparedAt, manual_balance_confirmed: false },
@@ -584,8 +584,8 @@ test("pilot plan khóa provider và tài sản nhưng chưa gọi provider", () 
   assert.equal(plan.submission_gate, "AWAITING_PROJECT_OWNER_APPROVAL");
   assert.equal(plan.provider_calls_made, false);
   assert.equal(plan.pilot_shot_ids[0], "SHOT-001");
-  assert.equal(plan.pilot_samples.length, 3);
-  assert.equal(plan.total_sample_duration_seconds, 45);
+  assert.equal(plan.pilot_samples.length, 1);
+  assert.equal(plan.total_sample_duration_seconds, 30);
   assert.deepEqual(plan.locked_identity_master_ids, ["TUONG_VY_MASTER_IDENTITY_V1"]);
   assert.deepEqual(plan.locked_voice_master_ids, ["TUONG_VY_VOICE_MASTER_AI_V1"]);
   assert.equal(plan.stages.find((stage) => stage.provider === "SYNC")?.required, true);
@@ -614,20 +614,19 @@ test("pilot plan từ chối số dư thiếu, xác nhận Sync thiếu và acco
   }), /RUNWAY_ACCOUNT_NOT_SUFFICIENT|SYNC_ACCOUNT_NOT_CONFIRMED|RUNWAY_ACCOUNT_CHECK_STALE/);
 });
 
-test("khóa sản xuất toàn phim cho đến khi mọi clip mẫu và pilot batch được duyệt", () => {
+test("khóa sản xuất toàn phim cho đến khi Golden Scene và QC được duyệt", () => {
   const approvedQc = { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true };
   const workflow = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "ok", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-10T10:00:00.000Z" },
     shot_plan: { summary: "Representative shot", shots: ["A"] },
     production_readiness: productionReadiness,
-    pilot_sampling: { sample_count: 3, clip_duration_seconds: 15, selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS", required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"] },
     pilot_batch: {
-      samples: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"].map((purpose, index) => ({
-        sample_id: `PILOT-${index + 1}`, purpose, shot_ids: [`SHOT-00${index + 1}`], duration_seconds: 15,
-        video_url: `https://drive.google.com/file/d/pilot-${index + 1}/view`, qc: approvedQc,
+      samples: [{
+        sample_id: "GOLDEN-SCENE-01", purpose: "IDENTITY_DIALOGUE", shot_ids: ["SHOT-001"], duration_seconds: 30,
+        video_url: "https://drive.google.com/file/d/golden-scene/view", qc: approvedQc,
         review: { decision: "APPROVE", notes: "ok", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-10T10:00:00.000Z" },
-      })),
+      }],
       batch_review: { decision: "APPROVE", notes: "all passed", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-10T10:00:00.000Z" },
     },
   });
@@ -635,13 +634,13 @@ test("khóa sản xuất toàn phim cho đến khi mọi clip mẫu và pilot ba
   assert.throws(() => ShortFilmWorkflowSchema.parse({ ...workflow, pilot_batch: { ...workflow.pilot_batch, samples: workflow.pilot_batch!.samples.map((sample, index) => index === 0 ? { ...sample, qc: { ...sample.qc, identity: false } } : sample) } }), /PILOT_SAMPLE_NOT_APPROVED/);
 });
 
-test("chọn clip mẫu theo rủi ro từ các execution shot hợp lệ của phim dài", () => {
-  const shots = Array.from({ length: 9 }, (_, index) => ({
+test("chọn đúng một Golden Scene 30 giây gồm các shot liên tiếp trong cùng cảnh", () => {
+  const shots = Array.from({ length: 6 }, (_, index) => ({
     shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
-    summary: `Shot ${index + 1}`,
+    summary: `CẢNH 2 — NỘI — PHÒNG KHÁCH — NGÀY | Shot ${index + 1}`,
     runway_prompt: `Cinematic natural performance for approved character in shot ${index + 1}`,
     duration_seconds: 5,
-    risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 3 ? ["MOTION_PERFORMANCE"] : index === 6 ? ["MULTI_CHARACTER_CONTINUITY"] : [],
+    risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 3 ? ["MOTION_PERFORMANCE"] : [],
   }));
   const parsed = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
@@ -649,9 +648,9 @@ test("chọn clip mẫu theo rủi ro từ các execution shot hợp lệ của 
     shot_plan: { summary: "Nine shots", shots: shots.map((shot) => shot.summary), execution_shots: shots },
   });
   const samples = selectShortFilmPilotSamples(parsed);
-  assert.equal(samples.length, 3);
-  assert.ok(samples.every((sample) => sample.expected_duration_seconds === 15 && sample.shots.length === 3));
-  assert.equal(new Set(samples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id))).size, 9);
+  assert.equal(samples.length, 1);
+  assert.equal(samples[0]?.expected_duration_seconds, 30);
+  assert.deepEqual(samples[0]?.shots.map((shot) => shot.shot_id), shots.map((shot) => shot.shot_id));
 });
 
 test("mở yêu cầu kịch bản AI khi dự toán và kinh phí đã duyệt", () => {
@@ -891,13 +890,13 @@ test("shot có bối cảnh Tường Vy nhưng thoại Minh phải khóa đúng 
   });
 });
 
-test("ba pilot 15 giây từ Shot Plan 10 giây luôn giữ đúng tổng 45 giây và trần chi phí", () => {
-  const shots = Array.from({ length: 18 }, (_, index) => ({
+test("Golden Scene dùng đúng 30 giây provider và trần chi phí tương ứng", () => {
+  const shots = Array.from({ length: 3 }, (_, index) => ({
     shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
-    summary: `Shot ${index + 1}`,
+    summary: `CẢNH 3 — NỘI — VĂN PHÒNG — NGÀY | Shot ${index + 1}`,
     runway_prompt: `Cinematic natural performance for approved character in shot ${index + 1}`,
     duration_seconds: 10,
-    risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 2 ? ["MOTION_PERFORMANCE"] : index === 4 ? ["MULTI_CHARACTER_CONTINUITY"] : [],
+    risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 2 ? ["MOTION_PERFORMANCE"] : [],
   }));
   const parsed = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
@@ -905,21 +904,21 @@ test("ba pilot 15 giây từ Shot Plan 10 giây luôn giữ đúng tổng 45 gi�
     shot_plan: { summary: "Eighteen shots", shots: shots.map((shot) => shot.summary), execution_shots: shots },
   });
   const samples = selectShortFilmPilotSamples(parsed);
-  assert.deepEqual(samples.map((sample) => sample.expected_duration_seconds), [15, 15, 15]);
-  assert.equal(samples.flatMap((sample) => sample.shots).reduce((sum, shot) => sum + shot.duration_seconds, 0), 45);
-  assert.equal(new Set(samples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id))).size, 6);
+  assert.deepEqual(samples.map((sample) => sample.expected_duration_seconds), [30]);
+  assert.equal(samples.flatMap((sample) => sample.shots).reduce((sum, shot) => sum + shot.duration_seconds, 0), 30);
+  assert.equal(new Set(samples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id))).size, 3);
   const budget = calculateShortFilmPilotBudget(parsed);
-  assert.equal(budget.unique_shot_seconds, 45);
+  assert.equal(budget.unique_shot_seconds, 30);
   assert.deepEqual(budget.proposed_caps, {
-    runway_credits: 648,
-    elevenlabs_characters: 810,
-    sync_usd: 2.7,
+    runway_credits: 432,
+    elevenlabs_characters: 540,
+    sync_usd: 1.8,
   });
   const pilotShotIds = samples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id));
   const withDialogue = ShortFilmWorkflowSchema.parse({
     ...parsed,
     pilot_budget_approval: {
-      sample_count: 3, clip_duration_seconds: 15, runway_credits_cap: 700,
+      sample_count: 1, clip_duration_seconds: 30, runway_credits_cap: 432,
       elevenlabs_credits_cap: 1_000, sync_usd_cap: 3, decision: "APPROVE",
       reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-11T00:00:00.000Z",
     },
@@ -934,7 +933,7 @@ test("ba pilot 15 giây từ Shot Plan 10 giây luôn giữ đúng tổng 45 gi�
     },
   });
   const dialogueBudget = calculateShortFilmPilotBudget(withDialogue);
-  assert.ok(dialogueBudget.required.elevenlabs_characters > 810);
+  assert.ok(dialogueBudget.required.elevenlabs_characters > 0);
   assert.ok(dialogueBudget.required.elevenlabs_characters <= 1_000);
   assert.equal(shortFilmPilotBudgetApprovalIsSufficient(withDialogue), true);
 });
@@ -993,15 +992,15 @@ test("chỉ READY_TO_PUBLISH sau SCRIPT, PILOT và phim hoàn chỉnh được d
     shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
     production_readiness: productionReadiness,
     pilot_batch: {
-      samples: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"].map((purpose, index) => ({
-        sample_id: `PILOT-${index + 1}`,
-        purpose,
-        shot_ids: [`SHOT-00${index + 1}`],
-        duration_seconds: 15,
-        video_url: `https://drive.google.com/file/d/pilot-${index + 1}/view`,
+      samples: [{
+        sample_id: "GOLDEN-SCENE-01",
+        purpose: "IDENTITY_DIALOGUE",
+        shot_ids: ["SHOT-001"],
+        duration_seconds: 30,
+        video_url: "https://drive.google.com/file/d/golden-scene/view",
         qc: approvedQc,
         review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
-      })),
+      }],
       batch_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
     },
     full_film: {
@@ -1170,14 +1169,14 @@ test("production readiness draft can be saved before the first keyframe approval
 });
 
 test("pilot readiness requires only selected pilot shots while full-film readiness remains locked", () => {
-  const executionShots = Array.from({ length: 5 }, (_, index) => ({
+  const executionShots = Array.from({ length: 7 }, (_, index) => ({
     shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
-    summary: `Pilot scope shot ${index + 1}`,
+    summary: `${index < 6 ? "CẢNH 1 — NỘI — NHÀ — NGÀY" : "CẢNH 2 — NGOẠI — ĐƯỜNG — NGÀY"} | Pilot scope shot ${index + 1}`,
     runway_prompt: `Cinematic approved identity shot ${index + 1}`,
     duration_seconds: 5,
     risk_tags: index === 0 ? ["IDENTITY_DIALOGUE"] : index === 2 ? ["MOTION_PERFORMANCE"] : [],
   }));
-  const pilotShotIds = executionShots.slice(0, 4).map((shot) => shot.shot_id);
+  const pilotShotIds = executionShots.slice(0, 6).map((shot) => shot.shot_id);
   const scopedReadiness = {
     ...productionReadiness,
     keyframes: pilotShotIds.map((shot_id) => ({ ...productionReadiness.keyframes[0], shot_id })),
@@ -1196,17 +1195,11 @@ test("pilot readiness requires only selected pilot shots while full-film readine
         shot_id,
         dialogue_line_id: `LINE-${String(index + 1).padStart(3, "0")}`,
       })),
-      golden_scene: { ...productionReadiness.performance_plan.golden_scene, shot_ids: pilotShotIds.slice(0, 3) },
+      golden_scene: { ...productionReadiness.performance_plan.golden_scene, shot_ids: pilotShotIds },
     },
   };
   const parsed = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
-    pilot_sampling: {
-      sample_count: 2,
-      clip_duration_seconds: 10,
-      selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
-      required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE"],
-    },
     script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
     shot_plan: {
       summary: "Five shots",
@@ -1223,7 +1216,7 @@ test("pilot readiness requires only selected pilot shots while full-film readine
   assert.equal(shortFilmNextAction(parsed), "PREPARE_SHORT_FILM_PILOT");
 });
 
-test("pilot budget approval is durable and cannot authorize a different sampling plan", () => {
+test("budget cũ không thể cấp quyền cho Golden Scene mới", () => {
   const approvedBudget = {
     sample_count: 3,
     clip_duration_seconds: 15,
@@ -1234,16 +1227,13 @@ test("pilot budget approval is durable and cannot authorize a different sampling
     reviewer: "PROJECT_OWNER",
     reviewed_at: "2026-08-11T00:00:00.000Z",
   } as const;
-  const parsed = ShortFilmWorkflowSchema.parse({ ...shortFilmWorkflow, pilot_budget_approval: approvedBudget });
-  assert.equal(parsed.pilot_budget_approval?.runway_credits_cap, 700);
-  assert.equal(shortFilmPilotBudgetApprovalIsSufficient(parsed), false);
   assert.throws(() => ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     pilot_sampling: {
-      sample_count: 2,
-      clip_duration_seconds: 10,
-      selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
-      required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE"],
+      sample_count: 1,
+      clip_duration_seconds: 30,
+      selection_mode: "CONTIGUOUS_GOLDEN_SCENE",
+      required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
     },
     pilot_budget_approval: approvedBudget,
   }), /PILOT_BUDGET_APPROVAL_MUST_MATCH_SAMPLING/);

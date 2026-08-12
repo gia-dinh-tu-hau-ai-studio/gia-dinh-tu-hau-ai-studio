@@ -9,7 +9,9 @@ import { ElevenLabsPilotProvider, RunwayPilotProvider, SyncPilotProvider } from 
 import { assembleVideoBuffers, fitAudioBuffer, probeVideoBuffer, trimVideoBuffer, type VideoTechnicalEvidence } from "../media/short-film-pilot-assembler";
 import { preparePrivateRunwayCharacterFace, preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
-const MANIFEST_NAME = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
+// V2 is intentionally isolated from the rejected multi-clip V1 manifests. This prevents
+// idempotency/restart paths from ever reusing old pilot media as a Golden Scene source.
+const MANIFEST_NAME = "SHORT_FILM_GOLDEN_SCENE_PROVIDER_EXECUTION_V2.json";
 const LEGACY_VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_V1.json";
 const VARIANT_MANIFEST_NAME = "SHORT_FILM_PILOT_PERFORMANCE_VARIANT_IDENTITY_LOCKED_V2.json";
 const EVALUATION_REEL_MANIFEST_NAME = "SHORT_FILM_PILOT_EVALUATION_REEL_30S_V1.json";

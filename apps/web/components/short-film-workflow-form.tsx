@@ -98,9 +98,9 @@ export function createInitialShortFilmWorkflow(): ShortFilmWorkflow {
       singing_scene_notes: "",
     },
     pilot_sampling: {
-      sample_count: 3,
-      clip_duration_seconds: 15,
-      selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS",
+      sample_count: 1,
+      clip_duration_seconds: 30,
+      selection_mode: "CONTIGUOUS_GOLDEN_SCENE",
       required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
     },
   };
@@ -461,16 +461,16 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
         <p className="gate-note">Hệ thống tự kiểm tra đúng nhân vật, đúng giọng, đúng người nói và đúng ảnh đã duyệt trước khi cho phép tạo clip mẫu.</p>
         <div className={`budget-approval ${persistedPilotBudgetApproved ? "approved" : "pending"}`}>
           <div>
-            <strong>{persistedPilotBudgetApproved ? "NGÂN SÁCH 3 CLIP MẪU ĐÃ DUYỆT" : "DUYỆT NGÂN SÁCH 3 CLIP MẪU"}</strong>
-            <p>{pilotBudgetSummary ?? "3 clip × 15 giây · Runway tối đa 700 credits · ElevenLabs tối đa 1.000 credits · Sync tối đa 3 USD."}</p>
-            <small>Chỉ áp dụng cho đợt clip mẫu; không duyệt sản xuất toàn phim.</small>
+            <strong>{persistedPilotBudgetApproved ? "NGÂN SÁCH GOLDEN SCENE 30 GIÂY ĐÃ DUYỆT" : "DUYỆT NGÂN SÁCH GOLDEN SCENE 30 GIÂY"}</strong>
+            <p>{pilotBudgetSummary ?? "1 cảnh phim hoàn chỉnh 30 giây · nhiều shot liền mạch cùng bối cảnh · audio-first và performance-driven."}</p>
+            <small>Chỉ áp dụng cho một cảnh phim kiểm chuẩn; không duyệt sản xuất toàn phim.</small>
           </div>
           <button className={persistedPilotBudgetApproved ? "action-completed" : characterVoiceSceneApprovalComplete ? "action-current" : "action-pending"} disabled={persistedPilotBudgetApproved || !characterVoiceSceneApprovalComplete} type="button" onClick={() => {
             if (!pilotBudget) return;
             patch({ pilot_budget_approval: { sample_count: value.pilot_sampling.sample_count, clip_duration_seconds: value.pilot_sampling.clip_duration_seconds, runway_credits_cap: pilotBudget.proposed_caps.runway_credits, elevenlabs_credits_cap: pilotBudget.proposed_caps.elevenlabs_characters, sync_usd_cap: pilotBudget.proposed_caps.sync_usd, decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: new Date().toISOString() } });
             onApprovePilotBudget?.();
           }}>
-            {persistedPilotBudgetApproved ? "✓ Đã duyệt ngân sách clip mẫu" : "Duyệt ngân sách 3 clip mẫu"}
+            {persistedPilotBudgetApproved ? "✓ Đã duyệt ngân sách Golden Scene" : "Duyệt ngân sách Golden Scene 30 giây"}
           </button>
           {!characterVoiceSceneApprovalComplete && <small>Ngân sách chỉ mở sau khi nhân vật, giọng nói và ảnh cảnh đã được xác nhận.</small>}
         </div>
@@ -482,7 +482,7 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
             <span>Ảnh cảnh mẫu đã duyệt: <strong>{value.production_readiness.keyframes.filter((item) => pilotShotIds.includes(item.shot_id)).length}/{pilotShotIds.length}</strong></span>
             <span>Cảnh mẫu có thoại đã khóa: <strong>{value.production_readiness.dialogue_line_approvals.filter((item) => pilotShotIds.includes(item.shot_id)).length}/{pilotShotIds.length}</strong></span>
           </div>
-          <p className="gate-note">Giai đoạn này chỉ kiểm tra các cảnh thuộc 3 clip pilot: {pilotShotIds.join(", ")}. Các cảnh còn lại chỉ bị khóa sau khi bạn duyệt pilot và quyết định sản xuất toàn phim.</p>
+          <p className="gate-note">Giai đoạn này chỉ kiểm tra các shot liền mạch của Golden Scene: {pilotShotIds.join(", ")}. Các cảnh còn lại chỉ bị khóa sau khi bạn duyệt Golden Scene và quyết định sản xuất toàn phim.</p>
           <div className="pilot-readiness-list">
             {pilotShotIds.map((shotId) => {
               const shot = value.shot_plan?.execution_shots.find((item) => item.shot_id === shotId);
@@ -547,10 +547,9 @@ export function ShortFilmWorkflowForm({ eligibleCharacters, value, onChange, onG
 
       <fieldset disabled={!scriptApproved || !value.shot_plan || !productionReady} className={!scriptApproved || !value.shot_plan || !productionReady ? "locked-stage" : ""}>
         <legend>Clip mẫu 10–20 giây và kiểm tra chất lượng</legend>
-        <p className="gate-note">TuhauAI chỉ tạo các clip mẫu đại diện trước. Toàn bộ phim vẫn khóa cho đến khi từng clip mẫu và kết quả tổng được duyệt.</p>
-        <label><span>Số clip mẫu cần xem</span><select value={value.pilot_sampling.sample_count} onChange={(event) => patch({ pilot_sampling: { ...value.pilot_sampling, sample_count: Number(event.target.value) } })}><option value={2}>2 clip</option><option value={3}>3 clip — khuyến nghị</option><option value={4}>4 clip</option><option value={5}>5 clip</option></select></label>
-        <label><span>Thời lượng mỗi clip</span><select value={value.pilot_sampling.clip_duration_seconds} onChange={(event) => patch({ pilot_sampling: { ...value.pilot_sampling, clip_duration_seconds: Number(event.target.value) } })}><option value={10}>10 giây</option><option value={15}>15 giây — khuyến nghị</option><option value={20}>20 giây</option></select></label>
-        <p className="gate-note">Các clip mẫu bắt buộc kiểm tra đúng nhân vật, thoại, chuyển động diễn xuất và tính nhất quán khi có nhiều nhân vật. Khi chọn 4–5 clip, hệ thống tự ưu tiên thêm các cảnh rủi ro cao.</p>
+        <p className="gate-note">TuhauAI tạo đúng một Golden Scene 30 giây từ một cảnh thật trong kịch bản. Cảnh gồm nhiều shot liền mạch, đủ thoại, phản ứng, chuyển động và continuity để đánh giá chuyên nghiệp.</p>
+        <div className="provider-grid"><span>Số cảnh kiểm chuẩn: <strong>1</strong></span><span>Thời lượng: <strong>30 giây</strong></span><span>Phương pháp: <strong>Audio-first · Performance-driven</strong></span></div>
+        <p className="gate-note">Toàn bộ phim vẫn khóa cho đến khi Golden Scene đạt đúng nhân vật, giọng, khẩu hình, diễn xuất, bối cảnh, ánh sáng và continuity.</p>
         {value.pilot_batch?.samples.map((sample, index) => <article className="workflow-card" key={sample.sample_id}>
           <h4>Clip mẫu {index + 1} · {sample.purpose}</h4>
           <video controls src={sample.video_url} />
