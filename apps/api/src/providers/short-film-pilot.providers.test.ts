@@ -6,7 +6,7 @@ import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
-import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, buildGoldenSceneSilentMotionPrompt, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
+import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, buildGoldenSceneSilentMotionPrompt, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -298,6 +298,13 @@ test("Golden Scene audio approval unlocks silent motion only after every transcr
 test("Golden Scene silent motion prompt preserves identity and stops speaking motion after dialogue", () => {
   const prompt = buildGoldenSceneSilentMotionPrompt({ shot_id: "SHOT-006", dialogue_text: "Việc gì mà chưa làm đã đòi tiền mình trước?" } as Parameters<typeof buildGoldenSceneSilentMotionPrompt>[0]);
   assert.match(prompt, /exact approved character identity/); assert.match(prompt, /stop speaking motion/); assert.ok(prompt.length <= 1000);
+});
+
+test("Golden Scene lip-sync opens only after every silent clip and verified audio are approved", () => {
+  const task = { audio: { verified: true }, silent_motion: { runway_status: "SUCCEEDED", drive_file_id: "video", review: "PENDING" } };
+  const plan = { status: "AWAITING_SILENT_MOTION_APPROVAL", tasks: [{ ...task }, { ...task }, { ...task }], heartbeat_at: "before" } as Parameters<typeof approveGoldenSceneSilentMotion>[0];
+  assert.equal(approveGoldenSceneSilentMotion(plan, "now").status, "PROCESSING_LIP_SYNC"); assert.equal(plan.tasks[0].lip_sync?.sync_status, "PENDING_SUBMIT");
+  assert.throws(() => approveGoldenSceneSilentMotion({ ...plan, status: "AWAITING_SILENT_MOTION_APPROVAL", tasks: [{ ...plan.tasks[0], silent_motion: { ...plan.tasks[0].silent_motion!, runway_status: "RUNNING" } }] }, "now"), /COMPLETED_SILENT_MOTION_AND_AUDIO_REQUIRED/);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {

@@ -33,6 +33,9 @@ export class AppController {
   @Post("projects/:projectId/short-film/golden-scene/motion/dialogue-audio/approve")
   approveGoldenSceneDialogueAudio(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.approveAudio(projectId); }
 
+  @Post("projects/:projectId/short-film/golden-scene/motion/silent-motion/approve")
+  approveGoldenSceneSilentMotion(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.approveSilentMotion(projectId); }
+
   @Post("projects/:projectId/short-film/golden-scene/character-keyframes/execute")
   executeCharacterKeyframes(@Param("projectId") projectId: string, @Body() body: unknown) { return this.characterKeyframes.execute(projectId, body); }
 
