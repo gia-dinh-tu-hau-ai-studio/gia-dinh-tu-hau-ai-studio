@@ -5,6 +5,7 @@ import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.conne
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
+import { OpenAiImageEditProvider, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -230,6 +231,19 @@ test("Golden Scene background approval requires exactly three persisted successf
   const manifest = { schema_version: "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1" as const, execution_id: "exec", project_id: "project", status: "AWAITING_KEYFRAME_QC" as const, caps: { runway_credits: 24 as const }, provider_calls_made: true, tasks: [task("SHOT-006"), task("SHOT-007"), task("SHOT-008")], runway_assets: {}, started_at: "2026-01-01", heartbeat_at: "2026-01-01" };
   assert.equal(reviewBackgroundGate(manifest, "APPROVE", "2026-01-02").status, "APPROVED");
   assert.throws(() => reviewBackgroundGate({ ...manifest, status: "AWAITING_KEYFRAME_QC", tasks: manifest.tasks.slice(0, 2) }, "APPROVE", "2026-01-02"), /EVIDENCE_INCOMPLETE/);
+});
+
+test("OpenAI Character keyframes require exact three-image one-dollar approval", () => {
+  assert.deepEqual(validateCharacterKeyframeBudget({ execution_approved: true, openai_usd_cap: 1, image_count: 3 }), { execution_approved: true, openai_usd_cap: 1, image_count: 3 });
+  assert.throws(() => validateCharacterKeyframeBudget({ execution_approved: true, openai_usd_cap: 2, image_count: 3 }), /EXACT_CAP_REQUIRED/);
+});
+
+test("OpenAI image edit uses one high-fidelity landscape output and no video provider", async () => {
+  let url = "", form: FormData | undefined;
+  const provider = new OpenAiImageEditProvider("secret", (async (input, init) => { url = String(input); form = init?.body as FormData; return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from("image").toString("base64") }] }), { status: 200 }); }) as typeof fetch);
+  const image = { content: Buffer.alloc(600), fileName: "image.png", mimeType: "image/png" };
+  await provider.edit({ background: image, characterImages: [image], prompt: "locked identity" });
+  assert.equal(url, "https://api.openai.com/v1/images/edits"); assert.equal(form?.get("model"), "gpt-image-1.5"); assert.equal(form?.get("size"), "1536x1024"); assert.equal(form?.get("quality"), "high"); assert.equal(form?.get("input_fidelity"), "high"); assert.equal(form?.get("n"), "1"); assert.equal(form?.getAll("image[]").length, 2);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
