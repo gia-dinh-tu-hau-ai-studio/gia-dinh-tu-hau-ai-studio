@@ -1267,6 +1267,16 @@ export function matchShortFilmShotActor(
 ) {
   const normalizedSummary = summary.toLocaleLowerCase("vi");
   const sourceNames = new Map(sourceActors.map((actor) => [actor.source_actor_id, actor.source_actor_name]));
+  const explicitSpeakers = filmCharacters.flatMap((character, order) => {
+    const names = [character.film_character_name, sourceNames.get(character.source_actor_id) ?? ""]
+      .map((name) => name.trim().toLocaleLowerCase("vi"))
+      .filter((name) => name.length >= 2 && !/^nhân vật\s+[a-z0-9]+$/iu.test(name));
+    const positions = names.map((name) => normalizedSummary.lastIndexOf(`${name}:`)).filter((position) => position >= 0);
+    return positions.length ? [{ source_actor_id: character.source_actor_id, position: Math.max(...positions), order }] : [];
+  });
+  explicitSpeakers.sort((left, right) => right.position - left.position || left.order - right.order);
+  if (explicitSpeakers[0]) return explicitSpeakers[0].source_actor_id;
+
   const matches = filmCharacters.flatMap((character, order) => {
     const names = [character.film_character_name, sourceNames.get(character.source_actor_id) ?? ""]
       .map((name) => name.trim().toLocaleLowerCase("vi"))
@@ -1276,6 +1286,30 @@ export function matchShortFilmShotActor(
   });
   matches.sort((left, right) => left.position - right.position || left.order - right.order);
   return matches[0]?.source_actor_id ?? (filmCharacters.length === 1 ? filmCharacters[0]?.source_actor_id : undefined);
+}
+
+/** Resolve dialogue from the right-most explicit `Character:` label in a shot summary. */
+export function matchShortFilmDialogueSpeaker(
+  summary: string,
+  filmCharacters: ReadonlyArray<Pick<ShortFilmWorkflow["film_characters"][number], "source_actor_id" | "film_character_name">>,
+  sourceActors: ReadonlyArray<Pick<ShortFilmWorkflow["source_actors"][number], "source_actor_id" | "source_actor_name">>,
+) {
+  const normalizedSummary = summary.toLocaleLowerCase("vi");
+  const sourceNames = new Map(sourceActors.map((actor) => [actor.source_actor_id, actor.source_actor_name]));
+  const candidates = filmCharacters.flatMap((character, order) =>
+    [character.film_character_name, sourceNames.get(character.source_actor_id) ?? ""]
+      .map((name) => name.trim())
+      .filter((name) => name.length >= 2)
+      .flatMap((name) => {
+        const marker = `${name.toLocaleLowerCase("vi")}:`;
+        const position = normalizedSummary.lastIndexOf(marker);
+        return position >= 0 ? [{ source_actor_id: character.source_actor_id, position, markerLength: marker.length, order }] : [];
+      }),
+  );
+  candidates.sort((left, right) => right.position - left.position || left.order - right.order);
+  const match = candidates[0];
+  if (!match) return undefined;
+  return { source_actor_id: match.source_actor_id, dialogue_text: summary.slice(match.position + match.markerLength).trim() };
 }
 
 export function shortFilmScriptApprovalIsFresh(

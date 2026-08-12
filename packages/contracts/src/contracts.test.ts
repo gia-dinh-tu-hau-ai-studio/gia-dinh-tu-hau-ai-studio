@@ -21,6 +21,7 @@ import {
   selectShortFilmPilotSamples,
   shortFilmMediaExecutionDecision,
   shortFilmPilotBudgetApprovalIsSufficient,
+  matchShortFilmDialogueSpeaker,
   matchShortFilmShotActor,
   shortFilmNextAction,
   shortFilmScriptApprovalIsFresh,
@@ -870,6 +871,24 @@ test("khóa Shot Plan khi SCRIPT_APPROVED chưa đạt", () => {
     ...shortFilmWorkflow,
     shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
   }));
+});
+
+test("shot có bối cảnh Tường Vy nhưng thoại Minh phải khóa đúng Minh", () => {
+  const characters = [
+    { source_actor_id: "CHAR_TUONG_VY", film_character_name: "Tường Vy" },
+    { source_actor_id: "CHAR_MINH", film_character_name: "Minh" },
+  ];
+  const actors = [
+    { source_actor_id: "CHAR_TUONG_VY", source_actor_name: "Tường Vy" },
+    { source_actor_id: "CHAR_MINH", source_actor_name: "Minh" },
+  ];
+  const summary = "Shot 03: CẢNH 1 – PHÒNG TRỌ CỦA TƯỜNG VY – SÁNG — MINH: Hồ sơ em hợp lắm.";
+
+  assert.equal(matchShortFilmShotActor(summary, characters, actors), "CHAR_MINH");
+  assert.deepEqual(matchShortFilmDialogueSpeaker(summary, characters, actors), {
+    source_actor_id: "CHAR_MINH",
+    dialogue_text: "Hồ sơ em hợp lắm.",
+  });
 });
 
 test("ba pilot 15 giây từ Shot Plan 10 giây luôn giữ đúng tổng 45 giây và trần chi phí", () => {
