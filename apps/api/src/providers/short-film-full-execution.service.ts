@@ -14,7 +14,7 @@ import { verifyVietnameseTranscript } from "./short-film-pilot-execution.service
 import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
 const FULL_MANIFEST = "SHORT_FILM_FULL_EXECUTION_V1.json";
-const PILOT_MANIFEST = "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1.json";
+const PILOT_MANIFEST = "SHORT_FILM_GOLDEN_SCENE_PROVIDER_EXECUTION_V2.json";
 
 type FullTask = {
   shot_id: string; prompt: string; duration_seconds: number; keyframe_url: string;

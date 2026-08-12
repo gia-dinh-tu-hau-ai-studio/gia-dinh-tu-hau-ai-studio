@@ -1272,19 +1272,19 @@ export function ProjectIntakeForm() {
       {createdProject?.next_action === "PREPARE_SHORT_FILM_PILOT" && (
         <section className="confirmation-panel">
           <div>
-            <h2>Chuẩn bị kế hoạch clip mẫu</h2>
-            <p>Chuẩn bị {shortFilmWorkflow.pilot_sampling.sample_count} clip mẫu × {shortFilmWorkflow.pilot_sampling.clip_duration_seconds} giây để chủ dự án đánh giá trước khi sản xuất toàn phim. Bước này chưa tạo clip.</p>
-            <label className="consent"><input checked={pilotSyncBalanceConfirmed} type="checkbox" onChange={(event) => setPilotSyncBalanceConfirmed(event.target.checked)} /> Tôi đã mở Sync Billing và xác nhận đủ hạn mức cho đợt clip mẫu này.</label>
+            <h2>Chuẩn bị Golden Scene 30 giây</h2>
+            <p>Chọn một cảnh thật liền mạch trong kịch bản, gồm nhiều shot cùng bối cảnh để đánh giá nhân vật, thoại, khẩu hình, diễn xuất và continuity. Bước này chưa gọi provider.</p>
+            <label className="consent"><input checked={pilotSyncBalanceConfirmed} type="checkbox" onChange={(event) => setPilotSyncBalanceConfirmed(event.target.checked)} /> Tôi đã mở Sync Billing và xác nhận đủ hạn mức cho Golden Scene này.</label>
           </div>
           <button disabled={!budgetApproved || !pilotSyncBalanceConfirmed || preparingShortFilmPilot} onClick={() => void prepareShortFilmPilot()} type="button">
-            {preparingShortFilmPilot ? "Đang chuẩn bị…" : "Chuẩn bị kế hoạch clip mẫu"}
+            {preparingShortFilmPilot ? "Đang chuẩn bị…" : "Chuẩn bị Golden Scene 30 giây"}
           </button>
           {shortFilmPilotPlanResult && <ResultDetails value={shortFilmPilotPlanResult} />}
           {shortFilmPilotPlanResult && <div className="approval-gate">
-            <strong>Duyệt chi phí chạy thật đợt clip mẫu</strong>
+            <strong>Duyệt chi phí chạy thật Golden Scene</strong>
             <p>Hạn mức đã duyệt: {shortFilmWorkflow.pilot_budget_approval?.runway_credits_cap.toLocaleString("vi-VN")} Runway credits · {shortFilmWorkflow.pilot_budget_approval?.elevenlabs_credits_cap.toLocaleString("vi-VN")} ElevenLabs characters · {shortFilmWorkflow.pilot_budget_approval?.sync_usd_cap.toLocaleString("vi-VN")} USD Sync.</p>
-            <label className="consent"><input checked={pilotExecutionApproved} type="checkbox" onChange={(event) => setPilotExecutionApproved(event.target.checked)} /> Tôi duyệt đúng hạn mức trên cho đợt clip mẫu; không duyệt sản xuất toàn phim.</label>
-            <button disabled={!pilotExecutionApproved || !shortFilmPilotBudgetApprovalIsSufficient(shortFilmWorkflow) || runningPilotExecution} onClick={() => void executeShortFilmPilot()} type="button">{runningPilotExecution ? "Đang bắt đầu…" : "Chạy đợt clip mẫu"}</button>
+            <label className="consent"><input checked={pilotExecutionApproved} type="checkbox" onChange={(event) => setPilotExecutionApproved(event.target.checked)} /> Tôi duyệt đúng hạn mức trên cho một Golden Scene 30 giây; không duyệt sản xuất toàn phim.</label>
+            <button disabled={!pilotExecutionApproved || !shortFilmPilotBudgetApprovalIsSufficient(shortFilmWorkflow) || runningPilotExecution} onClick={() => void executeShortFilmPilot()} type="button">{runningPilotExecution ? "Đang bắt đầu…" : "Sản xuất Golden Scene 30 giây"}</button>
             <button className="secondary-button" onClick={() => void refreshShortFilmPilotStatus()} type="button">Cập nhật tiến độ</button>
             {pilotExecutionResult && <ResultDetails value={pilotExecutionResult} />}
             {pilotAudioTasks.length > 0 && <div className="approval-gate">
