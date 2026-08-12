@@ -369,12 +369,15 @@ export function buildPilotPerformancePrompt(basePrompt: string, dialogueText: st
 }
 
 export function rejectPilotForRestart(manifest: PilotExecutionManifest, rejectedAt: string) {
-  if (manifest.status !== "AWAITING_PILOT_QC") throw new Error("PILOT_NOT_AWAITING_QC_REJECTION");
+  const dialogueRejected = manifest.status === "FAILED" && manifest.error?.stage === "DIALOGUE_AUDIO_APPROVAL";
+  if (manifest.status !== "AWAITING_PILOT_QC" && !dialogueRejected) throw new Error("PILOT_NOT_AWAITING_QC_REJECTION");
   const archiveName = `SHORT_FILM_PILOT_REJECTED_${rejectedAt.replace(/[:.]/g, "-")}_${manifest.execution_id}.json`;
   return {
     archiveName,
     archived: { ...manifest, qc_rejection: { decision: "REJECT" as const, reviewer: "PROJECT_OWNER" as const, rejected_at: rejectedAt } },
-    failed: { ...manifest, status: "FAILED" as const, heartbeat_at: rejectedAt, error: { stage: "PILOT_QC", message: "PILOT_REJECTED_BY_PROJECT_OWNER_FOR_RESTART" } },
+    failed: dialogueRejected
+      ? { ...manifest, heartbeat_at: rejectedAt }
+      : { ...manifest, status: "FAILED" as const, heartbeat_at: rejectedAt, error: { stage: "PILOT_QC", message: "PILOT_REJECTED_BY_PROJECT_OWNER_FOR_RESTART" } },
   };
 }
 
@@ -464,9 +467,15 @@ export class ShortFilmPilotExecutionService {
     const keyframeByShot = new Map(context.workflow.production_readiness!.keyframes.map((keyframe) => [keyframe.shot_id, keyframe.approved_image_url]));
     const required = calculateShortFilmPilotBudget(context.workflow).required;
     if (caps.runway_credits < required.runway_credits || caps.elevenlabs_characters < required.elevenlabs_characters || caps.sync_usd < required.sync_usd) throw new Error(`EXECUTION_CAP_TOO_LOW:RUNWAY=${required.runway_credits},ELEVENLABS=${required.elevenlabs_characters},SYNC=${required.sync_usd.toFixed(2)}`);
+    const previousTasks = new Map(existing.value.tasks.map((task) => [task.shot_id, task]));
     const tasks = samples.flatMap((sample) => sample.shots.map((shot) => {
       if (!keyframeByShot.has(shot.shot_id)) throw new Error(`APPROVED_KEYFRAME_MISSING:${shot.shot_id}`);
-      return { sample_id: sample.sample_id, shot_id: shot.shot_id, runway_status: "PENDING_SUBMIT", dialogue_line_id: dialogueByShot.get(shot.shot_id)?.line_id };
+      const line = dialogueByShot.get(shot.shot_id);
+      const previous = previousTasks.get(shot.shot_id);
+      const reusableAudio = line && previous?.audio_drive_file_id && previous.transcript_text
+        && verifyVietnameseTranscript(line.dialogue_text, { text: previous.transcript_text, languageCode: previous.transcript_language_code ?? "", languageProbability: previous.transcript_language_probability ?? 0 }).passed;
+      return { sample_id: sample.sample_id, shot_id: shot.shot_id, runway_status: "PENDING_SUBMIT", dialogue_line_id: line?.line_id,
+        ...(reusableAudio ? { audio_drive_file_id: previous.audio_drive_file_id, elevenlabs_request_id: previous.elevenlabs_request_id, voice_master_id: previous.voice_master_id, elevenlabs_voice_id: previous.elevenlabs_voice_id, tts_model_id: previous.tts_model_id, tts_language_code: previous.tts_language_code, transcript_text: previous.transcript_text, transcript_language_code: previous.transcript_language_code, transcript_language_probability: previous.transcript_language_probability, transcript_similarity: 1, transcript_verified: true, audio_review_decision: "PENDING" as const } : {}) };
     }));
     const now = new Date().toISOString();
     const manifest: PilotExecutionManifest = { schema_version: "SHORT_FILM_PILOT_PROVIDER_EXECUTION_V1", execution_id: randomUUID(), project_id: projectId, status: "PREPARING_DIALOGUE_AUDIO", samples, tasks, caps, provider_calls_made: false, heartbeat_at: now, started_at: now };
