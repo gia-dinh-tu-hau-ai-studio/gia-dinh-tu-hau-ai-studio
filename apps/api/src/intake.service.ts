@@ -245,7 +245,7 @@ export class IntakeService {
     if (!projectId) throw new BadRequestException({ code: "PROJECT_ID_REQUIRED", message: "project_id lÃ  báº¯t buá»™c" });
     const requestSchema = z.object({
       provider_budget: ProviderBudgetPlanSchema,
-      pilot_duration_seconds: z.number().int().min(10).max(20).optional(),
+      pilot_duration_seconds: z.number().int().min(10).max(30).optional(),
       manual_sync_balance_confirmed: z.boolean().default(false),
     });
     try {
