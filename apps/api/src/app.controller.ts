@@ -20,6 +20,12 @@ export class AppController {
   @Get("projects/:projectId/short-film/golden-scene/keyframes/status")
   goldenSceneKeyframeStatus(@Param("projectId") projectId: string) { return this.goldenSceneKeyframes.status(projectId); }
 
+  @Post("projects/:projectId/short-film/golden-scene/keyframes/review")
+  reviewGoldenSceneKeyframes(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const request = z.object({ decision: z.enum(["APPROVE", "REJECT"]) }).strict().parse(body);
+    return this.goldenSceneKeyframes.review(projectId, request.decision);
+  }
+
   @Get("health")
   health() {
     return {

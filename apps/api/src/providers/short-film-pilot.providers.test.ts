@@ -4,7 +4,7 @@ import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncP
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
-import { referenceActorIdsForShot } from "./golden-scene-keyframe.service";
+import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -223,6 +223,13 @@ test("Golden Scene close-ups cannot blend the other scene character identity", (
   assert.deepEqual(referenceActorIdsForShot("SHOT-006", "PA", ["PA", "TV"]), ["PA", "TV"]);
   assert.deepEqual(referenceActorIdsForShot("SHOT-007", "PA", ["PA", "TV"]), ["PA"]);
   assert.deepEqual(referenceActorIdsForShot("SHOT-008", "TV", ["PA", "TV"]), ["TV"]);
+});
+
+test("Golden Scene background approval requires exactly three persisted successful plates", () => {
+  const task = (shot_id: string) => ({ shot_id, actor_id: "PA", prompt: "empty corridor", runway_status: "SUCCEEDED", drive_file_id: `${shot_id}-file`, drive_url: `https://drive.google.com/${shot_id}` });
+  const manifest = { schema_version: "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1" as const, execution_id: "exec", project_id: "project", status: "AWAITING_KEYFRAME_QC" as const, caps: { runway_credits: 24 as const }, provider_calls_made: true, tasks: [task("SHOT-006"), task("SHOT-007"), task("SHOT-008")], runway_assets: {}, started_at: "2026-01-01", heartbeat_at: "2026-01-01" };
+  assert.equal(reviewBackgroundGate(manifest, "APPROVE", "2026-01-02").status, "APPROVED");
+  assert.throws(() => reviewBackgroundGate({ ...manifest, status: "AWAITING_KEYFRAME_QC", tasks: manifest.tasks.slice(0, 2) }, "APPROVE", "2026-01-02"), /EVIDENCE_INCOMPLETE/);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
