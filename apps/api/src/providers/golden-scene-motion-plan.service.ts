@@ -42,7 +42,7 @@ export type GoldenSceneMotionPlan = {
   schema_version: "SHORT_FILM_GOLDEN_SCENE_MOTION_PLAN_V1";
   execution_id: string;
   project_id: string;
-  status: "AWAITING_MOTION_BUDGET_APPROVAL" | "PREPARING_DIALOGUE_AUDIO" | "AWAITING_DIALOGUE_AUDIO_APPROVAL" | "PROCESSING_SILENT_MOTION" | "AWAITING_SILENT_MOTION_APPROVAL" | "PROCESSING_LIP_SYNC" | "AWAITING_FINAL_CLIP_APPROVAL" | "FAILED";
+  status: "AWAITING_MOTION_BUDGET_APPROVAL" | "PREPARING_DIALOGUE_AUDIO" | "AWAITING_DIALOGUE_AUDIO_APPROVAL" | "PROCESSING_SILENT_MOTION" | "AWAITING_SILENT_MOTION_APPROVAL" | "PROCESSING_LIP_SYNC" | "AWAITING_FINAL_CLIP_APPROVAL" | "FINAL_CLIPS_REJECTED" | "FAILED";
   source_character_keyframe_execution_id: string;
   provider_calls_made: boolean;
   immutable_inputs: true;
@@ -55,7 +55,35 @@ export type GoldenSceneMotionPlan = {
   elevenlabs_characters_used?: number;
   error?: { stage: string; message: string };
   runway_assets?: RunwayAssetCache;
+  editorial_recovery?: EditorialRecoveryPlan;
 };
+
+type EditorialRecoveryPlan = {
+  schema_version: "GOLDEN_SCENE_PURPOSEFUL_EDIT_V1";
+  dialogue_shots: Array<{ shot_id: string; source_file_id: string; trim_to_seconds: number; max_post_dialogue_seconds: 1 }>;
+  coverage_shots: Array<{ purpose: "PHONE_EVIDENCE_INSERT" | "LISTENER_REACTION" | "LOCATION_CONTEXT"; duration_seconds: number; requirement: string }>;
+  total_duration_seconds: 30;
+  paid_provider_calls_required: false;
+  review: "PENDING";
+};
+
+export function rejectAndPlanPurposefulGoldenSceneEdit(plan: GoldenSceneMotionPlan, now: string) {
+  if (plan.status !== "AWAITING_FINAL_CLIP_APPROVAL" || plan.tasks.some((task) => !task.lip_sync?.drive_file_id)) throw new Error("COMPLETED_FINAL_CLIPS_REQUIRED");
+  const dialogueShots = plan.tasks.map((task) => ({ shot_id: task.shot_id, source_file_id: task.lip_sync!.drive_file_id!, trim_to_seconds: Math.ceil((task.speech_window_ms.end + 1000) / 1000), max_post_dialogue_seconds: 1 as const }));
+  const dialogueDuration = dialogueShots.reduce((sum, shot) => sum + shot.trim_to_seconds, 0);
+  if (dialogueDuration >= 30) throw new Error("PURPOSEFUL_COVERAGE_WINDOW_MISSING");
+  const remaining = 30 - dialogueDuration;
+  const first = Math.floor(remaining / 3), second = Math.floor((remaining - first) / 2), third = remaining - first - second;
+  plan.editorial_recovery = {
+    schema_version: "GOLDEN_SCENE_PURPOSEFUL_EDIT_V1", dialogue_shots: dialogueShots,
+    coverage_shots: [
+      { purpose: "PHONE_EVIDENCE_INSERT", duration_seconds: first, requirement: "Cận cảnh tin tuyển dụng và yêu cầu chuyển tiền; không có khuôn mặt nói." },
+      { purpose: "LISTENER_REACTION", duration_seconds: second, requirement: "Phản ứng lắng nghe có điểm nhìn và cảm xúc rõ; không cử động môi." },
+      { purpose: "LOCATION_CONTEXT", duration_seconds: third, requirement: "Bối cảnh phòng trọ hỗ trợ nhịp cắt và continuity; không có chuyển động nhân vật ngẫu nhiên." },
+    ], total_duration_seconds: 30, paid_provider_calls_required: false, review: "PENDING",
+  };
+  plan.status = "FINAL_CLIPS_REJECTED"; plan.heartbeat_at = now; return plan;
+}
 
 export function approveGoldenSceneMotionBudget(plan: GoldenSceneMotionPlan, caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number }, now: string) {
   if (plan.status !== "AWAITING_MOTION_BUDGET_APPROVAL") throw new Error("MOTION_PLAN_NOT_AWAITING_BUDGET_APPROVAL");
@@ -242,6 +270,11 @@ export class GoldenSceneMotionPlanService {
   async approveSilentMotion(projectId: string) {
     const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
     if (!stored) throw new Error("GOLDEN_SCENE_MOTION_PLAN_NOT_FOUND"); const plan = approveGoldenSceneSilentMotion(stored.value, new Date().toISOString()); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
+  }
+
+  async rejectFinalClipsForPurposefulEdit(projectId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
+    if (!stored) throw new Error("GOLDEN_SCENE_MOTION_PLAN_NOT_FOUND"); const plan = rejectAndPlanPurposefulGoldenSceneEdit(stored.value, new Date().toISOString()); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
   }
 
   private async advanceSilentMotion(projectFolderId: string, plan: GoldenSceneMotionPlan) {

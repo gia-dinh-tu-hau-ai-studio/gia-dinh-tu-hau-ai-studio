@@ -6,7 +6,7 @@ import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
-import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, buildGoldenSceneSilentMotionPrompt, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
+import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, buildGoldenSceneSilentMotionPrompt, rejectAndPlanPurposefulGoldenSceneEdit, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -305,6 +305,14 @@ test("Golden Scene lip-sync opens only after every silent clip and verified audi
   const plan = { status: "AWAITING_SILENT_MOTION_APPROVAL", tasks: [{ ...task }, { ...task }, { ...task }], heartbeat_at: "before" } as Parameters<typeof approveGoldenSceneSilentMotion>[0];
   assert.equal(approveGoldenSceneSilentMotion(plan, "now").status, "PROCESSING_LIP_SYNC"); assert.equal(plan.tasks[0].lip_sync?.sync_status, "PENDING_SUBMIT");
   assert.throws(() => approveGoldenSceneSilentMotion({ ...plan, status: "AWAITING_SILENT_MOTION_APPROVAL", tasks: [{ ...plan.tasks[0], silent_motion: { ...plan.tasks[0].silent_motion!, runway_status: "RUNNING" } }] }, "now"), /COMPLETED_SILENT_MOTION_AND_AUDIO_REQUIRED/);
+});
+
+test("rejected final clips are trimmed to at most one second after speech and replaced by purposeful coverage", () => {
+  const task = (shot_id: string, speechEnd: number) => ({ shot_id, speech_window_ms: { start: 500, end: speechEnd }, lip_sync: { drive_file_id: `${shot_id}-final` } });
+  const plan = { status: "AWAITING_FINAL_CLIP_APPROVAL", tasks: [task("SHOT-006", 4370), task("SHOT-007", 5630), task("SHOT-008", 5450)], heartbeat_at: "before" } as Parameters<typeof rejectAndPlanPurposefulGoldenSceneEdit>[0];
+  const rejected = rejectAndPlanPurposefulGoldenSceneEdit(plan, "now");
+  assert.equal(rejected.status, "FINAL_CLIPS_REJECTED"); assert.deepEqual(rejected.editorial_recovery?.dialogue_shots.map((shot) => shot.trim_to_seconds), [6, 7, 7]);
+  assert.equal(rejected.editorial_recovery?.coverage_shots.reduce((sum, shot) => sum + shot.duration_seconds, 0), 10); assert.equal(rejected.editorial_recovery?.paid_provider_calls_required, false);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {

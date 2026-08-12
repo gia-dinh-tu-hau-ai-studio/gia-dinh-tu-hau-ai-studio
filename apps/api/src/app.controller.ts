@@ -36,6 +36,9 @@ export class AppController {
   @Post("projects/:projectId/short-film/golden-scene/motion/silent-motion/approve")
   approveGoldenSceneSilentMotion(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.approveSilentMotion(projectId); }
 
+  @Post("projects/:projectId/short-film/golden-scene/motion/final-clips/reject-purposeful-motion")
+  rejectGoldenSceneFinalClips(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.rejectFinalClipsForPurposefulEdit(projectId); }
+
   @Post("projects/:projectId/short-film/golden-scene/character-keyframes/execute")
   executeCharacterKeyframes(@Param("projectId") projectId: string, @Body() body: unknown) { return this.characterKeyframes.execute(projectId, body); }
 
