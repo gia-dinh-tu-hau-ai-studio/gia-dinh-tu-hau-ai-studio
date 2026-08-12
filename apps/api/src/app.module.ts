@@ -8,6 +8,7 @@ import { ShortFilmScriptProvider } from "./providers/short-film-script.provider"
 import { ShortFilmPilotExecutionService } from "./providers/short-film-pilot-execution.service";
 import { ShortFilmFullExecutionService } from "./providers/short-film-full-execution.service";
 import { GoldenSceneKeyframeService } from "./providers/golden-scene-keyframe.service";
+import { OpenAiCharacterKeyframeService } from "./providers/openai-character-keyframe.service";
 
 @Module({
   controllers: [AppController],
@@ -19,6 +20,7 @@ import { GoldenSceneKeyframeService } from "./providers/golden-scene-keyframe.se
     ShortFilmPilotExecutionService,
     ShortFilmFullExecutionService,
     GoldenSceneKeyframeService,
+    OpenAiCharacterKeyframeService,
     IntakeService,
   ],
 })
