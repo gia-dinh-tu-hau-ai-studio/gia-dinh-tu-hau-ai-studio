@@ -9,7 +9,7 @@ import { verifyVietnameseTranscript } from "./short-film-pilot-execution.service
 import { RunwayPilotProvider } from "./short-film-pilot.providers";
 import { SyncPilotProvider } from "./short-film-pilot.providers";
 import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
-import { fitAudioBuffer } from "../media/short-film-pilot-assembler";
+import { assembleVideoBuffers, createPurposefulCoverageClip, fitAudioBuffer, probeVideoBuffer, trimVideoBuffer } from "../media/short-film-pilot-assembler";
 
 const CHARACTER_KEYFRAME_MANIFEST = "SHORT_FILM_OPENAI_CHARACTER_KEYFRAMES_V1.json";
 const MOTION_PLAN_MANIFEST = "SHORT_FILM_GOLDEN_SCENE_MOTION_PLAN_V1.json";
@@ -42,7 +42,7 @@ export type GoldenSceneMotionPlan = {
   schema_version: "SHORT_FILM_GOLDEN_SCENE_MOTION_PLAN_V1";
   execution_id: string;
   project_id: string;
-  status: "AWAITING_MOTION_BUDGET_APPROVAL" | "PREPARING_DIALOGUE_AUDIO" | "AWAITING_DIALOGUE_AUDIO_APPROVAL" | "PROCESSING_SILENT_MOTION" | "AWAITING_SILENT_MOTION_APPROVAL" | "PROCESSING_LIP_SYNC" | "AWAITING_FINAL_CLIP_APPROVAL" | "FINAL_CLIPS_REJECTED" | "FAILED";
+  status: "AWAITING_MOTION_BUDGET_APPROVAL" | "PREPARING_DIALOGUE_AUDIO" | "AWAITING_DIALOGUE_AUDIO_APPROVAL" | "PROCESSING_SILENT_MOTION" | "AWAITING_SILENT_MOTION_APPROVAL" | "PROCESSING_LIP_SYNC" | "AWAITING_FINAL_CLIP_APPROVAL" | "FINAL_CLIPS_REJECTED" | "AWAITING_RECOVERY_REEL_APPROVAL" | "FAILED";
   source_character_keyframe_execution_id: string;
   provider_calls_made: boolean;
   immutable_inputs: true;
@@ -56,6 +56,7 @@ export type GoldenSceneMotionPlan = {
   error?: { stage: string; message: string };
   runway_assets?: RunwayAssetCache;
   editorial_recovery?: EditorialRecoveryPlan;
+  recovery_reel?: { drive_file_id: string; drive_url: string; duration_seconds: number; width: number; height: number; has_audio: boolean; review: "PENDING" };
 };
 
 type EditorialRecoveryPlan = {
@@ -275,6 +276,27 @@ export class GoldenSceneMotionPlanService {
   async rejectFinalClipsForPurposefulEdit(projectId: string) {
     const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
     if (!stored) throw new Error("GOLDEN_SCENE_MOTION_PLAN_NOT_FOUND"); const plan = rejectAndPlanPurposefulGoldenSceneEdit(stored.value, new Date().toISOString()); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
+  }
+
+  async buildRecoveryReel(projectId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
+    if (!stored) throw new Error("GOLDEN_SCENE_MOTION_PLAN_NOT_FOUND"); const plan = stored.value;
+    if (plan.status === "AWAITING_RECOVERY_REEL_APPROVAL" && plan.recovery_reel) return { ...plan, idempotent_replay: true };
+    if (plan.status !== "FINAL_CLIPS_REJECTED" || !plan.editorial_recovery || plan.editorial_recovery.paid_provider_calls_required) throw new Error("PURPOSEFUL_EDITORIAL_RECOVERY_REQUIRED");
+    const [shot6, shot7, shot8] = plan.editorial_recovery.dialogue_shots;
+    const task6 = plan.tasks.find((task) => task.shot_id === shot6.shot_id)!, task7 = plan.tasks.find((task) => task.shot_id === shot7.shot_id)!, task8 = plan.tasks.find((task) => task.shot_id === shot8.shot_id)!;
+    const [video6, video7, video8, locationImage, phoneImage, reactionImage] = await Promise.all([
+      this.drive.downloadBuffer(shot6.source_file_id), this.drive.downloadBuffer(shot7.source_file_id), this.drive.downloadBuffer(shot8.source_file_id),
+      this.drive.downloadBuffer(task6.character_keyframe_file_id), this.drive.downloadBuffer(task7.character_keyframe_file_id), this.drive.downloadBuffer(task8.character_keyframe_file_id),
+    ]);
+    const [trim6, trim7, trim8, location, phone, reaction] = await Promise.all([
+      trimVideoBuffer(video6, shot6.trim_to_seconds), trimVideoBuffer(video7, shot7.trim_to_seconds), trimVideoBuffer(video8, shot8.trim_to_seconds),
+      createPurposefulCoverageClip(locationImage, "LOCATION_CONTEXT", 4), createPurposefulCoverageClip(phoneImage, "PHONE_EVIDENCE_INSERT", 3), createPurposefulCoverageClip(reactionImage, "LISTENER_REACTION", 3),
+    ]);
+    const reel = await assembleVideoBuffers([location, trim6, phone, trim7, reaction, trim8], 30); const evidence = await probeVideoBuffer(reel);
+    if (Math.abs(evidence.duration_seconds - 30) > 0.25 || evidence.width !== 1920 || evidence.height !== 1080 || !evidence.has_audio) throw new Error("RECOVERY_REEL_TECHNICAL_QC_FAILED");
+    const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, "GOLDEN_SCENE_PURPOSEFUL_RECOVERY_REEL_30S_1920x1080.mp4", "video/mp4", reel);
+    plan.recovery_reel = { drive_file_id: uploaded.id as string, drive_url: uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`, ...evidence, review: "PENDING" }; plan.status = "AWAITING_RECOVERY_REEL_APPROVAL"; plan.heartbeat_at = new Date().toISOString(); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
   }
 
   private async advanceSilentMotion(projectFolderId: string, plan: GoldenSceneMotionPlan) {

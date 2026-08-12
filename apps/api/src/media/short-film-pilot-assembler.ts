@@ -148,6 +148,23 @@ export async function fitAudioBuffer(input: Buffer, durationSeconds: number) {
   }
 }
 
+export async function createPurposefulCoverageClip(input: Buffer, purpose: "PHONE_EVIDENCE_INSERT" | "LISTENER_REACTION" | "LOCATION_CONTEXT", durationSeconds: number) {
+  if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 10) throw new Error("COVERAGE_DURATION_INVALID");
+  const directory = await mkdtemp(join(tmpdir(), "tuhau-coverage-"));
+  try {
+    const source = join(directory, "source.png"), output = join(directory, "coverage.mp4"); await writeFile(source, input);
+    const base = "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,zoompan=z='min(zoom+0.0005,1.04)':d=1:s=1920x1080:fps=30";
+    const filter = purpose === "PHONE_EVIDENCE_INSERT"
+      ? `${base},drawbox=x=570:y=90:w=780:h=900:color=black@0.82:t=fill,drawbox=x=610:y=170:w=700:h=130:color=white@0.94:t=fill,drawbox=x=610:y=330:w=700:h=360:color=white@0.94:t=fill,drawbox=x=610:y=735:w=700:h=130:color=0xC62828@0.95:t=fill,drawtext=text='VIEC NHE - LUONG CAO':fontcolor=black:fontsize=42:x=650:y=210,drawtext=text='YEU CAU CHUYEN TIEN GIU CHO':fontcolor=0xC62828:fontsize=37:x=650:y=455,drawtext=text='CANH BAO LUA DAO':fontcolor=white:fontsize=44:x=720:y=775`
+      : purpose === "LISTENER_REACTION"
+        ? `${base},crop=1500:1080:210:0,scale=1920:1080`
+        : `${base},eq=brightness=-0.05:saturation=0.85`;
+    await run("ffmpeg", ["-y", "-loop", "1", "-i", source, "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-vf", filter, "-t", String(durationSeconds), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-movflags", "+faststart", output]);
+    const evidence = await probeVideo(output); if (Math.abs(evidence.duration_seconds - durationSeconds) > 0.25 || evidence.width !== 1920 || evidence.height !== 1080 || !evidence.has_audio) throw new Error(`COVERAGE_TECHNICAL_QC_FAILED:${purpose}`);
+    return await readFile(output);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
+
 export async function assemblePilotSample(urls: string[], fetcher: typeof fetch = fetch) {
   const inputs: Buffer[] = [];
   for (const url of urls) {
