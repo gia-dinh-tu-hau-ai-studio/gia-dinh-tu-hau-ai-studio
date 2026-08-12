@@ -374,7 +374,10 @@ export function buildPilotPerformancePrompt(basePrompt: string, dialogueText: st
 }
 
 export function rejectPilotForRestart(manifest: PilotExecutionManifest, rejectedAt: string) {
-  const dialogueRejected = manifest.status === "FAILED" && manifest.error?.stage === "DIALOGUE_AUDIO_APPROVAL";
+  const dialogueRejected = manifest.status === "FAILED" && (
+    manifest.error?.stage === "DIALOGUE_AUDIO_APPROVAL"
+    || (manifest.error?.stage === "PROVIDER_PROCESSING" && manifest.error.message.startsWith("VIETNAMESE_AUDIO_VERIFICATION_FAILED:"))
+  );
   if (manifest.status !== "AWAITING_PILOT_QC" && !dialogueRejected) throw new Error("PILOT_NOT_AWAITING_QC_REJECTION");
   const archiveName = `SHORT_FILM_PILOT_REJECTED_${rejectedAt.replace(/[:.]/g, "-")}_${manifest.execution_id}.json`;
   return {
