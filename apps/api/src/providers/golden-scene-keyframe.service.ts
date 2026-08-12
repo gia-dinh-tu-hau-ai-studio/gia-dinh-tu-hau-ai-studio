@@ -11,8 +11,12 @@ import { RunwayPilotProvider } from "./short-film-pilot.providers";
 const MANIFEST_NAME = "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1.json";
 export const GoldenSceneKeyframeRequestSchema = z.object({ execution_approved: z.literal(true), runway_credits_cap: z.literal(24) }).strict();
 
-type Task = { shot_id: string; actor_id: string; prompt: string; runway_task_id?: string; runway_status: string; output_url?: string; drive_file_id?: string; drive_url?: string };
-type Manifest = { schema_version: "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1"; execution_id: string; project_id: string; status: "PROCESSING_RUNWAY" | "AWAITING_KEYFRAME_QC" | "FAILED"; caps: { runway_credits: 24 }; provider_calls_made: boolean; tasks: Task[]; runway_assets: RunwayAssetCache; started_at: string; heartbeat_at: string; error?: { stage: string; message: string } };
+type Task = { shot_id: string; actor_id: string; prompt: string; runway_task_id?: string; runway_status: string; output_url?: string; drive_file_id?: string; drive_url?: string; error?: { code: string; message: string } };
+type Manifest = { schema_version: "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1"; execution_id: string; project_id: string; status: "PROCESSING_RUNWAY" | "AWAITING_KEYFRAME_QC" | "PARTIAL_FAILURE" | "FAILED"; caps: { runway_credits: 24 }; provider_calls_made: boolean; tasks: Task[]; runway_assets: RunwayAssetCache; started_at: string; heartbeat_at: string; error?: { stage: string; message: string } };
+
+export function referenceActorIdsForShot(shotId: string, primaryActorId: string, sceneActorIds: string[]) {
+  return shotId.endsWith("006") ? [...new Set(sceneActorIds)] : [primaryActorId];
+}
 
 function promptFor(shotId: string, summary: string, actorName: string, allTags: string[]) {
   const composition = shotId.endsWith("006") ? "medium two-shot, Phuong An receives the phone from Tuong Vy" : shotId.endsWith("007") ? "close-up of Phuong An reading a suspicious recruitment message, Tuong Vy softly out of focus behind" : "close-up of Tuong Vy replying with visible worry";
@@ -51,7 +55,7 @@ export class GoldenSceneKeyframeService {
     try {
       for (let index = 0; index < shots.length; index += 1) {
         const shot = shots[index]!, actorId = actorIds[index]!, character = byId.get(actorId)!;
-        const referenceImages = uniqueActors.map((id) => refs.get(id)!);
+        const referenceImages = referenceActorIdsForShot(shot.shot_id, actorId, uniqueActors).map((id) => refs.get(id)!);
         const prompt = promptFor(shot.shot_id, shot.summary, character.character_name, referenceImages.map((item) => item.tag));
         const submitted = await runway.submitKeyframe({ prompt, referenceImages, ratio: "1920:1080" });
         manifest.tasks.push({ shot_id: shot.shot_id, actor_id: actorId, prompt, runway_task_id: submitted.taskId, runway_status: "PENDING" });
@@ -70,14 +74,15 @@ export class GoldenSceneKeyframeService {
     const stored = await this.drive.readPilotJson<Manifest>(context.project_folder_id, MANIFEST_NAME);
     if (!stored) return { project_id: projectId, status: "NOT_STARTED", provider_calls_made: false };
     const manifest = stored.value;
-    if (manifest.status !== "PROCESSING_RUNWAY") return manifest;
+    if (manifest.status === "AWAITING_KEYFRAME_QC") return manifest;
+    if (!manifest.tasks.some((task) => !task.drive_file_id && !task.error)) return manifest;
     const secret = process.env.RUNWAYML_API_SECRET?.trim(); if (!secret) throw new Error("RUNWAY_SECRET_NOT_CONFIGURED");
     const runway = new RunwayPilotProvider(secret);
     try {
       for (const task of manifest.tasks) {
-        if (task.drive_file_id) continue;
+        if (task.drive_file_id || task.error) continue;
         const result = await runway.status(task.runway_task_id!); task.runway_status = result.status;
-        if (result.status === "FAILED") throw new Error(`${result.errorCode ?? "RUNWAY_FAILED"}:${result.error ?? "Keyframe generation failed"}`);
+        if (result.status === "FAILED") { task.error = { code: result.errorCode ?? "RUNWAY_FAILED", message: result.error ?? "Keyframe generation failed" }; continue; }
         if (result.status === "SUCCEEDED" && result.outputUrl) {
           const response = await fetch(result.outputUrl, { signal: AbortSignal.timeout(60_000) });
           if (!response.ok) throw new Error(`RUNWAY_OUTPUT_DOWNLOAD_HTTP_${response.status}`);
@@ -87,6 +92,10 @@ export class GoldenSceneKeyframeService {
         }
       }
       if (manifest.tasks.length === 3 && manifest.tasks.every((task) => task.drive_file_id)) manifest.status = "AWAITING_KEYFRAME_QC";
+      else if (manifest.tasks.every((task) => task.drive_file_id || task.error)) {
+        manifest.status = manifest.tasks.some((task) => task.drive_file_id) ? "PARTIAL_FAILURE" : "FAILED";
+        manifest.error = { stage: "RUNWAY_STATUS", message: manifest.tasks.filter((task) => task.error).map((task) => `${task.shot_id}:${task.error!.code}`).join(",") };
+      } else manifest.status = "PROCESSING_RUNWAY";
       manifest.heartbeat_at = new Date().toISOString(); await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest); return manifest;
     } catch (error) {
       manifest.status = "FAILED"; manifest.error = { stage: "RUNWAY_STATUS", message: error instanceof Error ? error.message : String(error) }; manifest.heartbeat_at = new Date().toISOString();
