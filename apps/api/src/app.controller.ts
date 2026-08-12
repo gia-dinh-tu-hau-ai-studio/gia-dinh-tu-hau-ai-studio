@@ -22,6 +22,9 @@ export class AppController {
   @Get("projects/:projectId/short-film/golden-scene/character-keyframes/status")
   characterKeyframeStatus(@Param("projectId") projectId: string) { return this.characterKeyframes.status(projectId); }
 
+  @Post("projects/:projectId/short-film/golden-scene/character-keyframes/review")
+  reviewCharacterKeyframes(@Param("projectId") projectId: string, @Body() body: unknown) { const request = z.object({ decision: z.enum(["APPROVE", "REJECT"]) }).strict().parse(body); return this.characterKeyframes.review(projectId, request.decision); }
+
   @Post("projects/:projectId/short-film/golden-scene/keyframes/execute")
   executeGoldenSceneKeyframes(@Param("projectId") projectId: string, @Body() body: unknown) { return this.goldenSceneKeyframes.execute(projectId, body); }
 

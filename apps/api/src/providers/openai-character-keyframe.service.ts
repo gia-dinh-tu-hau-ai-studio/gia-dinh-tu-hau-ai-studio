@@ -12,11 +12,18 @@ export const OPENAI_CHARACTER_KEYFRAME_MAX_USD = 1 as const;
 
 type BackgroundManifest = { status: string; tasks: Array<{ shot_id: string; drive_url?: string }> };
 type Task = { shot_id: string; actor_id: string; character_name: string; status: "PENDING" | "SUCCEEDED" | "FAILED"; drive_file_id?: string; drive_url?: string; error?: string };
-type Manifest = { schema_version: "SHORT_FILM_OPENAI_CHARACTER_KEYFRAMES_V1"; execution_id: string; project_id: string; status: "PROCESSING_OPENAI" | "AWAITING_CHARACTER_KEYFRAME_QC" | "FAILED"; caps: { openai_usd: 1; image_count: 3 }; model: "gpt-image-1.5"; tasks: Task[]; provider_calls_made: boolean; started_at: string; heartbeat_at: string; error?: { stage: string; message: string } };
+type Manifest = { schema_version: "SHORT_FILM_OPENAI_CHARACTER_KEYFRAMES_V1"; execution_id: string; project_id: string; status: "PROCESSING_OPENAI" | "AWAITING_CHARACTER_KEYFRAME_QC" | "APPROVED" | "REJECTED" | "FAILED"; caps: { openai_usd: 1; image_count: 3 }; model: "gpt-image-1.5"; tasks: Task[]; provider_calls_made: boolean; started_at: string; heartbeat_at: string; review?: { decision: "APPROVE" | "REJECT"; reviewer: "PROJECT_OWNER"; reviewed_at: string }; error?: { stage: string; message: string } };
 
 export function validateCharacterKeyframeBudget(input: { execution_approved: boolean; openai_usd_cap: number; image_count: number }) {
   if (input.execution_approved !== true || input.openai_usd_cap !== 1 || input.image_count !== 3) throw new Error("OPENAI_CHARACTER_KEYFRAME_EXACT_CAP_REQUIRED");
   return input;
+}
+
+export function reviewCharacterKeyframeGate(manifest: Manifest, decision: "APPROVE" | "REJECT", reviewedAt: string) {
+  if (manifest.status !== "AWAITING_CHARACTER_KEYFRAME_QC") throw new Error("CHARACTER_KEYFRAMES_NOT_AWAITING_QC");
+  const expected = [["SHOT-006", "GDTH-CHAR-002"], ["SHOT-007", "GDTH-CHAR-002"], ["SHOT-008", "GDTH-CHAR-001"]];
+  if (manifest.tasks.length !== 3 || expected.some(([shotId, actorId], index) => { const task = manifest.tasks[index]; return task?.shot_id !== shotId || task.actor_id !== actorId || task.status !== "SUCCEEDED" || !task.drive_file_id || !task.drive_url; })) throw new Error("CHARACTER_KEYFRAME_EVIDENCE_INCOMPLETE");
+  manifest.status = decision === "APPROVE" ? "APPROVED" : "REJECTED"; manifest.review = { decision, reviewer: "PROJECT_OWNER", reviewed_at: reviewedAt }; manifest.heartbeat_at = reviewedAt; return manifest;
 }
 
 async function normalize1920x1080(content: Buffer) {
@@ -74,4 +81,5 @@ export class OpenAiCharacterKeyframeService {
     }
   }
   async status(projectId: string) { const context = await this.registry.getShortFilmExecutionContext(projectId); return (await this.drive.readPilotJson<Manifest>(context.project_folder_id, MANIFEST_NAME))?.value ?? { project_id: projectId, status: "NOT_STARTED" }; }
+  async review(projectId: string, decision: "APPROVE" | "REJECT") { const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<Manifest>(context.project_folder_id, MANIFEST_NAME); if (!stored) throw new Error("CHARACTER_KEYFRAME_EXECUTION_NOT_FOUND"); const manifest = reviewCharacterKeyframeGate(stored.value, decision, new Date().toISOString()); await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest); return manifest; }
 }

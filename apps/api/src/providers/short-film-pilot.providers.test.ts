@@ -5,7 +5,7 @@ import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.conne
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
-import { OpenAiImageEditProvider, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
+import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -244,6 +244,13 @@ test("OpenAI image edit uses one high-fidelity landscape output and no video pro
   const image = { content: Buffer.alloc(600), fileName: "image.png", mimeType: "image/png" };
   await provider.edit({ background: image, characterImages: [image], prompt: "locked identity" });
   assert.equal(url, "https://api.openai.com/v1/images/edits"); assert.equal(form?.get("model"), "gpt-image-1.5"); assert.equal(form?.get("size"), "1536x1024"); assert.equal(form?.get("quality"), "high"); assert.equal(form?.get("input_fidelity"), "high"); assert.equal(form?.get("n"), "1"); assert.equal(form?.getAll("image[]").length, 2);
+});
+
+test("Character keyframe approval requires exact shot and locked actor mapping", () => {
+  const task = (shot_id: string, actor_id: string) => ({ shot_id, actor_id, character_name: "actor", status: "SUCCEEDED" as const, drive_file_id: `${shot_id}-file`, drive_url: `https://drive.google.com/${shot_id}` });
+  const manifest = { schema_version: "SHORT_FILM_OPENAI_CHARACTER_KEYFRAMES_V1" as const, execution_id: "exec", project_id: "project", status: "AWAITING_CHARACTER_KEYFRAME_QC" as const, caps: { openai_usd: 1 as const, image_count: 3 as const }, model: "gpt-image-1.5" as const, tasks: [task("SHOT-006", "GDTH-CHAR-002"), task("SHOT-007", "GDTH-CHAR-002"), task("SHOT-008", "GDTH-CHAR-001")], provider_calls_made: true, started_at: "2026-01-01", heartbeat_at: "2026-01-01" };
+  assert.equal(reviewCharacterKeyframeGate(manifest, "APPROVE", "2026-01-02").status, "APPROVED");
+  assert.throws(() => reviewCharacterKeyframeGate({ ...manifest, status: "AWAITING_CHARACTER_KEYFRAME_QC", tasks: [task("SHOT-006", "GDTH-CHAR-001"), ...manifest.tasks.slice(1)] }, "APPROVE", "2026-01-02"), /EVIDENCE_INCOMPLETE/);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
