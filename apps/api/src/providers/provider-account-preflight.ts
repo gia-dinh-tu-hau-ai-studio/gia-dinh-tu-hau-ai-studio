@@ -72,5 +72,15 @@ export async function checkProviderAccounts(input: unknown, environment: NodeJS.
     : "BLOCKED";
   const blocked = selected.some((item) => ["INSUFFICIENT", "NOT_CONFIGURED", "AUTH_ERROR"].includes(item.status));
   const unverified = selected.some((item) => item.status === "UNVERIFIED");
-  return { checked_at: new Date().toISOString(), execution_gate: blocked ? "BLOCKED" : unverified ? "MANUAL_CONFIRMATION_REQUIRED" : "READY", script_generation_gate: scriptGenerationGate, secret_values_exposed: false as const, providers: selected };
+  // Creating the project only persists the approved contract. It never invokes a media provider,
+  // so full-film balances must not prevent project creation. Pilot/full-film execution performs its
+  // own fresh, scope-specific preflight immediately before provider submission.
+  return {
+    checked_at: new Date().toISOString(),
+    project_creation_gate: "READY" as const,
+    execution_gate: blocked ? "BLOCKED" : unverified ? "MANUAL_CONFIRMATION_REQUIRED" : "READY",
+    script_generation_gate: scriptGenerationGate,
+    secret_values_exposed: false as const,
+    providers: selected,
+  };
 }

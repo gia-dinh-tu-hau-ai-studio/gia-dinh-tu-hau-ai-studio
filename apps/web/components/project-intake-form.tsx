@@ -140,6 +140,7 @@ type ProjectProgress = {
 
 type AccountPreflight = {
   checked_at: string;
+  project_creation_gate?: "READY" | "BLOCKED";
   execution_gate: "READY" | "BLOCKED" | "MANUAL_CONFIRMATION_REQUIRED";
   script_generation_gate?: "READY" | "BLOCKED";
   providers: Array<{ provider: string; status: string; required_units?: number; available_units?: number; unit?: string; message: string }>;
@@ -344,6 +345,8 @@ export function ProjectIntakeForm() {
     providerBudget.approval.approved_limit >= providerBudget.estimate.total;
   const accountExecutionReady = accountPreflight?.execution_gate === "READY" ||
     (accountPreflight?.execution_gate === "MANUAL_CONFIRMATION_REQUIRED" && manualBalanceConfirmed);
+  const projectCreationAccountReady = accountPreflight?.project_creation_gate === "READY" ||
+    (accountPreflight?.project_creation_gate === undefined && accountExecutionReady);
   const openAiAccountCheck = accountPreflight?.providers.find((provider) => provider.provider === "OPENAI");
   const scriptGenerationReady = accountPreflight?.script_generation_gate === "READY" ||
     (accountPreflight?.script_generation_gate === undefined && ["SUFFICIENT", "UNVERIFIED"].includes(openAiAccountCheck?.status ?? ""));
@@ -698,7 +701,7 @@ export function ProjectIntakeForm() {
       return;
     }
 
-    if (!accountExecutionReady) {
+    if (!projectCreationAccountReady) {
       setValidationFeedback({ kind: "error", title: "Chưa thể khởi tạo dự án", message: "Hãy kiểm tra tài khoản và xử lý đầy đủ trạng thái từng nhà cung cấp trước khi duyệt kinh phí." });
       setSubmitting(false);
       document.getElementById("intake-frame-4")?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1236,7 +1239,7 @@ export function ProjectIntakeForm() {
         <div className="final-action-panel">
           <strong>{characters.length === 0 ? "Chưa có nhân vật trong dự án" : `Sẵn sàng kiểm tra ${characters.length} nhân vật`}</strong>
           <span>{characters.length === 0 ? "Quay lại phần nội dung để chọn nhân vật." : "Nhân vật đã được đồng bộ tự động; không cần chọn lại."}</span>
-          <button className={`final-check-button${createdProject ? " action-completed" : ""}`} disabled={submitting || creating || Boolean(createdProject) || characters.length === 0 || !accountExecutionReady || !scriptReadyForCreation} type="submit">{createdProject ? `✓ Dự án ${createdProject.project_id} đã được tạo` : submitting || creating ? "Đang kiểm tra và khởi tạo…" : characters.length === 0 ? "Chưa thể tạo — chưa có nhân vật" : !accountExecutionReady ? "Kiểm tra tài khoản trước khi tạo" : !scriptReadyForCreation ? "Hoàn thiện và duyệt kịch bản trước khi tạo" : `Duyệt ${providerBudget.estimate.total.toLocaleString("vi-VN")} USD & khởi tạo dự án`}</button>
+          <button className={`final-check-button${createdProject ? " action-completed" : ""}`} disabled={submitting || creating || Boolean(createdProject) || characters.length === 0 || !projectCreationAccountReady || !scriptReadyForCreation} type="submit">{createdProject ? `✓ Dự án ${createdProject.project_id} đã được tạo` : submitting || creating ? "Đang kiểm tra và khởi tạo…" : characters.length === 0 ? "Chưa thể tạo — chưa có nhân vật" : !projectCreationAccountReady ? "Kiểm tra tài khoản trước khi tạo" : !scriptReadyForCreation ? "Hoàn thiện và duyệt kịch bản trước khi tạo" : `Duyệt ${providerBudget.estimate.total.toLocaleString("vi-VN")} USD & khởi tạo dự án`}</button>
         </div>
       </section>
       </>
