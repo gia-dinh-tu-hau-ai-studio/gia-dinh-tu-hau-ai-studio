@@ -59,9 +59,39 @@ function dialogueSimilarity(expected: string, actual: string) {
   return 1 - distances[right.length] / Math.max(left.length, right.length);
 }
 
+function dialogueWords(value: string) {
+  return normalizeVietnamese(value).split(" ").filter(Boolean);
+}
+
+function exactWordAccuracy(expected: string, actual: string) {
+  const left = dialogueWords(expected), right = dialogueWords(actual);
+  if (!left.length || !right.length) return 0;
+  const distances = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    let diagonal = distances[0]; distances[0] = row;
+    for (let column = 1; column <= right.length; column += 1) {
+      const above = distances[column];
+      distances[column] = Math.min(distances[column] + 1, distances[column - 1] + 1, diagonal + (left[row - 1] === right[column - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return 1 - distances[right.length] / Math.max(left.length, right.length);
+}
+
 export function verifyVietnameseTranscript(expected: string, evidence: { text: string; languageCode: string; languageProbability: number }) {
   const similarity = dialogueSimilarity(expected, evidence.text);
-  return { passed: ["vi", "vie"].includes(evidence.languageCode.toLowerCase()) && evidence.languageProbability >= 0.8 && similarity >= 0.82, similarity };
+  const wordAccuracy = exactWordAccuracy(expected, evidence.text);
+  // Character similarity alone hid real word substitutions such as "suất" ->
+  // "sót". Pilot audio must preserve every scripted Vietnamese word; the owner
+  // still performs the final listening approval before any video provider runs.
+  return {
+    passed: ["vi", "vie"].includes(evidence.languageCode.toLowerCase())
+      && evidence.languageProbability >= 0.8
+      && similarity >= 0.95
+      && wordAccuracy === 1,
+    similarity,
+    wordAccuracy,
+  };
 }
 
 export function reviewDialogueAudioGate(input: Pick<PilotExecutionManifest, "status" | "tasks">, decision: "APPROVE" | "REJECT", reviewedAt: string) {

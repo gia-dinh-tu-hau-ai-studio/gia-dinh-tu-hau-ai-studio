@@ -32,6 +32,8 @@ test("ElevenLabs uses a Vietnamese-capable model and returns billing metadata", 
   const body = JSON.parse(String(request?.body));
   assert.equal(body.model_id, "eleven_v3");
   assert.equal(body.language_code, "vi");
+  assert.equal(body.apply_text_normalization, "on");
+  assert.equal(body.voice_settings.stability, 0.62);
 });
 
 test("Vietnamese transcript gate rejects foreign or mismatched speech", () => {
@@ -106,6 +108,19 @@ test("evaluation reel prompt keeps the approved face visible and binds acting to
   assert.match(prompt, /Em quyết định liền nha/);
   assert.ok(prompt.length <= 1_000);
   assert.deepEqual(EVALUATION_PERFORMANCE_CONTRACT.required_beats, ["LISTEN_OR_CONSIDER", "EMOTIONAL_REACTION", "PURPOSEFUL_ACTION", "SETTLE_IN_CHARACTER"]);
+});
+
+test("Vietnamese transcript gate rejects a high-similarity wrong word", () => {
+  const expected = "Bên anh chỉ còn đúng một suất ưu tiên thôi nghen.";
+  const wrong = verifyVietnameseTranscript(expected, {
+    text: "Bên anh chỉ còn đúng một sót ưu tiên thôi nhen.",
+    languageCode: "vi",
+    languageProbability: 0.99,
+  });
+  assert.ok(wrong.similarity > 0.9);
+  assert.ok(wrong.wordAccuracy < 1);
+  assert.equal(wrong.passed, false);
+  assert.equal(verifyVietnameseTranscript(expected, { text: expected, languageCode: "vi", languageProbability: 0.99 }).passed, true);
 });
 
 test("evaluation reel technical gate rejects a short reel before owner QC", () => {
