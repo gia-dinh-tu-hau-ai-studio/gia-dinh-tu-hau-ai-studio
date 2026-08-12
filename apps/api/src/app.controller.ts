@@ -24,6 +24,12 @@ export class AppController {
   @Get("projects/:projectId/short-film/golden-scene/motion/status")
   goldenSceneMotionStatus(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.status(projectId); }
 
+  @Post("projects/:projectId/short-film/golden-scene/motion/approve-budget")
+  approveGoldenSceneMotionBudget(@Param("projectId") projectId: string, @Body() body: unknown) {
+    const request = z.object({ caps: z.object({ runway_credits: z.literal(432), elevenlabs_characters: z.literal(2000), sync_usd: z.literal(1.8) }) }).strict().parse(body);
+    return this.goldenSceneMotionPlan.approveBudget(projectId, request.caps);
+  }
+
   @Post("projects/:projectId/short-film/golden-scene/character-keyframes/execute")
   executeCharacterKeyframes(@Param("projectId") projectId: string, @Body() body: unknown) { return this.characterKeyframes.execute(projectId, body); }
 
