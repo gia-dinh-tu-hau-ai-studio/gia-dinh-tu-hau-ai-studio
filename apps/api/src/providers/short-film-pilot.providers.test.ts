@@ -6,6 +6,7 @@ import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
+import { validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -251,6 +252,31 @@ test("Character keyframe approval requires exact shot and locked actor mapping",
   const manifest = { schema_version: "SHORT_FILM_OPENAI_CHARACTER_KEYFRAMES_V1" as const, execution_id: "exec", project_id: "project", status: "AWAITING_CHARACTER_KEYFRAME_QC" as const, caps: { openai_usd: 1 as const, image_count: 3 as const }, model: "gpt-image-1.5" as const, tasks: [task("SHOT-006", "GDTH-CHAR-002"), task("SHOT-007", "GDTH-CHAR-002"), task("SHOT-008", "GDTH-CHAR-001")], provider_calls_made: true, started_at: "2026-01-01", heartbeat_at: "2026-01-01" };
   assert.equal(reviewCharacterKeyframeGate(manifest, "APPROVE", "2026-01-02").status, "APPROVED");
   assert.throws(() => reviewCharacterKeyframeGate({ ...manifest, status: "AWAITING_CHARACTER_KEYFRAME_QC", tasks: [task("SHOT-006", "GDTH-CHAR-001"), ...manifest.tasks.slice(1)] }, "APPROVE", "2026-01-02"), /EVIDENCE_INCOMPLETE/);
+});
+
+test("Golden Scene motion binds approved keyframe, speaker and Voice Master to the same actor", () => {
+  const binding = {
+    shotId: "SHOT-006",
+    keyframe: { actor_id: "GDTH-CHAR-002" },
+    dialogue: { speaker_source_actor_id: "GDTH-CHAR-002", voice_master_id: "VOICE-PA", pronunciation_decision: "APPROVE", age_casting_decision: "APPROVE", timing_decision: "APPROVE" },
+    speaker: { speaker_source_actor_id: "GDTH-CHAR-002", voice_master_id: "VOICE-PA" },
+    voice: { source_actor_id: "GDTH-CHAR-002", voice_master_id: "VOICE-PA", status: "APPROVED_LOCKED" },
+  };
+  assert.equal(validateGoldenSceneMotionBinding(binding), true);
+  assert.throws(() => validateGoldenSceneMotionBinding({ ...binding, keyframe: { actor_id: "GDTH-CHAR-001" } }), /CHARACTER_SPEAKER_KEYFRAME_MISMATCH/);
+  assert.throws(() => validateGoldenSceneMotionBinding({ ...binding, speaker: { ...binding.speaker, voice_master_id: "VOICE-WRONG" } }), /VOICE_SPEAKER_MISMATCH/);
+  assert.throws(() => validateGoldenSceneMotionBinding({ ...binding, voice: { ...binding.voice, status: "PENDING" } }), /APPROVED_LOCKED_VOICE_REQUIRED/);
+});
+
+test("Golden Scene motion rejects dialogue before pronunciation, age and timing are all approved", () => {
+  const binding = {
+    shotId: "SHOT-008",
+    keyframe: { actor_id: "GDTH-CHAR-001" },
+    dialogue: { speaker_source_actor_id: "GDTH-CHAR-001", voice_master_id: "VOICE-TV", pronunciation_decision: "APPROVE", age_casting_decision: "APPROVE", timing_decision: "REQUEST_CHANGES" },
+    speaker: { speaker_source_actor_id: "GDTH-CHAR-001", voice_master_id: "VOICE-TV" },
+    voice: { source_actor_id: "GDTH-CHAR-001", voice_master_id: "VOICE-TV", status: "APPROVED_LOCKED" },
+  };
+  assert.throws(() => validateGoldenSceneMotionBinding(binding), /DIALOGUE_QC_INCOMPLETE/);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {

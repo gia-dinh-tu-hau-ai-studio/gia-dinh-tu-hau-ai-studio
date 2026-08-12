@@ -5,6 +5,7 @@ import { ShortFilmFullExecutionService } from "./providers/short-film-full-execu
 import { z } from "zod";
 import { GoldenSceneKeyframeService } from "./providers/golden-scene-keyframe.service";
 import { OpenAiCharacterKeyframeService } from "./providers/openai-character-keyframe.service";
+import { GoldenSceneMotionPlanService } from "./providers/golden-scene-motion-plan.service";
 
 @Controller()
 export class AppController {
@@ -14,7 +15,14 @@ export class AppController {
     private readonly fullExecution: ShortFilmFullExecutionService,
     private readonly goldenSceneKeyframes: GoldenSceneKeyframeService,
     private readonly characterKeyframes: OpenAiCharacterKeyframeService,
+    private readonly goldenSceneMotionPlan: GoldenSceneMotionPlanService,
   ) {}
+
+  @Post("projects/:projectId/short-film/golden-scene/motion/prepare")
+  prepareGoldenSceneMotion(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.prepare(projectId); }
+
+  @Get("projects/:projectId/short-film/golden-scene/motion/status")
+  goldenSceneMotionStatus(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.status(projectId); }
 
   @Post("projects/:projectId/short-film/golden-scene/character-keyframes/execute")
   executeCharacterKeyframes(@Param("projectId") projectId: string, @Body() body: unknown) { return this.characterKeyframes.execute(projectId, body); }
