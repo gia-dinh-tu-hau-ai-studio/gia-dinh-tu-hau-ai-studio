@@ -241,7 +241,29 @@ test("migrate legacy short-film draft without deleting user content", () => {
   assert.equal(migrated.dialogue.singing_scene, defaults.dialogue.singing_scene);
 });
 
-test("legacy execution outputs are quarantined while project content and Masters are preserved", () => {
+test("Shot Plan blocks an ambiguous multi-character scene instead of silently using the first actor", () => {
+  const secondActor = {
+    ...shortFilmWorkflow.source_actors[0],
+    source_actor_id: "GDTH-CHAR-002",
+    source_actor_name: "Phương An",
+  };
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    character_count: 2,
+    source_actors: [...shortFilmWorkflow.source_actors, secondActor],
+    film_characters: [
+      ...shortFilmWorkflow.film_characters,
+      { ...shortFilmWorkflow.film_characters[0], source_actor_id: secondActor.source_actor_id, film_character_name: "Phương An" },
+    ],
+    target_duration_minutes: 1,
+    full_script: Array.from({ length: 6 }, (_, index) => `CẢNH ${index + 1}. Một người bước vào phòng và nhìn quanh rất lo lắng.`).join(" "),
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+  });
+
+  assert.throws(() => createShortFilmShotPlan(workflow), /SHOT_PLAN_CHARACTER_AMBIGUOUS/);
+});
+
+test("draft migration never deletes valid user approvals or project content", () => {
   const defaults = ShortFilmWorkflowSchema.parse(shortFilmWorkflow);
   const migrated = migrateShortFilmWorkflowDraft({
     ...shortFilmWorkflow,
@@ -252,9 +274,9 @@ test("legacy execution outputs are quarantined while project content and Masters
   }, defaults);
   assert.equal(migrated.idea_brief, "Nội dung dự án phải giữ nguyên");
   assert.deepEqual(migrated.source_actors, shortFilmWorkflow.source_actors);
-  assert.equal(migrated.pilot_budget_approval, undefined);
-  assert.equal(migrated.pilot, undefined);
-  assert.equal(migrated.full_film, undefined);
+  assert.equal(migrated.pilot_budget_approval?.decision, "APPROVE");
+  assert.equal(migrated.pilot?.review.decision, "APPROVE");
+  assert.equal(migrated.full_film?.review.decision, "APPROVE");
 });
 
 test("AI có thể tự xây dựng chi tiết nhân vật còn để trống", () => {
@@ -902,16 +924,23 @@ test("khóa toàn phim khi PILOT_APPROVED chưa đạt", () => {
 });
 
 test("chỉ READY_TO_PUBLISH sau SCRIPT, PILOT và phim hoàn chỉnh được duyệt QC", () => {
+  const approvedQc = { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true };
   const approved = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
     shot_plan: { summary: "Hai cảnh", shots: ["Cận Vy"] },
     production_readiness: productionReadiness,
-    pilot: {
-      duration_seconds: 15,
-      video_url: "https://drive.google.com/file/d/pilot/view",
-      qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true },
-      review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
+    pilot_batch: {
+      samples: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"].map((purpose, index) => ({
+        sample_id: `PILOT-${index + 1}`,
+        purpose,
+        shot_ids: [`SHOT-00${index + 1}`],
+        duration_seconds: 15,
+        video_url: `https://drive.google.com/file/d/pilot-${index + 1}/view`,
+        qc: approvedQc,
+        review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
+      })),
+      batch_review: { decision: "APPROVE", notes: "Đạt", reviewer: "PROJECT_OWNER" },
     },
     full_film: {
       video_url: "https://drive.google.com/file/d/full/view",
@@ -963,7 +992,7 @@ test("media providers remain locked when production readiness is missing", () =>
   assert.equal(shortFilmNextAction(parsed), "LOCK_SHORT_FILM_PRODUCTION_READINESS");
 });
 
-test("legacy approved readiness cannot bypass the performance-driven gate", () => {
+test("AI-only pilot does not require owner footage or a paid animatic before generation", () => {
   const parsed = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
@@ -971,11 +1000,11 @@ test("legacy approved readiness cannot bypass the performance-driven gate", () =
     production_readiness: { ...productionReadiness, performance_plan: undefined },
   });
   const decision = shortFilmMediaExecutionDecision(parsed, "PILOT");
-  assert.equal(decision.provider_execution_allowed, false);
-  assert.match(decision.blockers.join(","), /PERFORMANCE_PLAN_MISSING/);
+  assert.equal(decision.provider_execution_allowed, true);
+  assert.doesNotMatch(decision.blockers.join(","), /PERFORMANCE_PLAN|PERFORMANCE_SOURCE|ANIMATIC|GOLDEN_SCENE/);
 });
 
-test("paid providers remain locked until the Golden Scene passes every criterion", () => {
+test("pilot QC is the golden-scene gate, so an unreviewed pre-provider animatic cannot block AI-only pilot", () => {
   const parsed = ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
@@ -989,12 +1018,12 @@ test("paid providers remain locked until the Golden Scene passes every criterion
     },
   });
   const decision = shortFilmMediaExecutionDecision(parsed, "PILOT");
-  assert.equal(decision.provider_execution_allowed, false);
-  assert.match(decision.blockers.join(","), /GOLDEN_SCENE_NOT_APPROVED/);
+  assert.equal(decision.provider_execution_allowed, true);
+  assert.doesNotMatch(decision.blockers.join(","), /GOLDEN_SCENE_NOT_APPROVED/);
 });
 
-test("pilot is blocked when a Character Master is not APPROVED_LOCKED", () => {
-  const parsed = ShortFilmWorkflowSchema.parse({
+test("temporary Character sources are rejected at the contract boundary", () => {
+  assert.throws(() => ShortFilmWorkflowSchema.parse({
     ...shortFilmWorkflow,
     source_actors: [{ ...shortFilmWorkflow.source_actors[0], master_identity_status: "TEMPORARY" }],
     script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
@@ -1006,9 +1035,7 @@ test("pilot is blocked when a Character Master is not APPROVED_LOCKED", () => {
       qc: { identity: true, motion: true, lip_sync: true, voice: true, background: true, lighting: true, continuity: true },
       review: { decision: "PENDING", notes: "", reviewer: "PROJECT_OWNER" },
     },
-  });
-  assert.equal(shortFilmMediaExecutionDecision(parsed).provider_execution_allowed, false);
-  assert.match(shortFilmProductionReadinessBlockers(parsed).join(","), /IDENTITY_MASTER_NOT_LOCKED/);
+  }));
 });
 
 test("pilot is blocked when an approved Voice Master is missing", () => {

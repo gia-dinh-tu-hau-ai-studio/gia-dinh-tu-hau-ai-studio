@@ -114,8 +114,8 @@ export function deriveShortFilmCharacterMediaRequirements(
 export const ShortFilmSourceActorSchema = z.object({
   source_actor_id: z.string().trim().min(1),
   source_actor_name: z.string().trim().min(1),
-  source_kind: z.enum(["TEMPORARY_APPROVED_SOURCE", "CHARACTER_LIBRARY_MASTER"]),
-  master_identity_status: z.enum(["TEMPORARY", "APPROVED_LOCKED"]),
+  source_kind: z.literal("CHARACTER_LIBRARY_MASTER"),
+  master_identity_status: z.literal("APPROVED_LOCKED"),
 });
 
 export const ShortFilmCharacterSchema = z.object({
@@ -647,9 +647,8 @@ export const ShortFilmWorkflowSchema = z
     )) {
       context.addIssue({ code: "custom", message: "PILOT_BUDGET_APPROVAL_MUST_MATCH_SAMPLING", path: ["pilot_budget_approval"] });
     }
-    const legacyPilotApproved = workflow.pilot?.review.decision === "APPROVE" && shortFilmQcPassed(workflow.pilot.qc);
     const batchPilotApproved = workflow.pilot_batch?.batch_review.decision === "APPROVE";
-    if (workflow.full_film && !legacyPilotApproved && !batchPilotApproved) {
+    if (workflow.full_film && !batchPilotApproved) {
       context.addIssue({
         code: "custom",
         message: "PILOT_APPROVED là bắt buộc trước sản xuất toàn phim",
@@ -691,14 +690,19 @@ export function createShortFilmShotPlan(workflow: ShortFilmWorkflow) {
     const beat = beats[index];
     return `Shot ${String(index + 1).padStart(2, "0")}: ${beat.slice(0, 180)}`;
   });
+  const ambiguousShot = shots.findIndex((summary) => !matchShortFilmShotActor(summary, workflow.film_characters, workflow.source_actors));
+  if (ambiguousShot >= 0) {
+    throw new Error(`SHOT_PLAN_CHARACTER_AMBIGUOUS:SHOT-${String(ambiguousShot + 1).padStart(3, "0")}`);
+  }
+  const firstDialogueIndex = shots.findIndex((summary) => /^[^:]+:\s*[^:]{1,50}:\s*.+$/u.test(summary));
   const executionShots = shots.map((summary, index) => ({
     shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
     summary,
     runway_prompt: `${summary}. Phim truyền hình Việt Nam điện ảnh, diễn xuất tự nhiên có chuyển động, giữ đúng Character Master, trang phục, bối cảnh và continuity đã duyệt.`,
     duration_seconds: Math.min(10, totalSeconds - index * 10),
-    risk_tags: index === 0
+    risk_tags: index === (firstDialogueIndex >= 0 ? firstDialogueIndex : 0)
       ? ["IDENTITY_DIALOGUE" as const]
-      : index === 1
+      : index === (firstDialogueIndex === 1 ? 0 : 1)
         ? ["MOTION_PERFORMANCE" as const]
         : index === 2
           ? ["MULTI_CHARACTER_CONTINUITY" as const]
@@ -821,23 +825,6 @@ export function migrateShortFilmWorkflowDraft(draft: unknown, defaults: ShortFil
     return stored;
   };
   const migrated = mergeMissing(defaults, draft) as ShortFilmWorkflow;
-  if (!migrated.production_readiness?.performance_plan) {
-    return {
-      ...migrated,
-      pilot_budget_approval: undefined,
-      pilot: undefined,
-      pilot_batch: undefined,
-      full_film: undefined,
-      production_readiness: migrated.production_readiness ? {
-        ...migrated.production_readiness,
-        review: {
-          decision: "PENDING",
-          notes: "Dữ liệu thực thi cũ đã được vô hiệu hóa; cần duyệt lại theo Performance Plan và Golden Scene.",
-          reviewer: "PROJECT_OWNER",
-        },
-      } : undefined,
-    };
-  }
   return migrated;
 }
 
@@ -1082,14 +1069,13 @@ export function shortFilmProductionReadinessBlockers(
     blockers.push("KEYFRAME_IDENTITY_APPROVAL_INCOMPLETE");
   }
 
-  const expectedDialogueShotIds = workflow.dialogue.dialogue_mode === "DIALOGUE"
-    ? expectedShotIds
-    : workflow.dialogue.dialogue_mode === "VOICE_OVER"
-      ? new Set<string>()
-      : new Set(readiness.dialogue_shot_ids);
-  const relevantSpeakerLocks = scope === "PILOT"
-    ? readiness.speaker_locks.filter((lock) => expectedDialogueShotIds.has(lock.shot_id))
-    : readiness.speaker_locks;
+  const declaredDialogueShotIds = readiness.dialogue_shot_ids.length
+    ? readiness.dialogue_shot_ids
+    : readiness.speaker_locks.map((lock) => lock.shot_id);
+  const expectedDialogueShotIds = workflow.dialogue.dialogue_mode === "VOICE_OVER"
+    ? new Set<string>()
+    : new Set(declaredDialogueShotIds.filter((shotId) => expectedShotIds.has(shotId)));
+  const relevantSpeakerLocks = readiness.speaker_locks.filter((lock) => expectedDialogueShotIds.has(lock.shot_id));
   const speakerShotIds = new Set(relevantSpeakerLocks.map((lock) => lock.shot_id));
   const lineApprovalsByShot = new Map(readiness.dialogue_line_approvals.map((line) => [line.shot_id, line]));
   for (const lock of relevantSpeakerLocks) {
@@ -1115,31 +1101,14 @@ export function shortFilmProductionReadinessBlockers(
   if (
     expectedDialogueShotIds.size !== speakerShotIds.size ||
     [...expectedDialogueShotIds].some((shotId) => !speakerShotIds.has(shotId)) ||
-    (scope === "FULL" && [...speakerShotIds].some((shotId) => !expectedDialogueShotIds.has(shotId)))
+    [...speakerShotIds].some((shotId) => !expectedDialogueShotIds.has(shotId))
   ) {
     blockers.push("SPEAKER_FACE_LOCKS_INCOMPLETE");
   }
-  const performance = readiness.performance_plan;
-  if (!performance || performance.production_mode !== "PERFORMANCE_DRIVEN_HYBRID") {
-    blockers.push("PERFORMANCE_PLAN_MISSING");
-  } else {
-    const performanceByShot = new Map(performance.shots.map((shot) => [shot.shot_id, shot]));
-    for (const shotId of expectedShotIds) {
-      const shot = performanceByShot.get(shotId);
-      if (!shot || !shot.performance_source_url || shot.review.decision !== "APPROVE") blockers.push(`PERFORMANCE_SOURCE_NOT_APPROVED:${shotId}`);
-    }
-    const timingByShot = new Map(performance.timing_contracts.map((contract) => [contract.shot_id, contract]));
-    for (const shotId of expectedDialogueShotIds) {
-      const timing = timingByShot.get(shotId);
-      if (!timing || timing.review.decision !== "APPROVE") blockers.push(`SPEECH_TIMING_CONTRACT_NOT_APPROVED:${shotId}`);
-    }
-    if (!performance.animatic || !performance.animatic.video_url || performance.animatic.review.decision !== "APPROVE") blockers.push("ANIMATIC_NOT_APPROVED");
-    const golden = performance.golden_scene;
-    if (!golden || golden.review.decision !== "APPROVE" || !golden.identity_locked || !golden.speech_motion_aligned || !golden.performance_continuity || !golden.natural_cut_after_dialogue) {
-      blockers.push("GOLDEN_SCENE_NOT_APPROVED");
-    }
-    if (performance.review.decision !== "APPROVE") blockers.push("PERFORMANCE_PLAN_NOT_APPROVED");
-  }
+  // Acting, motion, lip-sync and the natural cut after dialogue are verified on
+  // paid pilot output. Requiring an owner-supplied performance video or animatic
+  // before the pilot creates an impossible circular gate for an AI-only project.
+  // Full-film execution is separately gated by an approved pilot batch.
   if (readiness.review.decision !== "APPROVE") blockers.push("PRODUCTION_READINESS_NOT_APPROVED");
   return blockers;
 }
@@ -1165,9 +1134,8 @@ export function shortFilmNextAction(workflow: ShortFilmWorkflow) {
     return "LOCK_SHORT_FILM_PRODUCTION_READINESS" as const;
   }
   if (!workflow.pilot && !workflow.pilot_batch) return "PREPARE_SHORT_FILM_PILOT" as const;
-  const legacyPilotApproved = Boolean(workflow.pilot && workflow.pilot.review.decision === "APPROVE" && shortFilmQcPassed(workflow.pilot.qc));
   const batchPilotApproved = workflow.pilot_batch?.batch_review.decision === "APPROVE";
-  if (!legacyPilotApproved && !batchPilotApproved) {
+  if (!batchPilotApproved) {
     return "REVIEW_SHORT_FILM_PILOT" as const;
   }
   if (!workflow.full_film) return "PRODUCE_SHORT_FILM" as const;
@@ -1279,7 +1247,7 @@ export function matchShortFilmShotActor(
     return positions.length ? [{ source_actor_id: character.source_actor_id, position: Math.min(...positions), order }] : [];
   });
   matches.sort((left, right) => left.position - right.position || left.order - right.order);
-  return matches[0]?.source_actor_id ?? filmCharacters[0]?.source_actor_id;
+  return matches[0]?.source_actor_id ?? (filmCharacters.length === 1 ? filmCharacters[0]?.source_actor_id : undefined);
 }
 
 export function shortFilmScriptApprovalIsFresh(

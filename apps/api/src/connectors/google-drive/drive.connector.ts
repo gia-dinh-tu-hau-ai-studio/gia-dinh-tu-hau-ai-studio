@@ -1,6 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { google, drive_v3 } from "googleapis";
 import { Readable } from "node:stream";
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { createDriveOAuthClient } from "../../google/google-auth";
 
 const RUNWAY_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -68,10 +70,33 @@ export class DriveConnector {
     return this.uploadBuffer(folder.id as string, name, mimeType, content);
   }
 
+  async uploadFullFilmArtifactFromFile(projectFolderId: string, name: string, mimeType: string, filePath: string) {
+    const folder = await this.findChildFolder(projectFolderId, "05_SAN_XUAT_PHIM");
+    const drive = this.createClient();
+    const response = await drive.files.create({
+      requestBody: { name, mimeType, parents: [folder.id as string] },
+      media: { mimeType, body: createReadStream(filePath) },
+      fields: "id,name,mimeType,size,webViewLink,webContentLink",
+      supportsAllDrives: true,
+    });
+    if (!response.data.id) throw new Error(`Drive không trả file id cho ${name}`);
+    return response.data;
+  }
+
   async downloadBuffer(fileId: string) {
     const drive = this.createClient();
     const response = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "arraybuffer" });
     return Buffer.from(response.data as ArrayBuffer);
+  }
+
+  async downloadToFile(fileId: string, filePath: string) {
+    const drive = this.createClient();
+    const response = await drive.files.get(
+      { fileId, alt: "media", supportsAllDrives: true },
+      { responseType: "stream" },
+    );
+    await pipeline(response.data as unknown as Readable, createWriteStream(filePath));
+    return filePath;
   }
 
   async downloadPrivateRunwayImage(reference: string) {

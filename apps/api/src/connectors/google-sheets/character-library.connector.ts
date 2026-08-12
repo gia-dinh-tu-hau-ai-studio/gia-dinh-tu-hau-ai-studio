@@ -123,7 +123,7 @@ export class CharacterLibraryConnector {
     return values
       .slice(1)
       .map((row) => this.mapRow(row, indexByColumn))
-      .filter((row) => this.isEligible(row) && this.masterIdentityApprovedLocked(row))
+      .filter((row) => this.isEligible(row) && this.masterIdentityApprovedLocked(row) && this.voiceMasterApprovedLocked(row))
       .map((row) => {
         const identity = this.parseJson(row.visual_identity_json);
         const voice = this.parseJson(row.voice_identity_json);

@@ -71,14 +71,28 @@ export async function assembleVideoBuffers(inputs: Buffer[], expectedDurationSec
   if (inputs.length === 0) throw new Error("VIDEO_INPUTS_REQUIRED");
   const directory = await mkdtemp(join(tmpdir(), "tuhau-pilot-"));
   try {
+    for (let index = 0; index < inputs.length; index += 1) {
+      await writeFile(join(directory, `input-${index}.mp4`), inputs[index]);
+    }
+    const result = join(directory, "pilot-sample.mp4");
+    await assembleVideoFiles(inputs.map((_, index) => join(directory, `input-${index}.mp4`)), result, expectedDurationSeconds);
+    return await readFile(result);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/** Assemble from disk so a full film never keeps every source clip in memory. */
+export async function assembleVideoFiles(inputs: string[], outputPath: string, expectedDurationSeconds?: number) {
+  if (inputs.length === 0) throw new Error("VIDEO_INPUTS_REQUIRED");
+  const directory = await mkdtemp(join(tmpdir(), "tuhau-film-assembly-"));
+  try {
     const normalized: string[] = [];
     for (let index = 0; index < inputs.length; index += 1) {
-      const input = join(directory, `input-${index}.mp4`);
       const output = join(directory, `normalized-${index}.mp4`);
-      await writeFile(input, inputs[index]);
-      const common = ["-y", "-i", input];
+      const common = ["-y", "-i", inputs[index]];
       const video = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,fps=30";
-      if (await hasAudio(input)) {
+      if (await hasAudio(inputs[index])) {
         await run("ffmpeg", [...common, "-vf", video, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-ar", "48000", "-ac", "2", output]);
       } else {
         await run("ffmpeg", [...common, "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-vf", video, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-shortest", output]);
@@ -87,13 +101,12 @@ export async function assembleVideoBuffers(inputs: Buffer[], expectedDurationSec
     }
     const list = join(directory, "concat.txt");
     await writeFile(list, normalized.map((path) => `file '${path.replace(/'/g, "'\\''")}'`).join("\n"));
-    const result = join(directory, "pilot-sample.mp4");
-    await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", result]);
-    const evidence = await probeVideo(result);
+    await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", outputPath], 900_000);
+    const evidence = await probeVideo(outputPath);
     if (expectedDurationSeconds !== undefined && Math.abs(evidence.duration_seconds - expectedDurationSeconds) > 0.25) {
       throw new Error(`VIDEO_ASSEMBLY_DURATION_MISMATCH:expected=${expectedDurationSeconds}:actual=${evidence.duration_seconds.toFixed(3)}`);
     }
-    return await readFile(result);
+    return evidence;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

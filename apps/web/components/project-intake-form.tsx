@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useState, type FocusEvent } from "react";
 import { approveProviderBudgetForProjectCreation, calculateShortFilmPilotBudget, calculateSuggestedProviderBudget, canResumeContractApproval, canResumeShortFilmWorkflow, deriveShortFilmCharacterMediaRequirements, migrateShortFilmWorkflowDraft, resetProviderBudgetApprovalForDraft, shortFilmPilotBudgetApprovalIsSufficient, shortFilmScriptProvider, shortFilmScriptReadyForProjectCreation, synchronizeShortFilmIntakeFields, type ProviderBudgetPlan, type ShortFilmResumeSnapshot, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { createInitialShortFilmWorkflow, ShortFilmWorkflowForm } from "./short-film-workflow-form";
-import { EvaluationReelQcPanel } from "./evaluation-reel-qc-panel";
 
 type FormProjectType = "SHORT_FILM";
 type IdentityMode = "LIBRARY_MASTER" | "ORIGINAL_FACE_COMPOSITE";
@@ -1015,7 +1014,7 @@ export function ProjectIntakeForm() {
 
   async function refreshShortFilmFullFilmStatus() {
     if (!createdProject) return;
-    const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/full-film/status`, { method: "POST" });
+    const response = await fetch(`/api/projects/${encodeURIComponent(createdProject.project_id)}/short-film/full-film/status`);
     const body = await response.json();
     setFullFilmExecutionResult(JSON.stringify(body, null, 2));
     if (["AWAITING_FINAL_QC", "FAILED"].includes(body.status)) setMonitoringFullFilmExecution(false);
@@ -1099,8 +1098,8 @@ export function ProjectIntakeForm() {
           <li className="current"><b>1</b><span>Thông tin &amp; ý tưởng</span></li>
           <li><b>2</b><span>Kịch bản &amp; nhân vật</span></li>
           <li><b>3</b><span>Kinh phí &amp; tài khoản</span></li>
-          <li><b>4</b><span>Shot Plan &amp; khóa Master</span></li>
-          <li><b>5</b><span>Clip pilot &amp; QC</span></li>
+          <li><b>4</b><span>Kế hoạch cảnh &amp; xác nhận nhân vật</span></li>
+          <li><b>5</b><span>Clip mẫu &amp; kiểm tra</span></li>
           <li><b>6</b><span>Sản xuất &amp; xuất bản</span></li>
         </ol>
         <small>Các bước sản xuất có chi phí chỉ mở sau khi bước trước đã được duyệt.</small>
@@ -1137,7 +1136,7 @@ export function ProjectIntakeForm() {
       </section>
 
       <section className="intake-frame active" id="intake-frame-2">
-        <div className="section-heading"><span>02</span><div><h2>Kịch bản, nhân vật và giọng thoại</h2><p>Hoàn thiện ý tưởng, duyệt kịch bản, phân vai và khóa đúng Character/Voice Master trước khi sản xuất.</p></div></div>
+        <div className="section-heading"><span>02</span><div><h2>Kịch bản, nhân vật và giọng thoại</h2><p>Hoàn thiện ý tưởng, duyệt kịch bản, phân vai và xác nhận đúng nhân vật cùng giọng nói trước khi sản xuất.</p></div></div>
         <p className="library-status">{libraryMessage}</p>
         <div className="field-grid">
           <>
@@ -1267,7 +1266,6 @@ export function ProjectIntakeForm() {
           {shortFilmSaveResult && <ResultDetails value={shortFilmSaveResult} />}
         </section>
       )}
-      {createdProject && createdProject.next_action !== "APPROVE_CONTRACT" && <EvaluationReelQcPanel projectId={createdProject.project_id} />}
       {createdProject?.next_action === "PREPARE_SHORT_FILM_PILOT" && (
         <section className="confirmation-panel">
           <div>
@@ -1313,7 +1311,7 @@ export function ProjectIntakeForm() {
             <label className="consent"><input checked={fullFilmExecutionApproved} type="checkbox" onChange={(event) => setFullFilmExecutionApproved(event.target.checked)} /> Tôi duyệt đúng hạn mức trên để sản xuất toàn phim.</label>
           </div>
           <button disabled={!fullFilmExecutionApproved || runningFullFilmExecution} onClick={() => void executeShortFilmFullFilm()} type="button">{runningFullFilmExecution ? "Đang khởi tạo…" : "Bắt đầu sản xuất toàn phim"}</button>
-          <button className="secondary-button" onClick={() => void refreshShortFilmFullFilmStatus()} type="button">Xử lý bước tiếp theo / cập nhật tiến độ</button>
+          <button className="secondary-button" onClick={() => void refreshShortFilmFullFilmStatus()} type="button">Cập nhật tiến độ</button>
           {fullFilmExecutionResult && <ResultDetails value={fullFilmExecutionResult} />}
         </section>;
       })()}
