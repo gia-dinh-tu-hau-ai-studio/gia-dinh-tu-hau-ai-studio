@@ -118,6 +118,7 @@ test("dialogue-audio rejection can restart, but unrelated failures cannot", () =
     error: { stage: "DIALOGUE_AUDIO_APPROVAL", message: "DIALOGUE_AUDIO_REJECTED_BY_PROJECT_OWNER" },
   } as Parameters<typeof rejectPilotForRestart>[0];
   assert.equal(rejectPilotForRestart(dialogueRejected, "now").failed.error?.stage, "DIALOGUE_AUDIO_APPROVAL");
+  assert.equal(rejectPilotForRestart({ ...dialogueRejected, error: { stage: "PROVIDER_PROCESSING", message: "VIETNAMESE_AUDIO_VERIFICATION_FAILED:LINE-003" } }, "now").failed.error?.stage, "PROVIDER_PROCESSING");
   assert.throws(() => rejectPilotForRestart({ ...dialogueRejected, error: { stage: "PROVIDER_PROCESSING", message: "failed" } }, "now"), /NOT_AWAITING/);
 });
 
