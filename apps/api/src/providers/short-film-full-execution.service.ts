@@ -1,11 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ProviderBudgetPlanSchema, providerBudgetApproved, shortFilmProductionReadinessBlockers } from "@tu-hau/contracts";
 import { DriveConnector } from "../connectors/google-drive/drive.connector";
 import { CharacterLibraryConnector } from "../connectors/google-sheets/character-library.connector";
 import { ProjectRegistryConnector } from "../connectors/google-sheets/project-registry.connector";
-import { assembleVideoBuffers } from "../media/short-film-pilot-assembler";
+import { assembleVideoFiles } from "../media/short-film-pilot-assembler";
 import { ElevenLabsPilotProvider, RunwayPilotProvider, SyncPilotProvider } from "./short-film-pilot.providers";
+import { checkProviderAccounts } from "./provider-account-preflight";
 import { verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 
@@ -29,8 +33,26 @@ type FullManifest = {
   heartbeat_at: string; started_at: string; error?: string;
 };
 
+export function fullFilmNeedsBackgroundRunner(status: FullManifest["status"]) {
+  return status === "IN_PROGRESS" || status === "ASSEMBLING";
+}
+
+export function calculateFullFilmRequiredCaps(
+  shots: Array<{ shot_id: string; duration_seconds: number }>,
+  reusedShotIds: ReadonlySet<string>,
+  dialogueCharactersByShot: ReadonlyMap<string, number>,
+) {
+  const remaining = shots.filter((shot) => !reusedShotIds.has(shot.shot_id));
+  return {
+    runway: remaining.reduce((sum, shot) => sum + shot.duration_seconds * 12, 0),
+    eleven: remaining.reduce((sum, shot) => sum + (dialogueCharactersByShot.get(shot.shot_id) ?? 0), 0),
+    sync: remaining.reduce((sum, shot) => sum + (dialogueCharactersByShot.has(shot.shot_id) ? shot.duration_seconds * 0.05 : 0), 0),
+  };
+}
+
 @Injectable()
 export class ShortFilmFullExecutionService {
+  private readonly activeRunners = new Set<string>();
   constructor(private readonly registry: ProjectRegistryConnector, private readonly characters: CharacterLibraryConnector, private readonly drive: DriveConnector) {}
 
   private secrets() {
@@ -42,7 +64,10 @@ export class ShortFilmFullExecutionService {
   async start(projectId: string, caps: FullManifest["caps"]) {
     const context = await this.registry.getShortFilmExecutionContext(projectId);
     const existing = await this.drive.readPilotJson<FullManifest>(context.project_folder_id, FULL_MANIFEST);
-    if (existing && existing.value.status !== "FAILED") return { ...existing.value, idempotent_replay: true };
+    if (existing && existing.value.status !== "FAILED") {
+      if (fullFilmNeedsBackgroundRunner(existing.value.status)) this.ensureRunning(projectId);
+      return { ...existing.value, idempotent_replay: true };
+    }
     if (context.workflow.pilot_batch?.batch_review.decision !== "APPROVE") throw new Error("PILOT_BATCH_APPROVED_REQUIRED");
     if (shortFilmProductionReadinessBlockers(context.workflow).length) throw new Error("PRODUCTION_READINESS_BLOCKED");
     const budget = ProviderBudgetPlanSchema.parse(context.provider_budget);
@@ -51,14 +76,22 @@ export class ShortFilmFullExecutionService {
     if (!shots.length) throw new Error("STRUCTURED_EXECUTION_SHOTS_REQUIRED");
     const pilot = await this.drive.readPilotJson<{ tasks?: Array<{ shot_id: string; final_drive_file_id?: string }> }>(context.project_folder_id, PILOT_MANIFEST);
     const reused = new Map((pilot?.value.tasks ?? []).filter((task) => task.final_drive_file_id).map((task) => [task.shot_id, task.final_drive_file_id as string]));
-    const remaining = shots.filter((shot) => !reused.has(shot.shot_id));
     const dialogue = new Map(context.workflow.production_readiness!.dialogue_line_approvals.map((line) => [line.shot_id, line]));
-    const required = {
-      runway: remaining.reduce((sum, shot) => sum + shot.duration_seconds * 12, 0),
-      eleven: remaining.reduce((sum, shot) => sum + (dialogue.get(shot.shot_id)?.dialogue_text.length ?? 0), 0),
-      sync: remaining.reduce((sum, shot) => sum + (dialogue.has(shot.shot_id) ? shot.duration_seconds * 0.05 : 0), 0),
-    };
+    const required = calculateFullFilmRequiredCaps(
+      shots,
+      new Set(reused.keys()),
+      new Map([...dialogue].map(([shotId, line]) => [shotId, line.dialogue_text.length])),
+    );
     if (caps.runway_credits < required.runway || caps.elevenlabs_characters < required.eleven || caps.sync_usd < required.sync) throw new Error(`FULL_FILM_CAP_TOO_LOW:RUNWAY=${required.runway},ELEVENLABS=${required.eleven},SYNC=${required.sync.toFixed(2)}`);
+    const account = await checkProviderAccounts({
+      project_type: "SHORT_FILM",
+      duration_seconds: context.workflow.target_duration_minutes * 60,
+      providers: { script: "PROJECT_OWNER", video: "RUNWAY", voice: "APPROVED_VOICE_MASTER", lip_sync: "SYNC" },
+    }, process.env);
+    const blockedAccounts = account.providers.filter((provider) => ["INSUFFICIENT", "AUTH_ERROR", "NOT_CONFIGURED"].includes(provider.status));
+    if (blockedAccounts.length) {
+      throw new Error(`FULL_FILM_PROVIDER_ACCOUNT_BLOCKED:${blockedAccounts.map((provider) => `${provider.provider}:${provider.status}`).join(",")}`);
+    }
     const keyframes = new Map(context.workflow.production_readiness!.keyframes.map((keyframe) => [keyframe.shot_id, keyframe.approved_image_url]));
     const tasks: FullTask[] = shots.map((shot) => {
       const reusedFile = reused.get(shot.shot_id);
@@ -69,7 +102,38 @@ export class ShortFilmFullExecutionService {
     const now = new Date().toISOString();
     const manifest: FullManifest = { schema_version: "SHORT_FILM_FULL_EXECUTION_V1", execution_id: randomUUID(), project_id: projectId, status: "IN_PROGRESS", tasks, caps, heartbeat_at: now, started_at: now };
     await this.drive.writePilotJson(context.project_folder_id, FULL_MANIFEST, manifest);
+    this.ensureRunning(projectId);
     return { ...manifest, required, idempotent_replay: false };
+  }
+
+  private ensureRunning(projectId: string) {
+    if (this.activeRunners.has(projectId)) return;
+    this.activeRunners.add(projectId);
+    queueMicrotask(() => {
+      void this.runToTerminal(projectId).catch((error) => {
+        console.error("Full-film background runner stopped", { projectId, error });
+      });
+    });
+  }
+
+  private async runToTerminal(projectId: string) {
+    try {
+      for (;;) {
+        const state = await this.tick(projectId);
+        if (["AWAITING_FINAL_QC", "FAILED"].includes(state.status)) return;
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
+      }
+    } finally {
+      this.activeRunners.delete(projectId);
+    }
+  }
+
+  async status(projectId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<FullManifest>(context.project_folder_id, FULL_MANIFEST);
+    if (!stored) throw new Error("FULL_FILM_EXECUTION_NOT_FOUND");
+    if (fullFilmNeedsBackgroundRunner(stored.value.status)) this.ensureRunning(projectId);
+    return stored.value;
   }
 
   async tick(projectId: string) {
@@ -135,12 +199,22 @@ export class ShortFilmFullExecutionService {
           next.runway_task_id = submitted.taskId; next.status = "RUNWAY_PROCESSING";
         } else if (manifest.tasks.every((task) => task.status === "COMPLETED")) {
           manifest.status = "ASSEMBLING";
-          const buffers: Buffer[] = [];
-          for (const task of manifest.tasks) buffers.push(await this.drive.downloadBuffer(task.final_drive_file_id as string));
-          const movie = await assembleVideoBuffers(buffers);
-          const output = await this.drive.uploadFullFilmArtifact(context.project_folder_id, `${projectId}_FULL_FILM_1920x1080.mp4`, "video/mp4", movie);
-          manifest.output = { drive_file_id: output.id as string, video_url: output.webViewLink ?? `https://drive.google.com/file/d/${output.id}/view`, width: 1920, height: 1080 };
-          manifest.status = "AWAITING_FINAL_QC";
+          const directory = await mkdtemp(join(tmpdir(), "tuhau-full-film-"));
+          try {
+            const inputPaths: string[] = [];
+            for (let index = 0; index < manifest.tasks.length; index += 1) {
+              const path = join(directory, `shot-${String(index + 1).padStart(4, "0")}.mp4`);
+              await this.drive.downloadToFile(manifest.tasks[index].final_drive_file_id as string, path);
+              inputPaths.push(path);
+            }
+            const moviePath = join(directory, `${projectId}_FULL_FILM_1920x1080.mp4`);
+            await assembleVideoFiles(inputPaths, moviePath, context.workflow.target_duration_minutes * 60);
+            const output = await this.drive.uploadFullFilmArtifactFromFile(context.project_folder_id, `${projectId}_FULL_FILM_1920x1080.mp4`, "video/mp4", moviePath);
+            manifest.output = { drive_file_id: output.id as string, video_url: output.webViewLink ?? `https://drive.google.com/file/d/${output.id}/view`, width: 1920, height: 1080 };
+            manifest.status = "AWAITING_FINAL_QC";
+          } finally {
+            await rm(directory, { recursive: true, force: true });
+          }
         }
       }
       manifest.heartbeat_at = new Date().toISOString();
