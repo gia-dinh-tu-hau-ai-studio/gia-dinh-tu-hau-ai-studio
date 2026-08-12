@@ -6,7 +6,7 @@ import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
-import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, buildGoldenSceneSilentMotionPrompt, rejectAndPlanPurposefulGoldenSceneEdit, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
+import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, buildGoldenSceneSilentMotionPrompt, buildProfessionalScene30sPlan, rejectAndPlanPurposefulGoldenSceneEdit, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -307,12 +307,23 @@ test("Golden Scene lip-sync opens only after every silent clip and verified audi
   assert.throws(() => approveGoldenSceneSilentMotion({ ...plan, status: "AWAITING_SILENT_MOTION_APPROVAL", tasks: [{ ...plan.tasks[0], silent_motion: { ...plan.tasks[0].silent_motion!, runway_status: "RUNNING" } }] }, "now"), /COMPLETED_SILENT_MOTION_AND_AUDIO_REQUIRED/);
 });
 
-test("rejected final clips are trimmed to at most one second after speech and replaced by purposeful coverage", () => {
+test("rejected final clips use audio-first cuts with at most 250ms after speech and no filler coverage", () => {
   const task = (shot_id: string, speechEnd: number) => ({ shot_id, speech_window_ms: { start: 500, end: speechEnd }, lip_sync: { drive_file_id: `${shot_id}-final` } });
   const plan = { status: "AWAITING_FINAL_CLIP_APPROVAL", tasks: [task("SHOT-006", 4370), task("SHOT-007", 5630), task("SHOT-008", 5450)], heartbeat_at: "before" } as Parameters<typeof rejectAndPlanPurposefulGoldenSceneEdit>[0];
   const rejected = rejectAndPlanPurposefulGoldenSceneEdit(plan, "now");
-  assert.equal(rejected.status, "FINAL_CLIPS_REJECTED"); assert.deepEqual(rejected.editorial_recovery?.dialogue_shots.map((shot) => shot.trim_to_seconds), [6, 7, 7]);
-  assert.equal(rejected.editorial_recovery?.coverage_shots.reduce((sum, shot) => sum + shot.duration_seconds, 0), 10); assert.equal(rejected.editorial_recovery?.paid_provider_calls_required, false);
+  assert.equal(rejected.status, "FINAL_CLIPS_REJECTED"); assert.deepEqual(rejected.editorial_recovery?.dialogue_shots.map((shot) => shot.trim_to_seconds), [4.62, 5.88, 5.7]);
+  assert.deepEqual(rejected.editorial_recovery?.coverage_shots.map((shot) => [shot.purpose, shot.duration_seconds]), [["PHONE_EVIDENCE_INSERT", 2]]);
+  assert.equal(rejected.editorial_recovery?.total_duration_seconds, 18.2); assert.equal(rejected.editorial_recovery?.paid_provider_calls_required, false);
+});
+
+test("professional scene plan fills exactly 30 seconds with locked characters, voices and purposeful beats", () => {
+  const ids = ["GDTH-CHAR-001", "GDTH-CHAR-002", "GDTH-AI-CHAR-001", "GDTH-AI-CHAR-002", "GDTH-AI-CHAR-003"];
+  const characters = ids.map((character_id) => ({ character_id, master_identity_id: `MASTER:${character_id}`, voice_master_id: `VOICE:${character_id}`, readiness: { master_identity: "APPROVED_LOCKED", voice_master: "APPROVED_LOCKED" } }));
+  const plan = buildProfessionalScene30sPlan({ projectId: "project", characters, now: "2026-01-01T00:00:00.000Z" });
+  assert.equal(plan.exact_duration_seconds, 30); assert.equal(plan.beats.length, 6); assert.equal(plan.beats.reduce((sum, beat) => sum + beat.duration_seconds, 0), 30);
+  assert.equal(plan.quality_contract.max_unmotivated_seconds, 0); assert.ok(plan.beats.every((beat) => beat.dialogue_text && beat.voice_master_id && beat.visual_purpose && beat.performance_direction));
+  assert.equal(plan.provider_calls_made, false); assert.equal(plan.status, "AWAITING_OWNER_PLAN_APPROVAL");
+  assert.throws(() => buildProfessionalScene30sPlan({ projectId: "project", characters: characters.slice(1), now: "2026-01-01T00:00:00.000Z" }), /LOCKED_CHARACTER_VOICE_REQUIRED/);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {

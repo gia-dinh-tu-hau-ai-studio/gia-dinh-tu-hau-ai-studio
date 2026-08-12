@@ -21,6 +21,9 @@ export class AppController {
   @Post("projects/:projectId/short-film/golden-scene/motion/prepare")
   prepareGoldenSceneMotion(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.prepare(projectId); }
 
+  @Post("projects/:projectId/short-film/golden-scene/professional-30s/prepare")
+  prepareProfessionalGoldenScene(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.prepareProfessionalScene30s(projectId); }
+
   @Get("projects/:projectId/short-film/golden-scene/motion/status")
   goldenSceneMotionStatus(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.status(projectId); }
 

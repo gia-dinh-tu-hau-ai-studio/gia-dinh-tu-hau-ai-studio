@@ -13,6 +13,61 @@ import { assembleVideoBuffers, createPurposefulCoverageClip, fitAudioBuffer, pro
 
 const CHARACTER_KEYFRAME_MANIFEST = "SHORT_FILM_OPENAI_CHARACTER_KEYFRAMES_V1.json";
 const MOTION_PLAN_MANIFEST = "SHORT_FILM_GOLDEN_SCENE_MOTION_PLAN_V1.json";
+const PROFESSIONAL_SCENE_PLAN_MANIFEST = "SHORT_FILM_PROFESSIONAL_SCENE_30S_V1.json";
+
+type ProfessionalSceneBeat = {
+  shot_id: string;
+  start_seconds: number;
+  end_seconds: number;
+  duration_seconds: 5;
+  actor_id: string;
+  character_master_id: string;
+  voice_master_id?: string;
+  dialogue_text?: string;
+  dialogue_window_seconds?: { start: number; end: number };
+  visual_purpose: string;
+  performance_direction: string;
+  transition: "MATCH_CUT" | "EYELINE_CUT" | "INSERT_CUT" | "REACTION_CUT";
+};
+
+export type ProfessionalScenePlan = {
+  schema_version: "SHORT_FILM_PROFESSIONAL_SCENE_30S_V1";
+  project_id: string;
+  status: "AWAITING_OWNER_PLAN_APPROVAL";
+  exact_duration_seconds: 30;
+  quality_contract: {
+    max_unmotivated_seconds: 0;
+    max_post_dialogue_settle_seconds: 0.25;
+    exact_locked_character_and_voice: true;
+    dialogue_lipsync_required: true;
+    provider_execution_blocked_until_approved: true;
+  };
+  beats: ProfessionalSceneBeat[];
+  proposed_caps: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8 };
+  provider_calls_made: false;
+  created_at: string;
+};
+
+const PROFESSIONAL_BEAT_BLUEPRINT = [
+  { actor_id: "GDTH-CHAR-001", dialogue_text: "Việc nhẹ lương cao mà phải chuyển tiền giữ chỗ sao?", visual_purpose: "Tường Vy dừng ngón tay trên màn hình tuyển dụng, nhận ra dấu hiệu bất thường.", performance_direction: "Nhìn điện thoại, cau mày có chủ đích; dừng tay đúng lúc nghi ngờ.", transition: "INSERT_CUT" as const },
+  { actor_id: "GDTH-CHAR-002", dialogue_text: "Đừng chuyển. Công ty thật không thu phí trước khi nhận việc.", visual_purpose: "Phương An bước tới kiểm tra màn hình và cảnh báo trực tiếp.", performance_direction: "Chỉ vào dòng yêu cầu chuyển tiền rồi nhìn Tường Vy; động tác kết thúc cùng câu.", transition: "EYELINE_CUT" as const },
+  { actor_id: "GDTH-AI-CHAR-002", dialogue_text: "Chuyển hai triệu hôm nay, ngày mai em nhận việc ngay.", visual_purpose: "Minh xuất hiện trong cuộc gọi, tạo áp lực chuyển tiền.", performance_direction: "Giọng dụ dỗ nhưng gấp; ánh mắt nhìn thẳng camera, không có cử chỉ lặp.", transition: "MATCH_CUT" as const },
+  { actor_id: "GDTH-AI-CHAR-001", dialogue_text: "Con kiểm tra địa chỉ với hợp đồng cho chắc nghen.", visual_purpose: "Bà Lan phản ứng đúng vai người mẹ lớn tuổi và đưa lời khuyên.", performance_direction: "Đặt tay nhẹ lên vai Tường Vy; ánh mắt lo lắng, kết thúc bằng cái gật nhỏ.", transition: "REACTION_CUT" as const },
+  { actor_id: "GDTH-AI-CHAR-003", dialogue_text: "Trang này mới tạo, số điện thoại cũng bị nhiều người tố cáo rồi.", visual_purpose: "Khang đối chiếu thông tin và đưa bằng chứng xác minh.", performance_direction: "Xoay màn hình cho mọi người xem; giữ điểm nhìn vào bằng chứng.", transition: "INSERT_CUT" as const },
+  { actor_id: "GDTH-CHAR-001", dialogue_text: "Em không chuyển. Mình lưu bằng chứng và báo công an.", visual_purpose: "Tường Vy từ chối, chụp bằng chứng và bấm báo cáo để khép cảnh.", performance_direction: "Nói dứt khoát, chụp màn hình rồi bấm báo cáo; frame cuối giữ trên trạng thái đã gửi.", transition: "MATCH_CUT" as const },
+] as const;
+
+export function buildProfessionalScene30sPlan(input: { projectId: string; characters: Array<{ character_id: string; master_identity_id?: string; voice_master_id?: string; readiness: { master_identity: string; voice_master: string } }>; now: string }): ProfessionalScenePlan {
+  const characters = new Map(input.characters.map((character) => [character.character_id, character]));
+  const beats = PROFESSIONAL_BEAT_BLUEPRINT.map((beat, index): ProfessionalSceneBeat => {
+    const character = characters.get(beat.actor_id);
+    if (!character || character.readiness.master_identity !== "APPROVED_LOCKED" || character.readiness.voice_master !== "APPROVED_LOCKED" || !character.master_identity_id || !character.voice_master_id) throw new Error(`PROFESSIONAL_SCENE_LOCKED_CHARACTER_VOICE_REQUIRED:${beat.actor_id}`);
+    const start = index * 5;
+    return { shot_id: `PRO-SHOT-${String(index + 1).padStart(2, "0")}`, start_seconds: start, end_seconds: start + 5, duration_seconds: 5, actor_id: beat.actor_id, character_master_id: character.master_identity_id, voice_master_id: character.voice_master_id, dialogue_text: beat.dialogue_text, dialogue_window_seconds: { start: start + 0.25, end: start + 4.75 }, visual_purpose: beat.visual_purpose, performance_direction: beat.performance_direction, transition: beat.transition };
+  });
+  if (beats.reduce((sum, beat) => sum + beat.duration_seconds, 0) !== 30 || beats.some((beat, index) => beat.start_seconds !== index * 5 || beat.end_seconds !== (index + 1) * 5)) throw new Error("PROFESSIONAL_SCENE_EXACT_30S_TIMELINE_REQUIRED");
+  return { schema_version: "SHORT_FILM_PROFESSIONAL_SCENE_30S_V1", project_id: input.projectId, status: "AWAITING_OWNER_PLAN_APPROVAL", exact_duration_seconds: 30, quality_contract: { max_unmotivated_seconds: 0, max_post_dialogue_settle_seconds: 0.25, exact_locked_character_and_voice: true, dialogue_lipsync_required: true, provider_execution_blocked_until_approved: true }, beats, proposed_caps: { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 }, provider_calls_made: false, created_at: input.now };
+}
 
 type CharacterKeyframeManifest = {
   execution_id: string;
@@ -56,32 +111,27 @@ export type GoldenSceneMotionPlan = {
   error?: { stage: string; message: string };
   runway_assets?: RunwayAssetCache;
   editorial_recovery?: EditorialRecoveryPlan;
-  recovery_reel?: { drive_file_id: string; drive_url: string; duration_seconds: number; width: number; height: number; has_audio: boolean; review: "PENDING" };
+  recovery_reel?: { drive_file_id: string; drive_url: string; duration_seconds: number; width: number; height: number; has_audio: boolean; review: "PENDING"; edit_schema?: "AUDIO_FIRST_PURPOSEFUL_CUT_V2" };
 };
 
 type EditorialRecoveryPlan = {
   schema_version: "GOLDEN_SCENE_PURPOSEFUL_EDIT_V1";
-  dialogue_shots: Array<{ shot_id: string; source_file_id: string; trim_to_seconds: number; max_post_dialogue_seconds: 1 }>;
+  dialogue_shots: Array<{ shot_id: string; source_file_id: string; trim_to_seconds: number; max_post_dialogue_seconds: 0.25 }>;
   coverage_shots: Array<{ purpose: "PHONE_EVIDENCE_INSERT" | "LISTENER_REACTION" | "LOCATION_CONTEXT"; duration_seconds: number; requirement: string }>;
-  total_duration_seconds: 30;
+  total_duration_seconds: number;
   paid_provider_calls_required: false;
   review: "PENDING";
 };
 
 export function rejectAndPlanPurposefulGoldenSceneEdit(plan: GoldenSceneMotionPlan, now: string) {
   if (plan.status !== "AWAITING_FINAL_CLIP_APPROVAL" || plan.tasks.some((task) => !task.lip_sync?.drive_file_id)) throw new Error("COMPLETED_FINAL_CLIPS_REQUIRED");
-  const dialogueShots = plan.tasks.map((task) => ({ shot_id: task.shot_id, source_file_id: task.lip_sync!.drive_file_id!, trim_to_seconds: Math.ceil((task.speech_window_ms.end + 1000) / 1000), max_post_dialogue_seconds: 1 as const }));
+  const dialogueShots = plan.tasks.map((task) => ({ shot_id: task.shot_id, source_file_id: task.lip_sync!.drive_file_id!, trim_to_seconds: Number(((task.speech_window_ms.end + 250) / 1000).toFixed(3)), max_post_dialogue_seconds: 0.25 as const }));
   const dialogueDuration = dialogueShots.reduce((sum, shot) => sum + shot.trim_to_seconds, 0);
-  if (dialogueDuration >= 30) throw new Error("PURPOSEFUL_COVERAGE_WINDOW_MISSING");
-  const remaining = 30 - dialogueDuration;
-  const first = Math.floor(remaining / 3), second = Math.floor((remaining - first) / 2), third = remaining - first - second;
   plan.editorial_recovery = {
     schema_version: "GOLDEN_SCENE_PURPOSEFUL_EDIT_V1", dialogue_shots: dialogueShots,
     coverage_shots: [
-      { purpose: "PHONE_EVIDENCE_INSERT", duration_seconds: first, requirement: "Cận cảnh tin tuyển dụng và yêu cầu chuyển tiền; không có khuôn mặt nói." },
-      { purpose: "LISTENER_REACTION", duration_seconds: second, requirement: "Phản ứng lắng nghe có điểm nhìn và cảm xúc rõ; không cử động môi." },
-      { purpose: "LOCATION_CONTEXT", duration_seconds: third, requirement: "Bối cảnh phòng trọ hỗ trợ nhịp cắt và continuity; không có chuyển động nhân vật ngẫu nhiên." },
-    ], total_duration_seconds: 30, paid_provider_calls_required: false, review: "PENDING",
+      { purpose: "PHONE_EVIDENCE_INSERT", duration_seconds: 2, requirement: "Cận cảnh bằng chứng chuyển tiền cần thiết cho câu chuyện; không mô phỏng chuyển động diễn viên." },
+    ], total_duration_seconds: Number((dialogueDuration + 2).toFixed(3)), paid_provider_calls_required: false, review: "PENDING",
   };
   plan.status = "FINAL_CLIPS_REJECTED"; plan.heartbeat_at = now; return plan;
 }
@@ -210,6 +260,15 @@ export function buildGoldenSceneMotionPlan(input: {
 export class GoldenSceneMotionPlanService {
   constructor(private readonly registry: ProjectRegistryConnector, private readonly drive: DriveConnector, private readonly characters: CharacterLibraryConnector) {}
 
+  async prepareProfessionalScene30s(projectId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const existing = await this.drive.readPilotJson<ProfessionalScenePlan>(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST);
+    if (existing) return { ...existing.value, idempotent_replay: true };
+    const plan = buildProfessionalScene30sPlan({ projectId, characters: await this.characters.listEligibleCharacters(), now: new Date().toISOString() });
+    await this.drive.writePilotJson(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST, plan);
+    return plan;
+  }
+
   async prepare(projectId: string) {
     const context = await this.registry.getShortFilmExecutionContext(projectId);
     const existing = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
@@ -281,22 +340,26 @@ export class GoldenSceneMotionPlanService {
   async buildRecoveryReel(projectId: string) {
     const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
     if (!stored) throw new Error("GOLDEN_SCENE_MOTION_PLAN_NOT_FOUND"); const plan = stored.value;
-    if (plan.status === "AWAITING_RECOVERY_REEL_APPROVAL" && plan.recovery_reel) return { ...plan, idempotent_replay: true };
-    if (plan.status !== "FINAL_CLIPS_REJECTED" || !plan.editorial_recovery || plan.editorial_recovery.paid_provider_calls_required) throw new Error("PURPOSEFUL_EDITORIAL_RECOVERY_REQUIRED");
-    const [shot6, shot7, shot8] = plan.editorial_recovery.dialogue_shots;
-    const task6 = plan.tasks.find((task) => task.shot_id === shot6.shot_id)!, task7 = plan.tasks.find((task) => task.shot_id === shot7.shot_id)!, task8 = plan.tasks.find((task) => task.shot_id === shot8.shot_id)!;
-    const [video6, video7, video8, locationImage, phoneImage, reactionImage] = await Promise.all([
+    if (plan.status === "AWAITING_RECOVERY_REEL_APPROVAL" && plan.recovery_reel?.edit_schema === "AUDIO_FIRST_PURPOSEFUL_CUT_V2") return { ...plan, idempotent_replay: true };
+    if (!["FINAL_CLIPS_REJECTED", "AWAITING_RECOVERY_REEL_APPROVAL"].includes(plan.status) || !plan.editorial_recovery || plan.editorial_recovery.paid_provider_calls_required) throw new Error("PURPOSEFUL_EDITORIAL_RECOVERY_REQUIRED");
+    plan.editorial_recovery = rejectAndPlanPurposefulGoldenSceneEdit({ ...plan, status: "AWAITING_FINAL_CLIP_APPROVAL" }, new Date().toISOString()).editorial_recovery;
+    const recovery = plan.editorial_recovery;
+    if (!recovery) throw new Error("AUDIO_FIRST_RECOVERY_PLAN_MISSING");
+    const [shot6, shot7, shot8] = recovery.dialogue_shots;
+    const task7 = plan.tasks.find((task) => task.shot_id === shot7.shot_id)!;
+    const [video6, video7, video8, phoneImage] = await Promise.all([
       this.drive.downloadBuffer(shot6.source_file_id), this.drive.downloadBuffer(shot7.source_file_id), this.drive.downloadBuffer(shot8.source_file_id),
-      this.drive.downloadBuffer(task6.character_keyframe_file_id), this.drive.downloadBuffer(task7.character_keyframe_file_id), this.drive.downloadBuffer(task8.character_keyframe_file_id),
+      this.drive.downloadBuffer(task7.character_keyframe_file_id),
     ]);
-    const [trim6, trim7, trim8, location, phone, reaction] = await Promise.all([
+    const [trim6, trim7, trim8, phone] = await Promise.all([
       trimVideoBuffer(video6, shot6.trim_to_seconds), trimVideoBuffer(video7, shot7.trim_to_seconds), trimVideoBuffer(video8, shot8.trim_to_seconds),
-      createPurposefulCoverageClip(locationImage, "LOCATION_CONTEXT", 4), createPurposefulCoverageClip(phoneImage, "PHONE_EVIDENCE_INSERT", 3), createPurposefulCoverageClip(reactionImage, "LISTENER_REACTION", 3),
+      createPurposefulCoverageClip(phoneImage, "PHONE_EVIDENCE_INSERT", 2),
     ]);
-    const reel = await assembleVideoBuffers([location, trim6, phone, trim7, reaction, trim8], 30); const evidence = await probeVideoBuffer(reel);
-    if (Math.abs(evidence.duration_seconds - 30) > 0.25 || evidence.width !== 1920 || evidence.height !== 1080 || !evidence.has_audio) throw new Error("RECOVERY_REEL_TECHNICAL_QC_FAILED");
-    const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, "GOLDEN_SCENE_PURPOSEFUL_RECOVERY_REEL_30S_1920x1080.mp4", "video/mp4", reel);
-    plan.recovery_reel = { drive_file_id: uploaded.id as string, drive_url: uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`, ...evidence, review: "PENDING" }; plan.status = "AWAITING_RECOVERY_REEL_APPROVAL"; plan.heartbeat_at = new Date().toISOString(); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
+    const expectedDuration = recovery.total_duration_seconds;
+    const reel = await assembleVideoBuffers([trim6, phone, trim7, trim8], expectedDuration); const evidence = await probeVideoBuffer(reel);
+    if (Math.abs(evidence.duration_seconds - expectedDuration) > 0.25 || evidence.width !== 1920 || evidence.height !== 1080 || !evidence.has_audio) throw new Error("RECOVERY_REEL_TECHNICAL_QC_FAILED");
+    const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, "GOLDEN_SCENE_AUDIO_FIRST_PURPOSEFUL_CUT_V2_1920x1080.mp4", "video/mp4", reel);
+    plan.recovery_reel = { drive_file_id: uploaded.id as string, drive_url: uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`, ...evidence, review: "PENDING", edit_schema: "AUDIO_FIRST_PURPOSEFUL_CUT_V2" }; plan.status = "AWAITING_RECOVERY_REEL_APPROVAL"; plan.heartbeat_at = new Date().toISOString(); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
   }
 
   private async advanceSilentMotion(projectFolderId: string, plan: GoldenSceneMotionPlan) {

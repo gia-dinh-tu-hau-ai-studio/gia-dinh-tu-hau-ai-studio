@@ -113,7 +113,7 @@ export async function assembleVideoFiles(inputs: string[], outputPath: string, e
 }
 
 export async function trimVideoBuffer(input: Buffer, durationSeconds: number) {
-  if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 30) throw new Error("VIDEO_TRIM_DURATION_INVALID");
+  if (!Number.isFinite(durationSeconds) || durationSeconds < 1 || durationSeconds > 30) throw new Error("VIDEO_TRIM_DURATION_INVALID");
   const directory = await mkdtemp(join(tmpdir(), "tuhau-trim-"));
   try {
     const source = join(directory, "source.mp4");
@@ -123,7 +123,7 @@ export async function trimVideoBuffer(input: Buffer, durationSeconds: number) {
     if (sourceEvidence.duration_seconds + 0.25 < durationSeconds) {
       throw new Error(`VIDEO_SOURCE_TOO_SHORT:expected=${durationSeconds}:actual=${sourceEvidence.duration_seconds.toFixed(3)}`);
     }
-    await run("ffmpeg", ["-y", "-i", source, "-t", String(durationSeconds), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", output]);
+    await run("ffmpeg", ["-y", "-i", source, "-t", durationSeconds.toFixed(3), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", output]);
     const outputEvidence = await probeVideo(output);
     if (Math.abs(outputEvidence.duration_seconds - durationSeconds) > 0.25) {
       throw new Error(`VIDEO_TRIM_DURATION_MISMATCH:expected=${durationSeconds}:actual=${outputEvidence.duration_seconds.toFixed(3)}`);
