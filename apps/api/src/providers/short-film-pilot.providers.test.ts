@@ -6,7 +6,7 @@ import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
-import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, buildGoldenSceneSilentMotionPrompt, buildProfessionalScene30sPlan, rejectAndPlanPurposefulGoldenSceneEdit, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
+import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, approveProfessionalScene30sBudget, buildGoldenSceneSilentMotionPrompt, buildProfessionalScene30sPlan, rejectAndPlanPurposefulGoldenSceneEdit, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -324,6 +324,13 @@ test("professional scene plan fills exactly 30 seconds with locked characters, v
   assert.equal(plan.quality_contract.max_unmotivated_seconds, 0); assert.ok(plan.beats.every((beat) => beat.dialogue_text && beat.voice_master_id && beat.visual_purpose && beat.performance_direction));
   assert.equal(plan.provider_calls_made, false); assert.equal(plan.status, "AWAITING_OWNER_PLAN_APPROVAL");
   assert.throws(() => buildProfessionalScene30sPlan({ projectId: "project", characters: characters.slice(1), now: "2026-01-01T00:00:00.000Z" }), /LOCKED_CHARACTER_VOICE_REQUIRED/);
+});
+
+test("professional scene budget requires exact caps and never unlocks providers before plan approval", () => {
+  const plan = { status: "AWAITING_OWNER_PLAN_APPROVAL", provider_calls_made: false } as Parameters<typeof approveProfessionalScene30sBudget>[0];
+  const approved = approveProfessionalScene30sBudget(plan, { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 }, "2026-01-01T00:00:00.000Z");
+  assert.equal(approved.status, "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED"); assert.equal(approved.approved_caps?.reviewer, "PROJECT_OWNER"); assert.equal(approved.provider_calls_made, false);
+  assert.throws(() => approveProfessionalScene30sBudget({ status: "AWAITING_OWNER_PLAN_APPROVAL" } as Parameters<typeof approveProfessionalScene30sBudget>[0], { runway_credits: 431, elevenlabs_characters: 2000, sync_usd: 1.8 }, "now"), /EXACT_CAPS_REQUIRED/);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {

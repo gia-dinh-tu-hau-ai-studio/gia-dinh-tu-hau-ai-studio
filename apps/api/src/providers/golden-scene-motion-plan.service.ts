@@ -33,7 +33,7 @@ type ProfessionalSceneBeat = {
 export type ProfessionalScenePlan = {
   schema_version: "SHORT_FILM_PROFESSIONAL_SCENE_30S_V1";
   project_id: string;
-  status: "AWAITING_OWNER_PLAN_APPROVAL";
+  status: "AWAITING_OWNER_PLAN_APPROVAL" | "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED";
   exact_duration_seconds: 30;
   quality_contract: {
     max_unmotivated_seconds: 0;
@@ -44,9 +44,18 @@ export type ProfessionalScenePlan = {
   };
   beats: ProfessionalSceneBeat[];
   proposed_caps: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8 };
+  approved_caps?: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8; approved_at: string; reviewer: "PROJECT_OWNER" };
   provider_calls_made: false;
   created_at: string;
 };
+
+export function approveProfessionalScene30sBudget(plan: ProfessionalScenePlan, caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number }, now: string) {
+  if (plan.status !== "AWAITING_OWNER_PLAN_APPROVAL") throw new Error("PROFESSIONAL_SCENE_NOT_AWAITING_BUDGET_APPROVAL");
+  if (caps.runway_credits !== 432 || caps.elevenlabs_characters !== 2000 || caps.sync_usd !== 1.8) throw new Error("PROFESSIONAL_SCENE_EXACT_CAPS_REQUIRED");
+  plan.approved_caps = { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8, approved_at: now, reviewer: "PROJECT_OWNER" };
+  plan.status = "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED";
+  return plan;
+}
 
 const PROFESSIONAL_BEAT_BLUEPRINT = [
   { actor_id: "GDTH-CHAR-001", dialogue_text: "Việc nhẹ lương cao mà phải chuyển tiền giữ chỗ sao?", visual_purpose: "Tường Vy dừng ngón tay trên màn hình tuyển dụng, nhận ra dấu hiệu bất thường.", performance_direction: "Nhìn điện thoại, cau mày có chủ đích; dừng tay đúng lúc nghi ngờ.", transition: "INSERT_CUT" as const },
@@ -265,6 +274,15 @@ export class GoldenSceneMotionPlanService {
     const existing = await this.drive.readPilotJson<ProfessionalScenePlan>(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST);
     if (existing) return { ...existing.value, idempotent_replay: true };
     const plan = buildProfessionalScene30sPlan({ projectId, characters: await this.characters.listEligibleCharacters(), now: new Date().toISOString() });
+    await this.drive.writePilotJson(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST, plan);
+    return plan;
+  }
+
+  async approveProfessionalScene30sBudget(projectId: string, caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number }) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<ProfessionalScenePlan>(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST);
+    if (!stored) throw new Error("PROFESSIONAL_SCENE_30S_PLAN_NOT_FOUND");
+    const plan = approveProfessionalScene30sBudget(stored.value, caps, new Date().toISOString());
     await this.drive.writePilotJson(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST, plan);
     return plan;
   }
