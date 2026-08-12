@@ -705,8 +705,11 @@ export function createShortFilmShotPlan(workflow: ShortFilmWorkflow) {
   if (beats.length < shotCount) {
     throw new Error(`SHOT_PLAN_SCRIPT_DETAIL_INSUFFICIENT:${beats.length}:${shotCount}`);
   }
-  const shots = Array.from({ length: shotCount }, (_, index) => {
-    const beat = beats[index];
+  const selectedBeatIndexes = Array.from({ length: shotCount }, (_, index) =>
+    shotCount === 1 ? 0 : Math.round(index * (beats.length - 1) / (shotCount - 1)),
+  );
+  const shots = selectedBeatIndexes.map((beatIndex, index) => {
+    const beat = beats[beatIndex];
     return `Shot ${String(index + 1).padStart(2, "0")}: ${beat.slice(0, 180)}`;
   });
   const ambiguousShot = shots.findIndex((summary) => !matchShortFilmShotActor(summary, workflow.film_characters, workflow.source_actors));

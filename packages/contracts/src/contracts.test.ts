@@ -287,6 +287,25 @@ test("Shot Plan preserves Vietnamese character names and multi-sentence dialogue
   assert.deepEqual(plan.execution_shots[1].risk_tags, ["IDENTITY_DIALOGUE"]);
 });
 
+test("Shot Plan samples the full approved script instead of truncating to the opening scene", () => {
+  const fullScript = Array.from({ length: 4 }, (_, sceneIndex) => [
+    `CẢNH ${sceneIndex + 1} – BỐI CẢNH ${sceneIndex + 1}`,
+    ...Array.from({ length: 8 }, (_, beatIndex) => `NHỊP ${sceneIndex * 8 + beatIndex + 1} – TƯỜNG VY thực hiện hành động ${sceneIndex + 1}.${beatIndex + 1} để câu chuyện tiến triển rõ ràng.`),
+  ].join("\n")).join("\n");
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    target_duration_minutes: 3,
+    full_script: fullScript,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+  });
+
+  const plan = createShortFilmShotPlan(workflow);
+  assert.equal(plan.execution_shots.length, 18);
+  assert.match(plan.execution_shots[0].summary, /CẢNH 1/u);
+  assert.match(plan.execution_shots.at(-1)?.summary ?? "", /CẢNH 4/u);
+  assert.ok([1, 2, 3, 4].every((scene) => plan.execution_shots.some((shot) => shot.summary.includes(`CẢNH ${scene}`))));
+});
+
 test("draft migration never deletes valid user approvals or project content", () => {
   const defaults = ShortFilmWorkflowSchema.parse(shortFilmWorkflow);
   const migrated = migrateShortFilmWorkflowDraft({
