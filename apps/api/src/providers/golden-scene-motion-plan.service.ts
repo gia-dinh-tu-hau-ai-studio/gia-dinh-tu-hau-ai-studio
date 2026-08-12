@@ -33,7 +33,7 @@ type ProfessionalSceneBeat = {
 export type ProfessionalScenePlan = {
   schema_version: "SHORT_FILM_PROFESSIONAL_SCENE_30S_V1";
   project_id: string;
-  status: "AWAITING_OWNER_PLAN_APPROVAL" | "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED";
+  status: "AWAITING_OWNER_PLAN_APPROVAL" | "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED" | "READY_FOR_PROVIDER_EXECUTION";
   exact_duration_seconds: 30;
   quality_contract: {
     max_unmotivated_seconds: 0;
@@ -45,6 +45,7 @@ export type ProfessionalScenePlan = {
   beats: ProfessionalSceneBeat[];
   proposed_caps: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8 };
   approved_caps?: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8; approved_at: string; reviewer: "PROJECT_OWNER" };
+  plan_review?: { decision: "APPROVE"; reviewed_at: string; reviewer: "PROJECT_OWNER" };
   provider_calls_made: false;
   created_at: string;
 };
@@ -54,6 +55,16 @@ export function approveProfessionalScene30sBudget(plan: ProfessionalScenePlan, c
   if (caps.runway_credits !== 432 || caps.elevenlabs_characters !== 2000 || caps.sync_usd !== 1.8) throw new Error("PROFESSIONAL_SCENE_EXACT_CAPS_REQUIRED");
   plan.approved_caps = { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8, approved_at: now, reviewer: "PROJECT_OWNER" };
   plan.status = "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED";
+  return plan;
+}
+
+export function approveProfessionalScene30sPlan(plan: ProfessionalScenePlan, now: string) {
+  if (plan.status !== "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED" || !plan.approved_caps) throw new Error("PROFESSIONAL_SCENE_APPROVED_BUDGET_REQUIRED");
+  if (plan.exact_duration_seconds !== 30 || plan.beats.length !== 6 || plan.beats.reduce((sum, beat) => sum + beat.duration_seconds, 0) !== 30) throw new Error("PROFESSIONAL_SCENE_EXACT_30S_TIMELINE_REQUIRED");
+  if (plan.beats.some((beat, index) => beat.start_seconds !== index * 5 || beat.end_seconds !== (index + 1) * 5 || !beat.character_master_id || !beat.voice_master_id || !beat.dialogue_text || !beat.visual_purpose || !beat.performance_direction)) throw new Error("PROFESSIONAL_SCENE_COMPLETE_PURPOSEFUL_BEATS_REQUIRED");
+  if (!plan.quality_contract.exact_locked_character_and_voice || !plan.quality_contract.dialogue_lipsync_required || plan.quality_contract.max_unmotivated_seconds !== 0 || plan.quality_contract.max_post_dialogue_settle_seconds > 0.25) throw new Error("PROFESSIONAL_SCENE_QUALITY_CONTRACT_REQUIRED");
+  plan.plan_review = { decision: "APPROVE", reviewed_at: now, reviewer: "PROJECT_OWNER" };
+  plan.status = "READY_FOR_PROVIDER_EXECUTION";
   return plan;
 }
 
@@ -283,6 +294,15 @@ export class GoldenSceneMotionPlanService {
     const stored = await this.drive.readPilotJson<ProfessionalScenePlan>(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST);
     if (!stored) throw new Error("PROFESSIONAL_SCENE_30S_PLAN_NOT_FOUND");
     const plan = approveProfessionalScene30sBudget(stored.value, caps, new Date().toISOString());
+    await this.drive.writePilotJson(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST, plan);
+    return plan;
+  }
+
+  async approveProfessionalScene30sPlan(projectId: string) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<ProfessionalScenePlan>(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST);
+    if (!stored) throw new Error("PROFESSIONAL_SCENE_30S_PLAN_NOT_FOUND");
+    const plan = approveProfessionalScene30sPlan(stored.value, new Date().toISOString());
     await this.drive.writePilotJson(context.project_folder_id, PROFESSIONAL_SCENE_PLAN_MANIFEST, plan);
     return plan;
   }

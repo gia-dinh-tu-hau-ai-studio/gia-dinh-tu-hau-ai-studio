@@ -6,7 +6,7 @@ import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
-import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, approveProfessionalScene30sBudget, buildGoldenSceneSilentMotionPrompt, buildProfessionalScene30sPlan, rejectAndPlanPurposefulGoldenSceneEdit, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
+import { approveGoldenSceneDialogueAudio, approveGoldenSceneMotionBudget, approveGoldenSceneSilentMotion, approveProfessionalScene30sBudget, approveProfessionalScene30sPlan, buildGoldenSceneSilentMotionPrompt, buildProfessionalScene30sPlan, rejectAndPlanPurposefulGoldenSceneEdit, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -331,6 +331,17 @@ test("professional scene budget requires exact caps and never unlocks providers 
   const approved = approveProfessionalScene30sBudget(plan, { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 }, "2026-01-01T00:00:00.000Z");
   assert.equal(approved.status, "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED"); assert.equal(approved.approved_caps?.reviewer, "PROJECT_OWNER"); assert.equal(approved.provider_calls_made, false);
   assert.throws(() => approveProfessionalScene30sBudget({ status: "AWAITING_OWNER_PLAN_APPROVAL" } as Parameters<typeof approveProfessionalScene30sBudget>[0], { runway_credits: 431, elevenlabs_characters: 2000, sync_usd: 1.8 }, "now"), /EXACT_CAPS_REQUIRED/);
+});
+
+test("professional scene plan approval requires budget and validates the complete purposeful 30-second timeline", () => {
+  const ids = ["GDTH-CHAR-001", "GDTH-CHAR-002", "GDTH-AI-CHAR-001", "GDTH-AI-CHAR-002", "GDTH-AI-CHAR-003"];
+  const characters = ids.map((character_id) => ({ character_id, master_identity_id: `MASTER:${character_id}`, voice_master_id: `VOICE:${character_id}`, readiness: { master_identity: "APPROVED_LOCKED", voice_master: "APPROVED_LOCKED" } }));
+  const plan = buildProfessionalScene30sPlan({ projectId: "project", characters, now: "2026-01-01T00:00:00.000Z" });
+  assert.throws(() => approveProfessionalScene30sPlan(plan, "now"), /APPROVED_BUDGET_REQUIRED/);
+  approveProfessionalScene30sBudget(plan, { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 }, "now");
+  const approved = approveProfessionalScene30sPlan(plan, "later"); assert.equal(approved.status, "READY_FOR_PROVIDER_EXECUTION"); assert.equal(approved.plan_review?.decision, "APPROVE"); assert.equal(approved.provider_calls_made, false);
+  const invalid = { ...plan, status: "AWAITING_OWNER_PLAN_APPROVAL_BUDGET_APPROVED", beats: plan.beats.map((beat, index) => index === 0 ? { ...beat, visual_purpose: "" } : beat) } as Parameters<typeof approveProfessionalScene30sPlan>[0];
+  assert.throws(() => approveProfessionalScene30sPlan(invalid, "later"), /COMPLETE_PURPOSEFUL_BEATS_REQUIRED/);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
