@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { selectShortFilmPilotSamples, type ShortFilmWorkflow } from "@tu-hau/contracts";
 import { DriveConnector } from "../connectors/google-drive/drive.connector";
 import { ProjectRegistryConnector } from "../connectors/google-sheets/project-registry.connector";
+import { CharacterLibraryConnector } from "../connectors/google-sheets/character-library.connector";
+import { ElevenLabsPilotProvider } from "./short-film-pilot.providers";
+import { verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 
 const CHARACTER_KEYFRAME_MANIFEST = "SHORT_FILM_OPENAI_CHARACTER_KEYFRAMES_V1.json";
 const MOTION_PLAN_MANIFEST = "SHORT_FILM_GOLDEN_SCENE_MOTION_PLAN_V1.json";
@@ -27,20 +30,37 @@ export type GoldenSceneMotionTask = {
   direction: { prepare: string; speak: string; settle: string };
 };
 
+type GoldenSceneAudio = { drive_file_id: string; drive_url: string; transcript_text: string; transcript_language_code: string; transcript_language_probability: number; transcript_similarity: number; verified: true; review: "PENDING" };
+
 export type GoldenSceneMotionPlan = {
   schema_version: "SHORT_FILM_GOLDEN_SCENE_MOTION_PLAN_V1";
   execution_id: string;
   project_id: string;
-  status: "AWAITING_MOTION_BUDGET_APPROVAL";
+  status: "AWAITING_MOTION_BUDGET_APPROVAL" | "PREPARING_DIALOGUE_AUDIO" | "AWAITING_DIALOGUE_AUDIO_APPROVAL" | "FAILED";
   source_character_keyframe_execution_id: string;
-  provider_calls_made: false;
+  provider_calls_made: boolean;
   immutable_inputs: true;
-  tasks: GoldenSceneMotionTask[];
+  tasks: Array<GoldenSceneMotionTask & { audio?: GoldenSceneAudio }>;
   stages: readonly ["DIALOGUE_AUDIO_REVIEW", "SILENT_MOTION_REVIEW", "LIP_SYNC_REVIEW"];
   proposed_caps: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8 };
   created_at: string;
   heartbeat_at: string;
+  approved_caps?: { runway_credits: 432; elevenlabs_characters: 2000; sync_usd: 1.8; approved_at: string; reviewer: "PROJECT_OWNER" };
+  elevenlabs_characters_used?: number;
+  error?: { stage: string; message: string };
 };
+
+export function approveGoldenSceneMotionBudget(plan: GoldenSceneMotionPlan, caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number }, now: string) {
+  if (plan.status !== "AWAITING_MOTION_BUDGET_APPROVAL") throw new Error("MOTION_PLAN_NOT_AWAITING_BUDGET_APPROVAL");
+  if (caps.runway_credits !== 432 || caps.elevenlabs_characters !== 2000 || caps.sync_usd !== 1.8) throw new Error("GOLDEN_SCENE_EXACT_CAPS_REQUIRED");
+  const requiredCharacters = plan.tasks.reduce((sum, task) => sum + task.dialogue_text.length, 0);
+  if (requiredCharacters > caps.elevenlabs_characters) throw new Error(`ELEVENLABS_CAP_TOO_LOW:${requiredCharacters}`);
+  plan.approved_caps = { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8, approved_at: now, reviewer: "PROJECT_OWNER" };
+  plan.elevenlabs_characters_used = 0;
+  plan.status = "PREPARING_DIALOGUE_AUDIO";
+  plan.heartbeat_at = now;
+  return plan;
+}
 
 export function validateGoldenSceneMotionBinding(input: {
   shotId: string;
@@ -134,7 +154,7 @@ export function buildGoldenSceneMotionPlan(input: {
 
 @Injectable()
 export class GoldenSceneMotionPlanService {
-  constructor(private readonly registry: ProjectRegistryConnector, private readonly drive: DriveConnector) {}
+  constructor(private readonly registry: ProjectRegistryConnector, private readonly drive: DriveConnector, private readonly characters: CharacterLibraryConnector) {}
 
   async prepare(projectId: string) {
     const context = await this.registry.getShortFilmExecutionContext(projectId);
@@ -149,6 +169,41 @@ export class GoldenSceneMotionPlanService {
 
   async status(projectId: string) {
     const context = await this.registry.getShortFilmExecutionContext(projectId);
-    return (await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST))?.value ?? { project_id: projectId, status: "NOT_PREPARED" };
+    const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
+    if (!stored) return { project_id: projectId, status: "NOT_PREPARED" };
+    const plan = stored.value;
+    if (plan.status !== "PREPARING_DIALOGUE_AUDIO") return plan;
+    try {
+      const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+      if (!apiKey) throw new Error("ELEVENLABS_API_KEY_NOT_CONFIGURED");
+      const pending = plan.tasks.find((task) => !task.audio);
+      if (!pending) {
+        plan.status = "AWAITING_DIALOGUE_AUDIO_APPROVAL";
+      } else {
+        const library = await this.characters.listEligibleCharacters();
+        const character = library.find((item) => item.character_id === pending.actor_id);
+        if (!character || character.readiness.voice_master !== "APPROVED_LOCKED" || character.voice_master_id !== pending.voice_master_id || !character.elevenlabs_voice_id) throw new Error(`LOCKED_PROVIDER_VOICE_MISSING:${pending.shot_id}`);
+        const nextUsage = (plan.elevenlabs_characters_used ?? 0) + pending.dialogue_text.length;
+        if (!plan.approved_caps || nextUsage > plan.approved_caps.elevenlabs_characters) throw new Error("ELEVENLABS_APPROVED_CAP_EXCEEDED");
+        const provider = new ElevenLabsPilotProvider(apiKey);
+        const output = await provider.synthesize({ voiceId: character.elevenlabs_voice_id, text: pending.dialogue_text, languageCode: "vi" });
+        const transcript = await provider.transcribeVietnamese(output.audio);
+        const verification = verifyVietnameseTranscript(pending.dialogue_text, transcript);
+        if (!verification.passed) throw new Error(`VIETNAMESE_AUDIO_VERIFICATION_FAILED:${pending.shot_id}:LANG=${transcript.languageCode}:PROB=${transcript.languageProbability.toFixed(3)}:SIM=${verification.similarity.toFixed(3)}`);
+        const uploaded = await this.drive.uploadPilotArtifact(context.project_folder_id, `${pending.shot_id}_GOLDEN_SCENE_APPROVED_VOICE.mp3`, "audio/mpeg", output.audio);
+        pending.audio = { drive_file_id: uploaded.id as string, drive_url: uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`, transcript_text: transcript.text, transcript_language_code: transcript.languageCode, transcript_language_probability: transcript.languageProbability, transcript_similarity: verification.similarity, verified: true, review: "PENDING" };
+        plan.elevenlabs_characters_used = nextUsage;
+        plan.provider_calls_made = true;
+        if (plan.tasks.every((task) => task.audio?.verified)) plan.status = "AWAITING_DIALOGUE_AUDIO_APPROVAL";
+      }
+      plan.heartbeat_at = new Date().toISOString(); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
+    } catch (error) {
+      plan.status = "FAILED"; plan.error = { stage: "DIALOGUE_AUDIO", message: error instanceof Error ? error.message : String(error) }; plan.heartbeat_at = new Date().toISOString(); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
+    }
+  }
+
+  async approveBudget(projectId: string, caps: { runway_credits: number; elevenlabs_characters: number; sync_usd: number }) {
+    const context = await this.registry.getShortFilmExecutionContext(projectId); const stored = await this.drive.readPilotJson<GoldenSceneMotionPlan>(context.project_folder_id, MOTION_PLAN_MANIFEST);
+    if (!stored) throw new Error("GOLDEN_SCENE_MOTION_PLAN_NOT_FOUND"); const plan = approveGoldenSceneMotionBudget(stored.value, caps, new Date().toISOString()); await this.drive.writePilotJson(context.project_folder_id, MOTION_PLAN_MANIFEST, plan); return plan;
   }
 }

@@ -6,7 +6,7 @@ import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
 import { referenceActorIdsForShot, reviewBackgroundGate } from "./golden-scene-keyframe.service";
 import { OpenAiImageEditProvider, reviewCharacterKeyframeGate, validateCharacterKeyframeBudget } from "./openai-character-keyframe.service";
-import { validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
+import { approveGoldenSceneMotionBudget, validateGoldenSceneMotionBinding } from "./golden-scene-motion-plan.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -277,6 +277,14 @@ test("Golden Scene motion rejects dialogue before pronunciation, age and timing 
     voice: { source_actor_id: "GDTH-CHAR-001", voice_master_id: "VOICE-TV", status: "APPROVED_LOCKED" },
   };
   assert.throws(() => validateGoldenSceneMotionBinding(binding), /DIALOGUE_QC_INCOMPLETE/);
+});
+
+test("Golden Scene motion budget requires the exact owner-approved caps and unlocks only audio", () => {
+  const plan = { status: "AWAITING_MOTION_BUDGET_APPROVAL", tasks: [{ dialogue_text: "Thoại tiếng Việt" }], heartbeat_at: "before" } as Parameters<typeof approveGoldenSceneMotionBudget>[0];
+  const approved = approveGoldenSceneMotionBudget(plan, { runway_credits: 432, elevenlabs_characters: 2000, sync_usd: 1.8 }, "now");
+  assert.equal(approved.status, "PREPARING_DIALOGUE_AUDIO");
+  assert.equal(approved.approved_caps?.reviewer, "PROJECT_OWNER");
+  assert.throws(() => approveGoldenSceneMotionBudget({ ...plan, status: "AWAITING_MOTION_BUDGET_APPROVAL" }, { runway_credits: 433, elevenlabs_characters: 2000, sync_usd: 1.8 }, "now"), /EXACT_CAPS_REQUIRED/);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
