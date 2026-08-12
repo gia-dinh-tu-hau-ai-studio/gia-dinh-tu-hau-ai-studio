@@ -1041,17 +1041,14 @@ export type ShortFilmPilotPreparationRequest = z.infer<typeof ShortFilmPilotPrep
 export function prepareShortFilmPilotPlan(input: ShortFilmPilotPreparationRequest) {
   const request = ShortFilmPilotPreparationRequestSchema.parse(input);
   const readiness = request.workflow.production_readiness!;
-  const pilotShotIds = request.workflow.shot_plan!.shots
-    .slice(0, Math.max(1, Math.min(request.workflow.shot_plan!.shots.length, request.workflow.pilot_sampling.sample_count)))
-    .map((_, index) => `SHOT-${String(index + 1).padStart(3, "0")}`);
-  while (pilotShotIds.length < request.workflow.pilot_sampling.sample_count) {
-    pilotShotIds.push(pilotShotIds[pilotShotIds.length % Math.max(1, pilotShotIds.length)] ?? "SHOT-001");
-  }
-  const pilotSamples = Array.from({ length: request.workflow.pilot_sampling.sample_count }, (_, index) => ({
-    sample_id: `PILOT-SAMPLE-${String(index + 1).padStart(2, "0")}`,
-    purpose: request.workflow.pilot_sampling.required_purposes[index] ?? "HIGH_RISK_SHOT",
-    shot_id: pilotShotIds[index],
-    duration_seconds: request.workflow.pilot_sampling.clip_duration_seconds,
+  const selectedSamples = selectShortFilmPilotSamples(request.workflow);
+  const pilotShotIds = selectedSamples.flatMap((sample) => sample.shots.map((shot) => shot.shot_id));
+  const pilotSamples = selectedSamples.map((sample) => ({
+    sample_id: sample.sample_id,
+    purpose: sample.purpose,
+    shot_id: sample.shots[0]?.shot_id ?? "",
+    shot_ids: sample.shots.map((shot) => shot.shot_id),
+    duration_seconds: sample.expected_duration_seconds,
     approval_status: "PENDING" as const,
   }));
   const dialogueShots = new Set(readiness.speaker_locks.map((lock) => lock.shot_id));
@@ -1066,7 +1063,7 @@ export function prepareShortFilmPilotPlan(input: ShortFilmPilotPreparationReques
     schema_version: "SHORT_FILM_PILOT_EXECUTION_V1" as const,
     project_id: request.project_id,
     pilot_duration_seconds: request.pilot_duration_seconds,
-    total_sample_duration_seconds: request.pilot_duration_seconds * pilotSamples.length,
+    total_sample_duration_seconds: pilotSamples.reduce((sum, sample) => sum + sample.duration_seconds, 0),
     pilot_samples: pilotSamples,
     pilot_shot_ids: pilotShotIds,
     locked_identity_master_ids: readiness.identity_masters.map((item) => item.master_identity_id),
