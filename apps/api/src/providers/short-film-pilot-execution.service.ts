@@ -496,7 +496,13 @@ export class ShortFilmPilotExecutionService {
   async status(projectId: string) {
     const context = await this.registry.getShortFilmExecutionContext(projectId);
     const stored = await this.drive.readPilotJson<PilotExecutionManifest>(context.project_folder_id, MANIFEST_NAME);
-    if (!stored) throw new Error("PILOT_EXECUTION_NOT_FOUND");
+    if (!stored) return {
+      schema_version: "SHORT_FILM_GOLDEN_SCENE_STATUS_V1",
+      project_id: projectId,
+      status: "NOT_PREPARED",
+      provider_calls_made: false,
+      next_action: "APPROVE_GOLDEN_SCENE_BUDGET",
+    } as const;
     const manifest = stored.value;
     if (["AWAITING_DIALOGUE_AUDIO_APPROVAL", "AWAITING_PILOT_QC", "FAILED"].includes(manifest.status)) return manifest;
     try {
