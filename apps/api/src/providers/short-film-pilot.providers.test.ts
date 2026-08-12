@@ -4,6 +4,7 @@ import { ElevenLabsPilotProvider, PilotProviderError, RunwayPilotProvider, SyncP
 import { extractGoogleDriveFileId } from "../connectors/google-drive/drive.connector";
 import { LOCKED_FACE_CROP_FILTER } from "./runway-private-keyframe";
 import { approvePilotPerformanceVariant, buildEvaluationReelFacePrompt, buildPilotPerformancePrompt, EVALUATION_PERFORMANCE_CONTRACT, rejectEvaluationReelForRestart, rejectPilotForRestart, resumeEvaluationReelManifest, reviewDialogueAudioGate, reviewEvaluationReelGate, selectEvaluationReelSourceTasks, selectLockedCharacterPerformanceImage, validateEvaluationReelRequest, validateEvaluationReelTechnicalEvidence, validateLockedCharacterPerformanceSource, validatePilotPerformanceVariant, validateProviderReadyFaceReference, verifyVietnameseTranscript } from "./short-film-pilot-execution.service";
+import { referenceActorIdsForShot } from "./golden-scene-keyframe.service";
 
 test("Runway submit uses current version and never accepts a shot over ten seconds", async () => {
   let request: RequestInit | undefined;
@@ -216,6 +217,12 @@ test("Runway Golden Scene keyframe uses gen4_image at 1920x1080 and private iden
   assert.match(url, /\/v1\/text_to_image$/);
   assert.deepEqual(body, { model: "gen4_image", promptText: "Cinematic corridor with @Character1", ratio: "1920:1080", referenceImages: [{ uri: "runway://locked-face", tag: "Character1" }] });
   await assert.rejects(() => provider.submitKeyframe({ prompt: "bad", referenceImages: [{ uri: "https://drive.google.com/file.jpg", tag: "Character1" }], ratio: "1920:1080" }), /private tagged references/);
+});
+
+test("Golden Scene close-ups cannot blend the other scene character identity", () => {
+  assert.deepEqual(referenceActorIdsForShot("SHOT-006", "PA", ["PA", "TV"]), ["PA", "TV"]);
+  assert.deepEqual(referenceActorIdsForShot("SHOT-007", "PA", ["PA", "TV"]), ["PA"]);
+  assert.deepEqual(referenceActorIdsForShot("SHOT-008", "TV", ["PA", "TV"]), ["TV"]);
 });
 
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
