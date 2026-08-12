@@ -672,14 +672,33 @@ export function createShortFilmShotPlan(workflow: ShortFilmWorkflow) {
   }
 
   const normalizedScript = workflow.full_script.replace(/\r/g, "").trim();
-  const sceneChunks = normalizedScript
-    .split(/(?=CẢNH\s+\d+)/giu)
-    .map((scene) => scene.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  const sourceBeats = (sceneChunks.length > 0 ? sceneChunks : [normalizedScript])
-    .flatMap((scene) => scene.split(/(?<=[.!?])\s+|(?=[A-ZÀ-Ỹ][A-ZÀ-Ỹ ]{2,}:)/u))
-    .map((beat) => beat.replace(/\s+/g, " ").trim())
-    .filter((beat) => beat.length >= 12);
+  const sceneChunks = normalizedScript.split(/(?=CẢNH\s+\d+)/giu).filter((scene) => scene.trim());
+  const sourceBeats = (sceneChunks.length > 0 ? sceneChunks : [normalizedScript]).flatMap((scene) => {
+    let sceneContext = "";
+    return scene.split("\n").flatMap((rawLine) => {
+      let line = rawLine.replace(/\s+/g, " ").trim();
+      if (!line) return [];
+      if (/^CẢNH\s+\d+/iu.test(line)) {
+        const inlineBoundary = line.search(/[.!?](?:\s+|$)/u);
+        if (inlineBoundary < 0 || inlineBoundary === line.length - 1) {
+          sceneContext = line;
+          return [];
+        }
+        sceneContext = line.slice(0, inlineBoundary + 1).trim();
+        line = line.slice(inlineBoundary + 1).trim();
+      }
+      if (/^(?:THỜI LƯỢNG MỤC TIÊU|HẾT)\b/iu.test(line) || line.length < 12) return [];
+      const dialoguePrefix = line.match(/^([^:]{2,80}:)\s*/u)?.[1];
+      return line.split(/(?<=[.!?])\s+/u).flatMap((part, index) => {
+        const normalizedPart = part.trim();
+        if (normalizedPart.length < 12) return [];
+        const actorBoundPart = index > 0 && dialoguePrefix && !normalizedPart.includes(":")
+          ? `${dialoguePrefix} ${normalizedPart}`
+          : normalizedPart;
+        return [sceneContext ? `${sceneContext} — ${actorBoundPart}` : actorBoundPart];
+      });
+    });
+  });
   const beats = sourceBeats.length > 0 ? sourceBeats : [workflow.script_synopsis];
   const totalSeconds = workflow.target_duration_minutes * 60;
   const shotCount = Math.max(3, Math.ceil(totalSeconds / 10));
@@ -694,7 +713,13 @@ export function createShortFilmShotPlan(workflow: ShortFilmWorkflow) {
   if (ambiguousShot >= 0) {
     throw new Error(`SHOT_PLAN_CHARACTER_AMBIGUOUS:SHOT-${String(ambiguousShot + 1).padStart(3, "0")}`);
   }
-  const firstDialogueIndex = shots.findIndex((summary) => /^[^:]+:\s*[^:]{1,50}:\s*.+$/u.test(summary));
+  const dialogueNames = workflow.film_characters
+    .map((character) => character.film_character_name.trim().toLocaleLowerCase("vi"))
+    .filter(Boolean);
+  const firstDialogueIndex = shots.findIndex((summary) => {
+    const normalizedSummary = summary.toLocaleLowerCase("vi");
+    return dialogueNames.some((name) => normalizedSummary.includes(`${name}:`));
+  });
   const executionShots = shots.map((summary, index) => ({
     shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
     summary,

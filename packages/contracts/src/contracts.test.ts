@@ -263,6 +263,30 @@ test("Shot Plan blocks an ambiguous multi-character scene instead of silently us
   assert.throws(() => createShortFilmShotPlan(workflow), /SHOT_PLAN_CHARACTER_AMBIGUOUS/);
 });
 
+test("Shot Plan preserves Vietnamese character names and multi-sentence dialogue", () => {
+  const script = [
+    "CẢNH 1 – PHÒNG TRỌ – SÁNG",
+    "NHỊP 1 – TƯỜNG VY ngồi trước bàn, nhìn điện thoại rồi thở dài vì chưa tìm được việc.",
+    "TƯỜNG VY: Trời ơi, kiếm việc đàng hoàng sao khó dữ vậy nè. Mình phải bình tĩnh tìm cho kỹ.",
+    "NHỊP 2 – TƯỜNG VY mở tin nhắn tuyển dụng và đọc kỹ từng dòng trên màn hình.",
+    "TƯỜNG VY: Việc nhẹ lương cao mà còn đòi chuyển tiền giữ suất thì đáng nghi quá.",
+    "NHỊP 3 – TƯỜNG VY chụp lại bằng chứng rồi gọi điện cho người thân để hỏi ý kiến.",
+    "TƯỜNG VY: Mình sẽ không chuyển tiền và sẽ báo tài khoản này ngay.",
+  ].join("\n");
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    target_duration_minutes: 1,
+    full_script: script,
+    script_review: { decision: "APPROVE", notes: "Approved", reviewer: "PROJECT_OWNER" },
+  });
+
+  const plan = createShortFilmShotPlan(workflow);
+  assert.equal(plan.execution_shots.length, 6);
+  assert.ok(plan.execution_shots.every((shot) => /TƯỜNG VY/u.test(shot.summary)));
+  assert.match(plan.execution_shots[2].summary, /TƯỜNG VY: Mình phải bình tĩnh tìm cho kỹ/u);
+  assert.deepEqual(plan.execution_shots[1].risk_tags, ["IDENTITY_DIALOGUE"]);
+});
+
 test("draft migration never deletes valid user approvals or project content", () => {
   const defaults = ShortFilmWorkflowSchema.parse(shortFilmWorkflow);
   const migrated = migrateShortFilmWorkflowDraft({
