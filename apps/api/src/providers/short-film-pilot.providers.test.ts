@@ -132,6 +132,7 @@ test("Vietnamese transcript gate rejects a high-similarity wrong word", () => {
   assert.ok(wrong.wordAccuracy < 1);
   assert.equal(wrong.passed, false);
   assert.equal(verifyVietnameseTranscript(expected, { text: expected, languageCode: "vi", languageProbability: 0.99 }).passed, true);
+  assert.equal(verifyVietnameseTranscript(expected, { text: "Bên anh chỉ còn đúng một suất ưu tiên thôi nghe.", languageCode: "vi", languageProbability: 0.99 }).passed, true);
 });
 
 test("evaluation reel technical gate rejects a short reel before owner QC", () => {
