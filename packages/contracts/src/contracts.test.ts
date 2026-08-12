@@ -10,6 +10,7 @@ import {
   createShortFilmShotPlan,
   createShortFilmResumeSnapshot,
   deriveShortFilmCharacterMediaRequirements,
+  migrateShortFilmGoldenSceneWorkflow,
   migrateShortFilmWorkflowDraft,
   normalizeProjectIntake,
   providerBudgetApproved,
@@ -240,6 +241,38 @@ test("migrate legacy short-film draft without deleting user content", () => {
   assert.deepEqual(migrated.pilot_sampling, defaults.pilot_sampling);
   assert.equal(migrated.dialogue.voice_master_mode, defaults.dialogue.voice_master_mode);
   assert.equal(migrated.dialogue.singing_scene, defaults.dialogue.singing_scene);
+});
+
+test("persisted 3x15 pilot migrates to Golden Scene and invalidates paid approvals", () => {
+  const migrated = migrateShortFilmGoldenSceneWorkflow({
+    ...shortFilmWorkflow,
+    pilot_sampling: { sample_count: 3, clip_duration_seconds: 15, selection_mode: "RISK_BASED_REPRESENTATIVE_SHOTS", required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"] },
+    pilot_budget_approval: { sample_count: 3, clip_duration_seconds: 15, runway_credits_cap: 648, elevenlabs_credits_cap: 810, sync_usd_cap: 2.4, decision: "APPROVE", reviewer: "PROJECT_OWNER", reviewed_at: "2026-08-12T15:40:16.187Z" },
+  });
+  assert.deepEqual(migrated.pilot_sampling, {
+    sample_count: 1,
+    clip_duration_seconds: 30,
+    selection_mode: "CONTIGUOUS_GOLDEN_SCENE",
+    required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
+  });
+  assert.equal(migrated.pilot_budget_approval, undefined);
+  assert.equal(migrated.pilot_batch, undefined);
+});
+
+test("Golden Scene recognizes the persisted Vietnamese Shot Plan scene delimiter", () => {
+  const shots = Array.from({ length: 3 }, (_, index) => ({
+    shot_id: `SHOT-${String(index + 1).padStart(3, "0")}`,
+    summary: `Shot ${index + 1}: CẢNH 1 – PHÒNG TRỌ CỦA TƯỜNG VY – SÁNG — Nhịp ${index + 1}`,
+    runway_prompt: `Điện ảnh Việt Nam shot ${index + 1}`,
+    duration_seconds: 10,
+    risk_tags: index === 1 ? ["IDENTITY_DIALOGUE"] : [],
+  }));
+  const workflow = ShortFilmWorkflowSchema.parse({
+    ...shortFilmWorkflow,
+    script_review: { decision: "APPROVE", notes: "", reviewer: "PROJECT_OWNER" },
+    shot_plan: { summary: "Một cảnh", shots: shots.map((shot) => shot.summary), execution_shots: shots },
+  });
+  assert.deepEqual(selectShortFilmPilotSamples(workflow)[0]?.shots.map((shot) => shot.shot_id), ["SHOT-001", "SHOT-002", "SHOT-003"]);
 });
 
 test("Shot Plan blocks an ambiguous multi-character scene instead of silently using the first actor", () => {
