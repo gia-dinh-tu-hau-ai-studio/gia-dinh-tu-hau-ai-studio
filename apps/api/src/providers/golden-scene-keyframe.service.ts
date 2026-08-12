@@ -2,17 +2,27 @@ import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { matchShortFilmShotActor, selectShortFilmPilotSamples } from "@tu-hau/contracts";
 import { z } from "zod";
+import { spawn } from "node:child_process";
 import { DriveConnector } from "../connectors/google-drive/drive.connector";
 import { CharacterLibraryConnector } from "../connectors/google-sheets/character-library.connector";
 import { ProjectRegistryConnector } from "../connectors/google-sheets/project-registry.connector";
 import { preparePrivateRunwayKeyframe, type RunwayAssetCache } from "./runway-private-keyframe";
 import { RunwayPilotProvider } from "./short-film-pilot.providers";
 
-const MANIFEST_NAME = "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1.json";
+const MANIFEST_NAME = "SHORT_FILM_GOLDEN_SCENE_BACKGROUND_KEYFRAMES_V2.json";
 export const GoldenSceneKeyframeRequestSchema = z.object({ execution_approved: z.literal(true), runway_credits_cap: z.literal(24) }).strict();
 
 type Task = { shot_id: string; actor_id: string; prompt: string; runway_task_id?: string; runway_status: string; output_url?: string; drive_file_id?: string; drive_url?: string; error?: { code: string; message: string } };
 type Manifest = { schema_version: "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1"; execution_id: string; project_id: string; status: "PROCESSING_RUNWAY" | "AWAITING_KEYFRAME_QC" | "PARTIAL_FAILURE" | "FAILED"; caps: { runway_credits: 24 }; provider_calls_made: boolean; tasks: Task[]; runway_assets: RunwayAssetCache; started_at: string; heartbeat_at: string; error?: { stage: string; message: string } };
+
+async function createNeutralLocationReference() {
+  return new Promise<Buffer>((resolve, reject) => {
+    const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=#9b8b75:s=1920x1080", "-frames:v", "1", "-vf", "drawbox=x=0:y=0:w=1920:h=360:color=#d6c5a6:t=fill,drawbox=x=0:y=760:w=1920:h=320:color=#6f665c:t=fill", "-f", "image2pipe", "-vcodec", "png", "pipe:1"], { stdio: ["ignore", "pipe", "pipe"] });
+    const output: Buffer[] = [], errors: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => output.push(chunk)); child.stderr.on("data", (chunk: Buffer) => errors.push(chunk)); child.on("error", reject);
+    child.on("close", (code) => code === 0 ? resolve(Buffer.concat(output)) : reject(new Error(`NEUTRAL_REFERENCE_FAILED:${Buffer.concat(errors).toString("utf8").slice(0, 300)}`)));
+  });
+}
 
 export function referenceActorIdsForShot(shotId: string, primaryActorId: string, sceneActorIds: string[]) {
   return shotId.endsWith("006") ? [...new Set(sceneActorIds)] : [primaryActorId];
@@ -21,6 +31,11 @@ export function referenceActorIdsForShot(shotId: string, primaryActorId: string,
 function promptFor(shotId: string, summary: string, actorName: string, allTags: string[]) {
   const composition = shotId.endsWith("006") ? "medium two-shot, Phuong An receives the phone from Tuong Vy" : shotId.endsWith("007") ? "close-up of Phuong An reading a suspicious recruitment message, Tuong Vy softly out of focus behind" : "close-up of Tuong Vy replying with visible worry";
   return `Vietnamese cinematic social drama keyframe. ${composition}. Location continuity: modest boarding-house corridor at noon, warm natural side light, realistic lived-in walls, restrained production design. Preserve the exact approved identity, face, age, hair and clothing of ${actorName}; references ${allTags.map((tag) => `@${tag}`).join(" and ")}. Shot context: ${summary}. Natural Vietnamese body language, consistent eyelines and screen direction, photorealistic, feature-film lighting, 16:9. No text, subtitles, logos, microphone, singing, glamour retouching or identity changes.`.slice(0, 1000);
+}
+
+function backgroundPrompt(shotId: string, summary: string) {
+  const framing = shotId.endsWith("006") ? "wide establishing view with clear floor marks for two actors" : shotId.endsWith("007") ? "medium reverse-angle view toward the shaded wall" : "matching close-up background plate facing the opposite eyeline";
+  return `@LocationPalette. Empty Vietnamese boarding-house corridor at noon, ${framing}. Modest contemporary Mekong Delta rental housing, weathered plaster, practical doors, small potted plant, warm natural side light, realistic feature-film production design, continuous geography and screen direction across the scene, photorealistic cinematic background plate, 16:9. Context: ${summary}. Absolutely no people, human figures, faces, silhouettes, mannequins, text, subtitles, logos, microphones or vehicles.`.slice(0, 1000);
 }
 
 @Injectable()
@@ -36,27 +51,20 @@ export class GoldenSceneKeyframeService {
     if (existing) return { ...existing.value, idempotent_replay: true };
     const shots = selectShortFilmPilotSamples(context.workflow)[0]?.shots ?? [];
     if (shots.length !== 3) throw new Error(`GOLDEN_SCENE_EXACTLY_THREE_KEYFRAMES_REQUIRED:${shots.length}`);
-    const library = await this.characters.listEligibleCharacters();
-    const byId = new Map(library.map((item) => [item.character_id, item]));
     const actorIds = shots.map((shot) => matchShortFilmShotActor(shot.summary, context.workflow.film_characters, context.workflow.source_actors));
-    if (actorIds.some((id) => !id || !byId.has(id))) throw new Error("GOLDEN_SCENE_LOCKED_CHARACTER_REFERENCE_MISSING");
+    if (actorIds.some((id) => !id)) throw new Error("GOLDEN_SCENE_ACTOR_ASSIGNMENT_MISSING");
     const runway = new RunwayPilotProvider(secret);
     const cache: RunwayAssetCache = {};
-    const uniqueActors = [...new Set(actorIds as string[])];
-    const refs = new Map<string, { uri: string; tag: string }>();
-    for (const [index, actorId] of uniqueActors.entries()) {
-      const character = byId.get(actorId)!;
-      if (character.readiness.master_identity !== "APPROVED_LOCKED") throw new Error(`MASTER_IDENTITY_NOT_LOCKED:${actorId}`);
-      refs.set(actorId, { uri: await preparePrivateRunwayKeyframe({ referenceUrl: character.face_reference_url || character.body_reference_url, cache, drive: this.drive, runway }), tag: `Character${index + 1}` });
-    }
+    const neutral = await createNeutralLocationReference();
+    const uploadedNeutral = await runway.uploadImage({ content: neutral, fileName: "GOLDEN_SCENE_NEUTRAL_LOCATION_PALETTE.png", mimeType: "image/png" });
     const now = new Date().toISOString();
     const manifest: Manifest = { schema_version: "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1", execution_id: randomUUID(), project_id: projectId, status: "PROCESSING_RUNWAY", caps: { runway_credits: 24 }, provider_calls_made: false, tasks: [], runway_assets: cache, started_at: now, heartbeat_at: now };
     await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
     try {
       for (let index = 0; index < shots.length; index += 1) {
-        const shot = shots[index]!, actorId = actorIds[index]!, character = byId.get(actorId)!;
-        const referenceImages = referenceActorIdsForShot(shot.shot_id, actorId, uniqueActors).map((id) => refs.get(id)!);
-        const prompt = promptFor(shot.shot_id, shot.summary, character.character_name, referenceImages.map((item) => item.tag));
+        const shot = shots[index]!, actorId = actorIds[index]!;
+        const referenceImages = [{ uri: uploadedNeutral.uri, tag: "LocationPalette" }];
+        const prompt = backgroundPrompt(shot.shot_id, shot.summary);
         const submitted = await runway.submitKeyframe({ prompt, referenceImages, ratio: "1920:1080" });
         manifest.tasks.push({ shot_id: shot.shot_id, actor_id: actorId, prompt, runway_task_id: submitted.taskId, runway_status: "PENDING" });
         manifest.provider_calls_made = true; manifest.heartbeat_at = new Date().toISOString();
