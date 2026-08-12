@@ -871,6 +871,27 @@ export function migrateShortFilmWorkflowDraft(draft: unknown, defaults: ShortFil
   };
 }
 
+/** Upgrade persisted server workflows without carrying legacy pilot authorization forward. */
+export function migrateShortFilmGoldenSceneWorkflow(input: unknown): ShortFilmWorkflow {
+  const workflow = ShortFilmWorkflowSchema.parse(input);
+  const sampling = workflow.pilot_sampling;
+  if (sampling.sample_count === 1 && sampling.clip_duration_seconds === 30 && sampling.selection_mode === "CONTIGUOUS_GOLDEN_SCENE") {
+    return workflow;
+  }
+  return ShortFilmWorkflowSchema.parse({
+    ...workflow,
+    pilot_sampling: {
+      sample_count: 1,
+      clip_duration_seconds: 30,
+      selection_mode: "CONTIGUOUS_GOLDEN_SCENE",
+      required_purposes: ["IDENTITY_DIALOGUE", "MOTION_PERFORMANCE", "MULTI_CHARACTER_CONTINUITY"],
+    },
+    pilot_budget_approval: undefined,
+    pilot: undefined,
+    pilot_batch: undefined,
+  });
+}
+
 export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
   const workflow = ShortFilmWorkflowSchema.parse(workflowInput);
   if (workflow.pilot_sampling.sample_count !== 1 || workflow.pilot_sampling.clip_duration_seconds !== 30 || workflow.pilot_sampling.selection_mode !== "CONTIGUOUS_GOLDEN_SCENE") {
@@ -878,7 +899,9 @@ export function selectShortFilmPilotSamples(workflowInput: ShortFilmWorkflow) {
   }
   const shots = workflow.shot_plan?.execution_shots ?? [];
   if (shots.length === 0) throw new Error("STRUCTURED_EXECUTION_SHOTS_REQUIRED");
-  const sceneLabel = (summary: string) => summary.includes("|") ? summary.split("|", 1)[0]?.trim() : undefined;
+  const sceneLabel = (summary: string) =>
+    summary.match(/CẢNH\s+\d+.*?(?=\s+—\s+)/iu)?.[0]?.trim() ??
+    (summary.includes("|") ? summary.split("|", 1)[0]?.trim() : undefined);
   const groups = new Map<string, typeof shots>();
   for (const shot of shots) {
     const scene = sceneLabel(shot.summary);

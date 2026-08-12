@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import {
   calculateProjectProgress,
   createShortFilmResumeSnapshot,
+  migrateShortFilmGoldenSceneWorkflow,
   shortFilmMediaExecutionDecision,
   shortFilmNextAction,
   shortFilmScriptApprovalIsFresh,
@@ -140,8 +141,8 @@ export class ProjectRegistryConnector {
 
   async getShortFilmWorkflow(projectId: string): Promise<StoredShortFilmWorkflow> {
     const { row, contract } = await this.readProject(projectId);
-    const resume = createShortFilmResumeSnapshot(contract);
-    const workflow = resume.short_film_workflow;
+    const workflow = migrateShortFilmGoldenSceneWorkflow(contract.short_film_workflow);
+    const resume = createShortFilmResumeSnapshot({ ...contract, short_film_workflow: workflow });
     return { project_id: projectId, project_type: "SHORT_FILM", workflow, resume_snapshot: resume, next_action: shortFilmNextAction(workflow), media_execution: shortFilmMediaExecutionDecision(workflow), updated_at: String(row[23] ?? row[22] ?? "") };
   }
 
@@ -149,7 +150,7 @@ export class ProjectRegistryConnector {
     const { row, contract } = await this.readProject(projectId);
     const projectFolderId = String(row[20] ?? "").trim();
     if (!projectFolderId) throw new ProjectRegistryInvalidStateError(`Dự án ${projectId} thiếu project_folder_id`);
-    return { project_id: projectId, project_folder_id: projectFolderId, workflow: ShortFilmWorkflowSchema.parse(contract.short_film_workflow), provider_budget: contract.provider_budget };
+    return { project_id: projectId, project_folder_id: projectFolderId, workflow: migrateShortFilmGoldenSceneWorkflow(contract.short_film_workflow), provider_budget: contract.provider_budget };
   }
 
   async getProjectProgress(projectId: string) {
