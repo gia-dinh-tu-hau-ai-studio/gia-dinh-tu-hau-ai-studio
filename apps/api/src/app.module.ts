@@ -7,6 +7,7 @@ import { IntakeService } from "./intake.service";
 import { ShortFilmScriptProvider } from "./providers/short-film-script.provider";
 import { ShortFilmPilotExecutionService } from "./providers/short-film-pilot-execution.service";
 import { ShortFilmFullExecutionService } from "./providers/short-film-full-execution.service";
+import { GoldenSceneKeyframeService } from "./providers/golden-scene-keyframe.service";
 
 @Module({
   controllers: [AppController],
@@ -17,6 +18,7 @@ import { ShortFilmFullExecutionService } from "./providers/short-film-full-execu
     ShortFilmScriptProvider,
     ShortFilmPilotExecutionService,
     ShortFilmFullExecutionService,
+    GoldenSceneKeyframeService,
     IntakeService,
   ],
 })
