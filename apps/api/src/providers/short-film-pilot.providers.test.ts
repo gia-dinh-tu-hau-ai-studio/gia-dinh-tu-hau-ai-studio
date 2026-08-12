@@ -209,6 +209,15 @@ test("Runway Character Performance uses locked image for identity and video only
   );
 });
 
+test("Runway Golden Scene keyframe uses gen4_image at 1920x1080 and private identity references only", async () => {
+  let url = "", body: Record<string, unknown> = {};
+  const provider = new RunwayPilotProvider("secret", (async (input, init) => { url = String(input); body = JSON.parse(String(init?.body)); return new Response(JSON.stringify({ id: "keyframe-1" }), { status: 200 }); }) as typeof fetch);
+  assert.deepEqual(await provider.submitKeyframe({ prompt: "Cinematic corridor with @Character1", referenceImages: [{ uri: "runway://locked-face", tag: "Character1" }], ratio: "1920:1080" }), { taskId: "keyframe-1" });
+  assert.match(url, /\/v1\/text_to_image$/);
+  assert.deepEqual(body, { model: "gen4_image", promptText: "Cinematic corridor with @Character1", ratio: "1920:1080", referenceImages: [{ uri: "runway://locked-face", tag: "Character1" }] });
+  await assert.rejects(() => provider.submitKeyframe({ prompt: "bad", referenceImages: [{ uri: "https://drive.google.com/file.jpg", tag: "Character1" }], ratio: "1920:1080" }), /private tagged references/);
+});
+
 test("approved performance variant replaces only its pilot shot for full-film reuse", () => {
   const target = { sample_id: "S3", shot_id: "SHOT-005", runway_status: "SUCCEEDED", final_drive_file_id: "old-final" };
   const untouched = { sample_id: "S3", shot_id: "SHOT-006", runway_status: "SUCCEEDED", final_drive_file_id: "other-final" };

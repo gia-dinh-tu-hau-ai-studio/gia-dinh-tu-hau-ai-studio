@@ -3,6 +3,7 @@ import { IntakeService } from "./intake.service";
 import { ShortFilmPilotExecutionService } from "./providers/short-film-pilot-execution.service";
 import { ShortFilmFullExecutionService } from "./providers/short-film-full-execution.service";
 import { z } from "zod";
+import { GoldenSceneKeyframeService } from "./providers/golden-scene-keyframe.service";
 
 @Controller()
 export class AppController {
@@ -10,7 +11,14 @@ export class AppController {
     private readonly intakeService: IntakeService,
     private readonly pilotExecution: ShortFilmPilotExecutionService,
     private readonly fullExecution: ShortFilmFullExecutionService,
+    private readonly goldenSceneKeyframes: GoldenSceneKeyframeService,
   ) {}
+
+  @Post("projects/:projectId/short-film/golden-scene/keyframes/execute")
+  executeGoldenSceneKeyframes(@Param("projectId") projectId: string, @Body() body: unknown) { return this.goldenSceneKeyframes.execute(projectId, body); }
+
+  @Get("projects/:projectId/short-film/golden-scene/keyframes/status")
+  goldenSceneKeyframeStatus(@Param("projectId") projectId: string) { return this.goldenSceneKeyframes.status(projectId); }
 
   @Get("health")
   health() {

@@ -92,6 +92,22 @@ export class RunwayPilotProvider {
     return { taskId: body.id };
   }
 
+  async submitKeyframe(input: { prompt: string; referenceImages: Array<{ uri: string; tag: string }>; ratio: "1920:1080" }) {
+    if (!input.prompt.trim() || input.prompt.length > 1_000) throw new PilotProviderError("RUNWAY", "INVALID_PROMPT", "Runway keyframe prompt must be 1-1000 characters", false);
+    if (input.referenceImages.length < 1 || input.referenceImages.length > 3 || input.referenceImages.some((item) => !item.uri.startsWith("runway://") || !/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(item.tag))) {
+      throw new PilotProviderError("RUNWAY", "INVALID_REFERENCE_IMAGES", "Runway keyframes require 1-3 private tagged references", false);
+    }
+    const response = await providerResponse(await this.fetcher("https://api.dev.runwayml.com/v1/text_to_image", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.apiKey}`, "X-Runway-Version": "2024-11-06", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gen4_image", promptText: input.prompt, ratio: input.ratio, referenceImages: input.referenceImages }),
+      signal: AbortSignal.timeout(20_000),
+    }), "RUNWAY");
+    const body = await response.json() as { id?: string };
+    if (!body.id) throw new PilotProviderError("RUNWAY", "MALFORMED_RESPONSE", "Runway did not return keyframe task id", false);
+    return { taskId: body.id };
+  }
+
   async submit(input: { imageUrl: string; prompt: string; durationSeconds: number; ratio: "1280:720" | "720:1280" }) {
     if (!Number.isInteger(input.durationSeconds) || input.durationSeconds < 2 || input.durationSeconds > 10) {
       throw new PilotProviderError("RUNWAY", "INVALID_DURATION", "Runway shot duration must be 2-10 seconds", false);
