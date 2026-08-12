@@ -30,6 +30,9 @@ export class AppController {
     return this.goldenSceneMotionPlan.approveProfessionalScene30sBudget(projectId, request.caps);
   }
 
+  @Post("projects/:projectId/short-film/golden-scene/professional-30s/approve-plan")
+  approveProfessionalGoldenScenePlan(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.approveProfessionalScene30sPlan(projectId); }
+
   @Get("projects/:projectId/short-film/golden-scene/motion/status")
   goldenSceneMotionStatus(@Param("projectId") projectId: string) { return this.goldenSceneMotionPlan.status(projectId); }
 
