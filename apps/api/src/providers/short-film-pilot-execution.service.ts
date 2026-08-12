@@ -60,7 +60,12 @@ function dialogueSimilarity(expected: string, actual: string) {
 }
 
 function dialogueWords(value: string) {
-  return normalizeVietnamese(value).split(" ").filter(Boolean);
+  return normalizeVietnamese(value).split(" ").filter(Boolean).map((word) =>
+    // Vietnamese ASR writes the same Southern sentence-final particle in
+    // several accepted forms. Canonicalize only this closed dialect set; all
+    // content words still require an exact match.
+    ["nghen", "nhen", "nghe"].includes(word) ? "nghen" : word,
+  );
 }
 
 function exactWordAccuracy(expected: string, actual: string) {
