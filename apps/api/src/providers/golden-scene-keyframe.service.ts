@@ -13,7 +13,16 @@ const MANIFEST_NAME = "SHORT_FILM_GOLDEN_SCENE_BACKGROUND_KEYFRAMES_V2.json";
 export const GoldenSceneKeyframeRequestSchema = z.object({ execution_approved: z.literal(true), runway_credits_cap: z.literal(24) }).strict();
 
 type Task = { shot_id: string; actor_id: string; prompt: string; runway_task_id?: string; runway_status: string; output_url?: string; drive_file_id?: string; drive_url?: string; error?: { code: string; message: string } };
-type Manifest = { schema_version: "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1"; execution_id: string; project_id: string; status: "PROCESSING_RUNWAY" | "AWAITING_KEYFRAME_QC" | "PARTIAL_FAILURE" | "FAILED"; caps: { runway_credits: 24 }; provider_calls_made: boolean; tasks: Task[]; runway_assets: RunwayAssetCache; started_at: string; heartbeat_at: string; error?: { stage: string; message: string } };
+type Manifest = { schema_version: "SHORT_FILM_GOLDEN_SCENE_KEYFRAMES_V1"; execution_id: string; project_id: string; status: "PROCESSING_RUNWAY" | "AWAITING_KEYFRAME_QC" | "APPROVED" | "REJECTED" | "PARTIAL_FAILURE" | "FAILED"; caps: { runway_credits: 24 }; provider_calls_made: boolean; tasks: Task[]; runway_assets: RunwayAssetCache; started_at: string; heartbeat_at: string; review?: { decision: "APPROVE" | "REJECT"; reviewer: "PROJECT_OWNER"; reviewed_at: string }; error?: { stage: string; message: string } };
+
+export function reviewBackgroundGate(manifest: Manifest, decision: "APPROVE" | "REJECT", reviewedAt: string) {
+  if (manifest.status !== "AWAITING_KEYFRAME_QC") throw new Error("GOLDEN_SCENE_BACKGROUND_NOT_AWAITING_QC");
+  if (manifest.tasks.length !== 3 || manifest.tasks.some((task) => task.runway_status !== "SUCCEEDED" || !task.drive_file_id || !task.drive_url)) throw new Error("GOLDEN_SCENE_BACKGROUND_EVIDENCE_INCOMPLETE");
+  manifest.status = decision === "APPROVE" ? "APPROVED" : "REJECTED";
+  manifest.review = { decision, reviewer: "PROJECT_OWNER", reviewed_at: reviewedAt };
+  manifest.heartbeat_at = reviewedAt;
+  return manifest;
+}
 
 async function createNeutralLocationReference() {
   return new Promise<Buffer>((resolve, reject) => {
@@ -109,5 +118,14 @@ export class GoldenSceneKeyframeService {
       manifest.status = "FAILED"; manifest.error = { stage: "RUNWAY_STATUS", message: error instanceof Error ? error.message : String(error) }; manifest.heartbeat_at = new Date().toISOString();
       await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest); return manifest;
     }
+  }
+
+  async review(projectId: string, decision: "APPROVE" | "REJECT") {
+    const context = await this.registry.getShortFilmExecutionContext(projectId);
+    const stored = await this.drive.readPilotJson<Manifest>(context.project_folder_id, MANIFEST_NAME);
+    if (!stored) throw new Error("GOLDEN_SCENE_BACKGROUND_EXECUTION_NOT_FOUND");
+    const manifest = reviewBackgroundGate(stored.value, decision, new Date().toISOString());
+    await this.drive.writePilotJson(context.project_folder_id, MANIFEST_NAME, manifest);
+    return manifest;
   }
 }
